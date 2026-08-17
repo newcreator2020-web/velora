@@ -23,17 +23,18 @@
     "test:e2e": "cross-env PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers playwright test",
     "test:e2e:prod": "cross-env PLAYWRIGHT_USE_PRODUCTION=1 PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers playwright test",
     "playwright:install": "cross-env PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers playwright install chromium",
-    "db:types": "supabase gen types typescript --project-id dgekfjkuvnofwdwxflms --schema public > src/types/supabase.ts",
+    "db:types": "supabase gen types typescript --local --schema public > src/types/supabase.ts",
+    "db:types:cloud": "supabase gen types typescript --project-id dgekfjkuvnofwdwxflms --schema public > src/types/supabase.ts",
     "db:start": "supabase start",
     "db:stop": "supabase stop",
     "db:link": "supabase link --project-ref dgekfjkuvnofwdwxflms --password $env:SUPABASE_DB_PASSWORD",
     "db:push": "supabase db push",
     "db:reset": "supabase db reset",
     "db:seed": "supabase db seed",
-    "db:test": "pnpm test:db",
+    "db:test": "vitest run tests/db",
     "check:db": "pnpm db:test",
-    "verify": "pnpm check ; pnpm db:test ; pnpm build",
-    "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:run"
+    "verify": "pnpm check && pnpm db:test && pnpm build",
+    "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:run src/"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",

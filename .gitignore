@@ -55,3 +55,10 @@ coverage/
 /blob-report/
 /playwright/.cache/
 /.playwright-browsers/
+
+# IDE / AI agent tool-local files (NOT project governance).
+# Project technical rules are the single source of truth in TRAE Project Rules
+# and the docs/ folder. Do not commit regenerated scratch files.
+AGENTS.md
+CLAUDE.md
+CLAUDE_todo*.md

@@ -1,0 +1,65 @@
+# A reference Supabase config.toml for local development (Supabase CLI).
+# This file is SAFE TO VERSION: contains NO production secrets.
+# Secret overrides live in .env or environment of the deploying user.
+
+# Documentation: https://supabase.com/docs/reference/cli/config
+
+[project]
+  project_id = "velora-local"
+
+[api]
+  enabled = true
+  port = 54321
+  schemas = ["public", "storage", "graphql_public"]
+  extra_search_path = ["public", "extensions"]
+  max_rows = 1000
+
+[db]
+  port = 54322
+  shadow_port = 54320
+  major_version = 15
+
+  # Seed file is applied after `supabase db reset` completes the migrations.
+  # All test fixtures belong here, NEVER in versioned migrations.
+  seed.enabled = true
+  seed.sql_paths = ["supabase/seed.sql"]
+
+[auth]
+  enabled = true
+  port = 54321
+  site_url = "http://localhost:3000"
+  additional_redirect_urls = ["http://localhost:3000/**"]
+  enable_signup = true
+  email.enable_confirmations = false
+  email.enable_double_confirmations = false
+  email.template = {}
+
+[storage]
+  enabled = true
+  port = 54321
+  file_size_limit = 10485760
+
+[realtime]
+  enabled = false
+
+[analytics]
+  enabled = false
+
+[edge_runtime]
+  enabled = false
+
+[inbucket]
+  enabled = true
+  port = 54324
+
+[studio]
+  enabled = true
+  port = 54323
+
+[integrations]
+  [integrations.pg_graphql]
+    enabled = true
+
+[pcg]
+  plan = ""
+  external = false

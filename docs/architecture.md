@@ -1,4 +1,4 @@
-# VELORA — Architettura (Fase 0)
+# VELORA — Architettura (FASE 1 aggiornata)
 
 Decisioni architetturali prese per la fondazione tecnica.
 Questo documento descrive **solo ciò che esiste realmente in questa fase**.
@@ -21,23 +21,47 @@ differenziate per admin/dashboard/sito pubblico.
 
 ## 2. Stack di base
 
-| Componente         | Scelta                                     | Note                                                           |
-| ------------------ | ------------------------------------------ | -------------------------------------------------------------- |
-| Framework UI       | Next.js 16+ App Router                     | Rendering ibrido (server/client) supportato nativamente        |
-| Linguaggio         | TypeScript strict                          | tsconfig con `strict: true` e regole aggiuntive                |
-| Package manager    | pnpm v11+                                  | Installato globalmente via npm                                 |
-| Dev server         | Turbopack (`next dev --turbopack`)         | Nessuna modifica a runtime production                          |
-| Lint               | ESLint + `next/core-web-vitals` + Prettier | Nessuna regola disabilitata senza motivo                       |
-| Formattazione      | Prettier 3                                 | Config condivisa, check separato da lint                       |
-| Unit / Integration | Vitest 4 + jsdom + Testing Library         | Coverage via `@vitest/coverage-v8`                             |
-| E2E                | Playwright                                 | Chromium, web-server auto avviato, test su `/` e `/api/health` |
-| Schema env         | Zod                                        | `src/config/env.ts` distingue server/public                    |
-| Git                | Standard                                   | `.gitignore` per node, Next, env, test artifacts, IDE          |
+| Componente         | Scelta                                                           | Note                                                               |
+| ------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Framework UI       | Next.js 16+ App Router                                           | Rendering ibrido (server/client) supportato nativamente            |
+| Linguaggio         | TypeScript strict                                                | tsconfig con `strict: true` e `noUncheckedIndexedAccess` abilitati |
+| Package manager    | pnpm v11+                                                        | Workspace singolo attualmente                                      |
+| Dev server         | Turbopack (`next dev --turbopack`)                               | Nessuna modifica a runtime production                              |
+| Lint               | ESLint 10 Flat Config + Prettier                                 | Zero warnings                                                      |
+| Formattazione      | Prettier 3                                                       | `.prettierrc` condiviso, check separato da lint                    |
+| Unit / Integration | Vitest 4 + jsdom + Testing Library + pg (direct)                 | Coverage via `@vitest/coverage-v8`                                 |
+| E2E                | Playwright 1.62                                                  | Chromium, web-server auto, smoke test `/` e `/api/health`          |
+| Database           | PostgreSQL 15+ su Supabase (Cloud / self-hosted / Docker locale) | RLS + RLS-helpers + trigger-based invariants                       |
+| Schema env         | Zod                                                              | `src/config/env.ts` distingue server/public                        |
+| Git                | Standard + branch strategy                                       | `main`, `develop`, `feature/*`, `fix/*`                            |
 
-Non sono ancora introdotte: Tailwind, Supabase, Stripe, database, autenticazione,
-domini personalizzati, booking, AI, ecc.
+## 3. Moduli introdotti in FASE 1 (Multi-tenant core)
 
-## 3. Boundary client / server
+Sono ora presenti i seguenti moduli (minimi, senza UI effettiva):
+
+```
+src/
+├─ modules/auth/core/
+│   ├─ guards.ts        # Zod role guard + gerarchia numerica ruoli
+│   └─ roles.ts         # Enums + ruolo numerico (Staff 10 → PlatformAdmin 10000)
+└─ lib/supabase/
+    ├─ browser.ts       # Client anon, per browser
+    ├─ server.ts        # Client server-side, context user
+    └─ service.ts       # service_role + marcato "server-only"
+```
+
+### Client Supabase a 3 livelli
+
+1. **`browser.ts`** → usa `NEXT_PUBLIC_SUPABASE_ANON_KEY`, cookie-less,
+   nessun segreto. Viene importato solo da codice client.
+2. **`server.ts`** → Server Components / Route Handlers; legge la sessione
+   dalle chiamate SSR.
+3. **`service.ts`** → marcato `import "server-only"`; usa
+   `SUPABASE_SERVICE_ROLE_KEY` e **bypassa RLS**. Deve essere usato solo da
+   backend autorizzato e MAI da codice raggiungibile dal client senza
+   adeguati controlli di autorizzazione.
+
+## 4. Boundary client / server
 
 La separazione è garantita in più modi:
 
@@ -50,138 +74,126 @@ La separazione è garantita in più modi:
    - Variabili senza prefisso → server-only.
    - Variabili con prefisso `NEXT_PUBLIC_*` → disponibili anche nel browser.
 
-3. **Validazione centralizzata**
-   - `src/config/env.ts` esporta `serverEnv` e `publicEnv`. Entrambe sono
-     validate con Zod. Importare dall'una o dall'altra esplicita l'intenzione.
+3. **Validazione centralizzata** con Zod.
 
 4. **Nessun segreto hardcoded**
-   - `.env.example` contiene solo lo schema, senza valori reali.
-   - `.env`, `.env.local` e simili sono in `.gitignore`.
+   - `.env.example` contiene solo lo schema; `.env` è ignorato da git.
 
-## 4. Organizzazione del codice (Fase 0)
+## 5. Organizzazione del codice (FASE 1)
 
 ```
 src/
 ├─ app/                 # App Router: pagine, layout, API route, boundaries
-├─ config/              # Configurazioni (env, ecc.)
+├─ config/              # Configurazioni (env, …)
 ├─ lib/
 │  ├─ server/           # Server-only (health builder, …)
+│  ├─ supabase/         # 3 clients: browser / server / service
 │  └─ utils.ts          # Utility pure, condivise
-└─ types/               # Tipi condivisi e contratti (Result, Health, …)
+├─ modules/
+│  └─ auth/core/        # ruoli + guardie
+└─ types/               # Tipi condivisi + Database (generati da Supabase CLI)
+supabase/
+├─ migrations/          # DDL versionata (12 file attualmente: 001…012)
+├─ seed.sql             # DATI TEST local-only; applicato dopo migrations
+└─ config.toml          # Config Supabase CLI per locale
+tests/
+└─ db/                  # Test DB-level: RLS, invariants, isolation
+e2e/                    # Playwright smoke test
 ```
 
-La struttura prevede in futuro moduli business sotto `src/modules/`:
+## 6. Ambienti (Local / Staging / Production)
 
-- `auth/`
-- `tenant/`
-- `site/`
-- `business/`
-- `billing/`
-- `booking/`
-- `ai/`
+| Ambiente    | Supabase                                  | Test distruttivi ammessi? | RPC `test_*` permanenti? |
+| ----------- | ----------------------------------------- | :-----------------------: | :----------------------: |
+| **LOCAL**   | Docker `supabase start` (porta 54322)     | ✅ Si, senza limitazioni  | ✅ TRANSIENT (beforeAll) |
+| **DEV**     | Cloud `dgekfjkuvnofwdwxflms` (temporaneo) | ✅ Ultima volta in FASE 1 |        ❌ RIMOSSI        |
+| **STAGING** | Cloud dedicato (futuro)                   |            ❌             |            ❌            |
+| **PROD**    | Cloud dedicato (futuro)                   |            ❌             |            ❌            |
 
-Essi **non esistono ancora** in questa fase e verranno creati **solo quando**
-ci saranno funzionalità reali da assegnarvi. Nessun file vuoto o stub è stato
-aggiunto per simulare una struttura più grande.
+Vedi `docs/database.md` per il workflow completo di migration.
 
-## 5. Strategia testing
+## 7. Strategia testing
+
+### DB-level tests (`tests/db/*.test.ts`)
+
+- Ambiente **Node** (`@vitest-environment node`).
+- **Env guardrail fail-hard**: se `NEXT_PUBLIC_SUPABASE_URL` non è in whitelist
+  (`127.0.0.1`, `localhost`, `db.dgekf…`, `velora-local`) → la suite fallisce
+  `process.exit(1)` prima di qualunque modifica.
+- Impersonazione RLS tramite:
+  1. Transient helper `test_rls()` (CREATA e DROPPATA nel beforeAll/afterAll
+     via connessione `pg.Client` diretta, **MAI in migration**).
+  2. `SET LOCAL ROLE authenticated` +
+     `set_config('request.jwt.claims', '{"sub":"…"}', true)`.
+- ~43 test attuali coprono: cross-tenant, RBAC, privilege escalation,
+  last-owner invariant, platform-admin isolation, audit append-only,
+  structural constraints.
 
 ### Unit / Integration (Vitest)
 
-- Ambiente `jsdom`.
-- File `*.test.ts` o `*.spec.ts` **dentro** `src/`, accanto al codice testato.
-- Test reali già presenti e significativi:
-  - `src/lib/utils.test.ts` → verifica utility di stringa, uptime formatter,
-    safe JSON parse e helper Result.
-  - `src/lib/server/health.test.ts` → verifica struttura payload health,
-    timestamp ISO, crescita uptime (con fake timers).
+- File `*.test.ts` dentro `src/` accanto al codice testato.
 
 ### End-to-End (Playwright)
 
-- Cartella `e2e/` separata da `src/`.
-- Configurazione avvia automaticamente il `webServer` (sviluppo o produzione)
-  e attende `/api/health`.
-- Smoke test reale già presente:
-  1. carica `/` e verifica status 2xx e elementi identificabili via
-     `data-testid` (title, subtitle, status badge, system info, footer);
-  2. chiama `GET /api/health` e verifica struttura JSON, campi minimi e header
-     `Cache-Control: no-store`;
-  3. verifica che una rotta inesistente restituisca 404 con la pagina
-     `not-found` renderizzata.
+- Cartella `e2e/` separata.
+- Smoke test: homepage, health, 404.
 
-### Scoping
+## 8. Database & RLS (sintesi)
 
-- `vitest` non esegue file dentro `e2e/`.
-- `playwright` non esegue test dentro `src/`.
+- **12 migration** versionate (001…012). Principio **IMMUTABILE**: una
+  migration distribuita non viene più modificata; correzioni = nuova
+  migration append-only.
+- **Seed separato**: `supabase/seed.sql` (NON in migration).
+- **RLS FORZATO** su tutte le tabelle tenant-sensitive (`ENABLE ROW LEVEL
+SECURITY` + `FORCE`).
+- **Helpers RLS**: `is_tenant_member`, `has_tenant_role`, `is_platform_admin`
+  sono `SECURITY DEFINER SET search_path = ''` completamente qualificati
+  (`public.*` / `auth.*`), `REVOKE ALL FROM PUBLIC`, grant minimali.
+- **Last Owner Invariant** garantita da trigger `DEFERRABLE INITIALLY DEFERRED`
+  `guard_last_active_owner` + constraint trigger.
+- **audit_logs append-only** garantita da trigger + policy insert limitata a
+  `service_role`.
 
-## 6. Strategia environment
+Vedi `docs/multi-tenancy.md` e `docs/database.md`.
 
-- **.env.example** → template versionato, soli placeholder.
-- **.env.local** → file locale dell'utente, ignorato da Git, per segreti e
-  override.
-- **Validazione runtime con Zod** in `src/config/env.ts`:
-  - `serverEnvSchema` → valori server-only.
-  - `publicEnvSchema` → valori `NEXT_PUBLIC_*`.
-  - In caso di schema invalido: lancio eccezione (fail-fast).
-- `NODE_ENV` è gestito separatamente dallo schema server.
+## 9. Health endpoint
 
-## 7. Health endpoint
+`GET /api/health` invariato (Fase 0).
 
-`GET /api/health`
+## 10. Cosa NON è ancora implementato (esplicito)
 
-- Risposta JSON `{ status, timestamp, service, version, checks: { uptime_ms } }`.
-- HTTP 200 se `status === "ok"`, 503 altrimenti.
-- Header `Cache-Control: no-store`.
-- Nessuna informazione sensibile esposta.
-
-Motivazione: servirà in futuro per monitoring, load balancer, readiness probe
-e post-deploy smoke checks.
-
-## 8. Cosa NON è ancora implementato (esplicito)
-
-Questa lista è intenzionale ed evita fraintendimenti.
-
-- ❌ Database / schema / Supabase / Postgres
-- ❌ Autenticazione e autorizzazione (ruoli SUPER_ADMIN / OWNER / …)
-- ❌ Row Level Security
-- ❌ Multi-tenant (tenant_id, mapping dominio-tenant, isolamento)
-- ❌ Pannello admin / dashboard / site builder
+- ❌ UI Auth (signup/login/password reset)
+- ❌ Dashboard admin / gestione tenant
 - ❌ Siti pubblici dei clienti / custom domains / SSL
 - ❌ Booking engine / disponibilità / race conditions
 - ❌ Pagamenti / Stripe / webhook / abbonamenti
 - ❌ AI assistant / LLM / RAG
 - ❌ Email / notifiche
-- ❌ Analytics
-- ❌ Upload file / storage
+- ❌ Analytics avanzati
+- ❌ Upload file / storage (schema esiste, non usato)
 
-Ognuno di questi moduli verrà introdotto in fasi successive, con la propria
-migrazione, policy, test e senza indebolire le garanzie attuali.
+## 11. Regole operative / Definition of Done (FASE 1)
 
-## 9. Regole operative / Definition of Done (minime per la Fase 0)
-
-Una modifica è considerata pronta solo se:
+Una modifica al core DB è considerata pronta solo se:
 
 1. `pnpm typecheck` passa;
-2. `pnpm lint` passa;
+2. `pnpm lint` passa (zero warnings);
 3. `pnpm format:check` passa;
-4. `pnpm test:run` passa;
-5. `pnpm build` passa (production build);
-6. l'app avvia (`pnpm start`) e risponde `/api/health`;
-7. `pnpm test:e2e` passa (almeno Chromium);
-8. nessun segreto entra in Git;
-9. nessuna regola di lint o tipo è stata disabilitata per mascherare un errore.
+4. `pnpm test:run` passa (unit src/);
+5. **Locale**: `supabase start` OK → `supabase db reset` (prima volta) OK →
+   secondo `supabase db reset` (idempotenza) OK;
+6. **Locale**: `pnpm db:test` passa i ~43 test;
+7. `pnpm build` passa;
+8. Playwright `pnpm test:e2e` passa;
+9. working tree pulito (`git status` senza modifiche o `??` incontrollati);
+10. nessun segreto entra in git;
+11. migration: si usa nuova migration append-only, MAI modifica migration
+    distribuita.
 
-Il comando aggregato è `pnpm check` (non include la build production e E2E,
-che sono più costose e tipicamente in CI).
+## 12. Future work
 
-## 10. Future work (cose deliberate per dopo)
-
-- Aggiungere una convenzione `server-only` più forte (es. `import "server-only"`
-  negli appropriati moduli, appena si iniziano a gestire rotte che toccano
-  dati sensibili).
-- Centralizzare future feature-flags (es. `booking_enabled`, `ai_enabled`) in
-  un modulo dedicato di entitlement.
-- Preparare lo scaffold iniziale di `src/modules/*` quando viene introdotta la
-  prima feature business concreta.
-- Aggiungere un audit log strutturato quando si introdurranno operazioni
-  amministrative.
+- Sostituire la sessione Cloud `dgekfjkuvnofwdwxflms` con ambienti dedicati
+  (DEV → STAGING → PRODUCTION) al termine della FASE 2.
+- Introdurre `import "server-only"` in più file quando necessario.
+- Centralizzare entitlement (feature flags per piano).
+- Introdurre pgTAP per test strutturali alongside Vitest.
