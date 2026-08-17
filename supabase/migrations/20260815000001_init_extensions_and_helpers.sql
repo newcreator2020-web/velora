@@ -2,9 +2,9 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA public;
 
--- Make absolutely sure extensions exist and are public; if previously installed
--- under a different schema, drop + recreate pinned under public to keep SQL
--- references (`public.crypt`, `public.gen_salt`) stable.
+-- Ensure extensions live under `public` so `public.crypt`, `public.gen_salt`,
+-- etc. always resolve. ALTER EXTENSION SET SCHEMA preserves existing
+-- dependencies (e.g. pgjwt → pgcrypto) unlike DROP+CREATE.
 DO $$
 DECLARE
   _schema NAME;
@@ -12,16 +12,14 @@ BEGIN
   SELECT extnamespace::regnamespace::name INTO _schema
     FROM pg_extension WHERE extname = 'pgcrypto';
   IF _schema IS NOT NULL AND _schema <> 'public' THEN
-    EXECUTE 'DROP EXTENSION pgcrypto';
-    CREATE EXTENSION pgcrypto WITH SCHEMA public;
+    EXECUTE 'ALTER EXTENSION pgcrypto SET SCHEMA public';
   END IF;
 
   _schema := NULL;
   SELECT extnamespace::regnamespace::name INTO _schema
     FROM pg_extension WHERE extname = 'uuid-ossp';
   IF _schema IS NOT NULL AND _schema <> 'public' THEN
-    EXECUTE 'DROP EXTENSION "uuid-ossp"';
-    CREATE EXTENSION "uuid-ossp" WITH SCHEMA public;
+    EXECUTE 'ALTER EXTENSION "uuid-ossp" SET SCHEMA public';
   END IF;
 END $$;
 

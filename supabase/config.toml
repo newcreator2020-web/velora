@@ -48,7 +48,7 @@
 [edge_runtime]
   enabled = false
 
-[inbucket]
+[local_smtp]
   enabled = true
   port = 54324
 
