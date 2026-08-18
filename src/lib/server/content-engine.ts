@@ -28,6 +28,12 @@ export const RADIUS_ALLOWED = ["none", "sm", "md", "lg", "xl", "full"] as const;
 
 export const SINGLETON_TYPES: ReadonlyArray<SectionType> = ["hero", "about", "contact"];
 
+export function safeVariant(v: string): (typeof ALLOWED_VARIANTS)[number] {
+  return ALLOWED_VARIANTS.includes(v as (typeof ALLOWED_VARIANTS)[number])
+    ? (v as (typeof ALLOWED_VARIANTS)[number])
+    : "default";
+}
+
 export function isSingletonSection(t: unknown): t is "hero" | "about" | "contact" {
   return typeof t === "string" && SINGLETON_TYPES.includes(t as SectionType);
 }

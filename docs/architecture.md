@@ -271,12 +271,104 @@ ISR dynamic: `/s/[slug]` revalidate=300s (1).
 
 ---
 
-## 13. Future work
+## 13. FASE 6 — Site Management Studio + Draft/Preview/Publish (Freeze 2026-08-19)
+
+Aggiunto in FASE 6: dashboard di configurazione sito **tenant-scoped**,
+**autenticata**, con workflow bozza → anteprima privata → pubblicazione
+atomica con cache invalidation per singolo tenant.
+
+Documentazione dettagliata → `docs/site-management-studio.md`.
+
+### 13.1 Modello dati Draft separato + Published (ADR FASE 6)
+
+| Concetto         | Tabella / Colonne                                                                                            | Note                                                                      |
+| ---------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| Stato editoriale | `site_editorial_state` (tenant_id PK, JSONB sections/services/theme, draft_revision UUID, updated_at)        | 1 riga per tenant; RLS FORCE + policies owner/manager write, member read. |
+| Pubblicato       | `site_sections` + `services` + `business_profiles.theme_*` + `tenants.published` (bool) + `published_at`     | Stesse tabelle FASE 5 (non modificato schema FASE 5 esistente).           |
+| Publish boundary | RPC `publish_site_draft()` SECURITY DEFINER, `search_path=''`, auth.uid() + has_tenant_role verify inside TX | Atomicità garantita da singola transazione DB.                            |
+
+### 13.2 Matrice autorizzativa (FASE 6)
+
+| Azione        | ANON | NO-TENANT | STAFF |  MANAGER   |       OWNER        |
+| ------------- | :--: | :-------: | :---: | :--------: | :----------------: |
+| `/app/site`   | DENY |   DENY    | READ  | READ+WRITE |     READ+WRITE     |
+| Preview draft | DENY |   DENY    | READ  |   ALLOW    |       ALLOW        |
+| Save Draft    | DENY |   DENY    | DENY  |   ALLOW    |       ALLOW        |
+| Publish       | DENY |   DENY    | DENY  |   ALLOW    |       ALLOW        |
+| **Unpublish** | DENY |   DENY    | DENY  |    DENY    | ALLOW (solo Owner) |
+
+### 13.3 Invarianti di sicurezza critici FASE 6
+
+1. `tenant_id` **mai** autorevole dal client; ogni Server Action lo deriva da `requireTenantRole()` server-side.
+2. Whitelist payload: solo chiavi `{sections, services, theme, revision}` sono elaborate; chiavi extra (`tenant_id`, `__proto__`, `role`, `published`, `business_profile_id`) scartate.
+3. Preview route: `dynamic='force-dynamic'` + `requireTenantMembership` prima di qualunque render → NO leak URL-indovinabile.
+4. Publish RPC: SECURITY DEFINER `SET search_path=''` + auth.uid() verify interno + compare-and-swap revision (CONCURRENT code per lost-update).
+5. Audit `site_published` / `site_editorial_draft_saved`: insert service_role only (anti-tampering), metadata PII-free (counts / prefix hash, nessun contenuto libero).
+6. Cache invalidation publish: esclusivamente `revalidatePath('/s/'+slug)` → **ZERO invalidazione globale**.
+
+### 13.4 Source of Truth aggiornata (FASE 6)
+
+```
+Bozza editoriale  → site_editorial_state (JSONB aggregato 1:1)
+Revision concorrenza → site_editorial_state.draft_revision (UUID)
+Pubblicato live   → site_sections/services/bp.theme_*/tenants.published (FASE 5 unchanged)
+Preview rendering → SOLO site_editorial_state (force-dynamic, NO ISR)
+Public rendering  → SOLO tabelle published (ISR 300s)
+First-publish 404 → tenants.published=false → not-found page (draft NON distrutto)
+```
+
+Vedi `docs/site-management-studio.md` §2, §5, §6.
+
+### 13.5 Comandi di verifica FASE 6
+
+```bash
+pnpm typecheck                 # TypeScript strict + exactOptional (0 errori)
+pnpm format:check              # Prettier 0 warning
+pnpm build                     # Next.js 16 production build
+pnpm test run                  # 193 PASS FASE1-6 core / 10 FAIL (preesistenti: health env + auth-onboarding test RPC non nel DB locale)
+pnpm db:reset                  # Idempotenza migrations 001→024 (2 run consecutivi identici)
+```
+
+### 13.6 Service Client Inventory (FASE 6)
+
+| File + riga                                      | Uso                     | Classificazione | Note                                                                                      |
+| ------------------------------------------------ | ----------------------- | --------------- | ----------------------------------------------------------------------------------------- |
+| `site-studio.ts:74` `getSupabaseServiceClient()` | INSERT `audit_logs`     | **JUSTIFIED**   | Policy `audit_logs_service_only_insert`; audit tamper-proof non scrivibile da user-bound. |
+| `auth.ts:243` (FASE 1)                           | onboarding provisioning | **JUSTIFIED**   | Create profiles/membership/tenants RLS non accessibili da anon/authenticated              |
+
+NESSUN altro uso del service client per le write tenant-scoped (sections/services/theme usano **esclusivamente** createSupabaseServerClient user-bound).
+
+### 13.7 Atomicity Report publish
+
+```
+BEGIN TX (RPC publish_site_draft)
+  1. SELECT FOR UPDATE site_editorial_state (lock a livello riga)
+  2. IF expected_revision ≠ current → RAISE EXCEPTION CONCURRENT
+  3. DELETE site_sections  WHERE tenant_id = $1
+  4. DELETE services       WHERE tenant_id = $1
+  5. INSERT site_sections  (rows 0..N dal draft JSONB normalizzato)
+  6. INSERT services       (rows 0..M)
+  7. UPDATE business_profiles (theme_primary, theme_background, …, theme_radius, theme_fonts)
+  8. UPDATE tenants SET published=true, published_at=NOW()
+  9. UPDATE site_editorial_state SET draft_revision = new_uuid, updated_at=NOW()
+  10. RETURN (ok, new_published_at, sections_applied, services_applied, theme_applied)
+COMMIT
+
+Next.js (Server Action post-TX):
+  11. try { revalidatePath('/s/'+slug) } catch { /* NON bloccante, fallback ISR 300s */ }
+  12. Audit insert site_published (NON bloccante)
+```
+
+Fallimento in punto 1-10 → **ROLLBACK automatico**: né site_sections né published cambiano. Stato transiente parziale impossibile per definizione.
+
+---
+
+## 14. Future work
 
 - Sostituire la sessione Cloud `dgekfjkuvnofwdwxflms` con ambienti dedicati
   (DEV → STAGING → PRODUCTION).
 - Introdurre `import "server-only"` in più file server-side.
 - Centralizzare entitlement (feature flags per piano).
 - Introdurre pgTAP per test strutturali alongside Vitest.
-- FASE 6+ bookings engine, payments, staff & reviews reali, custom domains,
+- FASE 7+ bookings engine, payments, staff & reviews reali, custom domains,
   sitemap, OG meta per-tenant, storage upload gallery immagini.

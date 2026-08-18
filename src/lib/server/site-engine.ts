@@ -8,7 +8,6 @@ import {
   themeTokensSchema,
   normalizePublicLink,
   SECTION_TYPES,
-  ALLOWED_VARIANTS,
   heroSettingsSchema,
   aboutSettingsSchema,
   servicesSettingsSchema,
@@ -16,6 +15,7 @@ import {
   staffSettingsSchema,
   reviewsSettingsSchema,
   contactSettingsSchema,
+  safeVariant,
 } from "@/lib/server/content-engine";
 import type {
   PublicSite,
@@ -302,12 +302,6 @@ type ServiceRow = {
   currency: string;
   duration_minutes: number | null;
 };
-
-function safeVariant(v: string): (typeof ALLOWED_VARIANTS)[number] {
-  return ALLOWED_VARIANTS.includes(v as (typeof ALLOWED_VARIANTS)[number])
-    ? (v as (typeof ALLOWED_VARIANTS)[number])
-    : "default";
-}
 
 function mapServices(rows: ServiceRow[]): PublicService[] {
   const out: PublicService[] = [];
