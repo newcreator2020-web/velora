@@ -10,6 +10,7 @@ const useProduction = Boolean(process.env["PLAYWRIGHT_USE_PRODUCTION"]);
 
 export default defineConfig({
   testDir: "./e2e",
+  globalSetup: "./e2e/global-setup-public.mjs",
   timeout: 30_000,
   fullyParallel: true,
   forbidOnly: isCI,

@@ -1,0 +1,122 @@
+import "dotenv/config";
+import { Client as PgClient } from "pg";
+import { randomUUID } from "node:crypto";
+
+const buildPgOpts = () => ({
+  host: process.env.SUPABASE_DB_HOST ?? "127.0.0.1",
+  port: Number(process.env.SUPABASE_DB_PORT ?? 54322),
+  database: process.env.SUPABASE_DB_NAME ?? "postgres",
+  user: process.env.SUPABASE_DB_USER ?? "postgres",
+  password: process.env.SUPABASE_DB_PASSWORD ?? "postgres",
+});
+
+const A = {
+  slug: "velora-e2e-pub-barber-a",
+  name: "E2E Tenant A Srl",
+  displayName: "Barbiere E2E — TENANT A FASE4",
+  category: "Barbiere",
+  description:
+    "Sito pubblico E2E Fase 4. Contenuti esclusivi Tenant A. Taglio, rasatura, cura barba.",
+  phone: "+39 06 11111111",
+  email: "e2e-pub-a@velora-public.example",
+  website: "https://pub-a.velora-test.example",
+  address: "Via dei Condotti 1",
+  city: "Roma",
+  province: "RM",
+  postal: "00187",
+  country: "IT",
+};
+const B = {
+  slug: "velora-e2e-pub-beauty-b",
+  name: "E2E Tenant B Sas",
+  displayName: "Centro Bellezza E2E — TENANT B FASE4",
+  category: "Estetica",
+  description:
+    "Sito pubblico E2E Fase 4. Contenuti esclusivi Tenant B. Trattamenti viso, corpo, solarium.",
+  phone: "+39 02 22222222",
+  email: "e2e-pub-b@velora-public.example",
+  website: "https://pub-b.velora-test.example",
+  address: "Via Montenapoleone 22",
+  city: "Milano",
+  province: "MI",
+  postal: "20121",
+  country: "IT",
+};
+const UNPUB = {
+  slug: "velora-e2e-unpublished-c",
+  name: "E2E Unpublished Snc",
+  displayName: "NON VISIBILE",
+  category: "Prova",
+  description: "NON PUBBLICATO - NON VISIBILE",
+  city: "Napoli",
+  province: "NA",
+  postal: "80100",
+  country: "IT",
+};
+
+async function cleanupAndInsert(pg, spec, opts) {
+  const now = new Date();
+  const publishedAt = opts.published ? now : null;
+  const tenantId = randomUUID();
+  await pg.query(`DELETE FROM public.business_profiles WHERE tenant_id = $1`, [tenantId]);
+  await pg.query(
+    `DELETE FROM public.tenants WHERE id IN (SELECT id FROM public.tenants WHERE slug = $1) OR slug = $1`,
+    [spec.slug],
+  );
+  await pg.query(
+    `INSERT INTO public.tenants(id, name, slug, status, published, published_at, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [tenantId, spec.name, spec.slug, opts.status, opts.published, publishedAt, now, now],
+  );
+  await pg.query(
+    `INSERT INTO public.business_profiles(
+        tenant_id, display_name, category, description, phone, email, website_url,
+        address_line1, address_line2, city, province, postal_code, country_code,
+        latitude, longitude, locale, timezone, created_at, updated_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+    [
+      tenantId,
+      spec.displayName,
+      spec.category,
+      spec.description,
+      spec.phone ?? null,
+      spec.email ?? null,
+      spec.website ?? null,
+      spec.address ?? null,
+      null,
+      spec.city,
+      spec.province,
+      spec.postal,
+      spec.country,
+      null,
+      null,
+      "it",
+      "Europe/Rome",
+      now,
+      now,
+    ],
+  );
+  return tenantId;
+}
+
+async function main() {
+  const pg = new PgClient(buildPgOpts());
+  try {
+    await pg.connect();
+    await cleanupAndInsert(pg, A, { status: "active", published: true });
+    await cleanupAndInsert(pg, B, { status: "active", published: true });
+    await cleanupAndInsert(pg, UNPUB, { status: "active", published: false });
+    console.warn(`[E2E PUBLIC SETUP] OK`);
+    console.warn(`  A /s/${A.slug}  (published active)`);
+    console.warn(`  B /s/${B.slug}  (published active)`);
+    console.warn(`  C /s/${UNPUB.slug}  (unpublished)`);
+  } catch (err) {
+    console.error("[E2E PUBLIC SETUP] FAIL", err);
+    process.exit(1);
+  } finally {
+    await pg.end();
+  }
+  process.exit(0);
+}
+
+await main();
