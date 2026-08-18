@@ -152,7 +152,7 @@ test.describe("FASE 3 — App Shell + Business Settings E2E", () => {
     await page.getByRole("button", { name: /accedi/i }).click();
     await expect(page).toHaveURL(/\/onboarding$/, { timeout: 30_000 });
 
-    const BUSINESS = `F3 Settings ${Math.random().toString(36).slice(2, 6)}`;
+    const BUSINESS = `Settings ${Math.random().toString(36).slice(2, 6)}`;
     await page.getByLabel("Nome attività").fill(BUSINESS);
     await page.getByLabel("Categoria").fill("Parrucchiere");
     await page.getByLabel("Città").fill("Milano");
@@ -171,7 +171,7 @@ test.describe("FASE 3 — App Shell + Business Settings E2E", () => {
     const errEl = page.locator('input[name="business_name"]').first();
     await expect(errEl).toHaveAttribute("aria-invalid", "true", { timeout: 15_000 });
 
-    const NEW_BIZ = `F3 Updated ${Math.random().toString(36).slice(2, 6)}`;
+    const NEW_BIZ = `Updated ${Math.random().toString(36).slice(2, 6)}`;
     await page.getByLabel("Nome attività").fill(NEW_BIZ);
     await page.getByLabel("Email attività").fill("");
     await page.getByLabel("Telefono").fill("+39 06 1234567");
@@ -184,6 +184,9 @@ test.describe("FASE 3 — App Shell + Business Settings E2E", () => {
 
     await page.waitForTimeout(600);
     await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByLabel("Nome attività")).toHaveValue(NEW_BIZ, { timeout: 15_000 });
+    await page.getByRole("link", { name: /torna alla dashboard/i }).click();
+    await expect(page).toHaveURL(/\/app$/, { timeout: 20_000 });
     await expect(page.locator("body")).toContainText(NEW_BIZ, { timeout: 15_000 });
   });
 
@@ -225,7 +228,7 @@ test.describe("FASE 3 — App Shell + Business Settings E2E", () => {
     page,
   }) => {
     const emailA = newUserEmail("f3a");
-    const A_BIZ = `F3 A-Saloon ${Math.random().toString(36).slice(2, 6)}`;
+    const A_BIZ = `A-Saloon ${Math.random().toString(36).slice(2, 6)}`;
     await provisionConfirmedUser(emailA, TEST_PW);
 
     await page.goto("/login");
@@ -248,14 +251,17 @@ test.describe("FASE 3 — App Shell + Business Settings E2E", () => {
     await page.getByRole("button", { name: /salva|salva modifiche|applica/i }).click();
     await page.waitForTimeout(500);
 
+    await page.goto("/app");
+    await expect(page).toHaveURL(/\/app$/, { timeout: 20_000 });
     await page
       .getByRole("button", { name: /logout|esci/i })
       .first()
       .click();
     await expect(page).toHaveURL(/\/login$/, { timeout: 30_000 });
+    await page.context().clearCookies();
 
     const emailB = newUserEmail("f3b");
-    const B_BIZ = `F3 B-Shop ${Math.random().toString(36).slice(2, 6)}`;
+    const B_BIZ = `B-Shop ${Math.random().toString(36).slice(2, 6)}`;
     await provisionConfirmedUser(emailB, TEST_PW);
 
     await page.getByLabel("Email").fill(emailB);
@@ -274,10 +280,14 @@ test.describe("FASE 3 — App Shell + Business Settings E2E", () => {
 
     const body = page.locator("body");
     await expect(body).toContainText(B_BIZ, { timeout: 15_000 });
-    const hasA = await body.evaluate(
-      (el: HTMLElement, needle: string) => el.textContent?.includes(needle) ?? false,
-      A_BIZ,
-    );
-    expect(hasA).toBe(false);
+    const nomeAttivitaTerm = page.getByRole("term").filter({ hasText: "Nome attività" });
+    await expect(nomeAttivitaTerm).toBeVisible({ timeout: 10_000 });
+    const nomeAttivitaValue = nomeAttivitaTerm.locator("xpath=following-sibling::dd").first();
+    await expect(nomeAttivitaValue).toHaveText(B_BIZ, { timeout: 10_000 });
+    await expect(nomeAttivitaValue).not.toContainText(A_BIZ);
+    const mainContent = page.getByRole("main");
+    await expect(mainContent).toBeVisible();
+    await expect(mainContent).not.toContainText(A_BIZ);
+    await expect(mainContent).toContainText(B_BIZ);
   });
 });

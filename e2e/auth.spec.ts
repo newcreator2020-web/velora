@@ -159,7 +159,7 @@ test.describe("FASE 2 — Auth + Onboarding E2E", () => {
     await page.getByLabel("Lingua").fill("it-IT");
 
     await page.getByRole("button", { name: /crea la tua attività/i }).click();
-    await expect(page).toHaveURL(/\/dashboard$/, { timeout: 45_000 });
+    await expect(page).toHaveURL(/\/app$|\/dashboard$/, { timeout: 45_000 });
 
     const body = page.locator("body");
     await expect(body).toContainText(BUSINESS, { timeout: 15_000 });
@@ -168,7 +168,7 @@ test.describe("FASE 2 — Auth + Onboarding E2E", () => {
     await expect(body).toContainText("owner");
 
     await page.reload({ waitUntil: "domcontentloaded" });
-    await expect(page).toHaveURL(/\/dashboard$/, { timeout: 20_000 });
+    await expect(page).toHaveURL(/\/app$/, { timeout: 20_000 });
     await expect(body).toContainText(BUSINESS, { timeout: 15_000 });
   });
 
@@ -189,7 +189,7 @@ test.describe("FASE 2 — Auth + Onboarding E2E", () => {
     await page.getByLabel("Timezone").fill("Europe/Rome");
     await page.getByLabel("Lingua").fill("it-IT");
     await page.getByRole("button", { name: /crea la tua attività/i }).click();
-    await expect(page).toHaveURL(/\/dashboard$/, { timeout: 45_000 });
+    await expect(page).toHaveURL(/\/app$|\/dashboard$/, { timeout: 45_000 });
 
     await page
       .getByRole("button", { name: /logout|esci/i })
@@ -219,7 +219,7 @@ test.describe("FASE 2 — Auth + Onboarding E2E", () => {
     await page.getByLabel("Timezone").fill("Europe/Rome");
     await page.getByLabel("Lingua").fill("it-IT");
     await page.getByRole("button", { name: /crea la tua attività/i }).click();
-    await expect(page).toHaveURL(/\/dashboard$/, { timeout: 45_000 });
+    await expect(page).toHaveURL(/\/app$|\/dashboard$/, { timeout: 45_000 });
     await expect(page.locator("body")).toContainText(A_BIZ, { timeout: 15_000 });
 
     await page
@@ -244,7 +244,7 @@ test.describe("FASE 2 — Auth + Onboarding E2E", () => {
     await page.getByLabel("Timezone").fill("Europe/Rome");
     await page.getByLabel("Lingua").fill("it-IT");
     await page.getByRole("button", { name: /crea la tua attività/i }).click();
-    await expect(page).toHaveURL(/\/dashboard$/, { timeout: 45_000 });
+    await expect(page).toHaveURL(/\/app$|\/dashboard$/, { timeout: 45_000 });
 
     const body = page.locator("body");
     await expect(body).toContainText(B_BIZ, { timeout: 15_000 });
