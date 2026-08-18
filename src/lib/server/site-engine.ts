@@ -47,6 +47,30 @@ export function normalizeHostname(raw: unknown): string | null {
   return h;
 }
 
+/**
+ * SOURCE OF TRUTH (Regola 49):
+ *  businessName    ← business_profiles.display_name  (Structured, NOT JSONB)
+ *  slug            ← tenants.slug
+ *  publication     ← tenants.status = 'active' AND tenants.published = true
+ *  section config  ← site_sections (position ASC, enabled, variant, settings JSONB presentation-only)
+ *  section order   ← site_sections.position (deterministico, UNIQUE per tenant)
+ *  contacts        ← business_profiles.phone/email/address/city/...
+ *  services        ← services table (active=true, tenant_scoped RLS)
+ *  staff public    ← dedicated public staff model IN FUTURO (oggi: []. MAI memberships!)
+ *  reviews         ← dedicated review model IN FUTURO (oggi: []. MAI nomi fake!)
+ *  theme tokens    ← business_profiles.theme_primary / theme_* (structured columns, non JSONB)
+ */
+
+type ThemeColumnsRaw = {
+  theme_primary: string | null;
+  theme_background: string | null;
+  theme_foreground: string | null;
+  theme_muted: string | null;
+  theme_radius: string | null;
+  theme_heading_font_preset: string | null;
+  theme_body_font_preset: string | null;
+};
+
 export interface PublicSiteData {
   slug: string;
   businessName: string;
@@ -72,6 +96,8 @@ export interface PublicTenantNotFound {
 export interface PublicTenantFound {
   readonly _tag: "Found";
   site: PublicSiteData;
+  tenantId: string;
+  theme: ThemeColumnsRaw;
 }
 
 export type PublicTenantResult = PublicTenantFound | PublicTenantNotFound;
@@ -129,7 +155,8 @@ export async function resolvePublicTenant(params: {
     let query = supabase
       .from("tenants")
       .select(
-        `slug,
+        `id,
+       slug,
        status,
        published,
        business_profiles (
@@ -145,7 +172,14 @@ export async function resolvePublicTenant(params: {
          postal_code,
          country_code,
          locale,
-         timezone
+         timezone,
+         theme_primary,
+         theme_background,
+         theme_foreground,
+         theme_muted,
+         theme_radius,
+         theme_heading_font_preset,
+         theme_body_font_preset
        )`,
       )
       .limit(1);
@@ -169,9 +203,7 @@ export async function resolvePublicTenant(params: {
     }
 
     const bpRaw = (data as { business_profiles?: unknown }).business_profiles ?? null;
-    const bp = (
-      Array.isArray(bpRaw) ? (bpRaw[0] ?? null) : bpRaw && typeof bpRaw === "object" ? bpRaw : null
-    ) as null | {
+    type BpFull = ThemeColumnsRaw & {
       display_name: string | null;
       category: string | null;
       description: string | null;
@@ -185,7 +217,10 @@ export async function resolvePublicTenant(params: {
       country_code: string | null;
       locale: string | null;
       timezone: string | null;
-    } | null;
+    };
+    const bp = (
+      Array.isArray(bpRaw) ? (bpRaw[0] ?? null) : bpRaw && typeof bpRaw === "object" ? bpRaw : null
+    ) as BpFull | null;
 
     const businessName =
       bp?.display_name && typeof bp.display_name === "string" && bp.display_name.trim().length > 0
@@ -198,6 +233,16 @@ export async function resolvePublicTenant(params: {
         host: hostForLog,
       });
     }
+
+    const theme: ThemeColumnsRaw = {
+      theme_primary: bp?.theme_primary ?? null,
+      theme_background: bp?.theme_background ?? null,
+      theme_foreground: bp?.theme_foreground ?? null,
+      theme_muted: bp?.theme_muted ?? null,
+      theme_radius: bp?.theme_radius ?? null,
+      theme_heading_font_preset: bp?.theme_heading_font_preset ?? null,
+      theme_body_font_preset: bp?.theme_body_font_preset ?? null,
+    };
 
     const site: PublicSiteData = {
       slug: data.slug,
@@ -221,23 +266,13 @@ export async function resolvePublicTenant(params: {
       canonicalPath: `/s/${data.slug}`,
     };
 
-    return { _tag: "Found", site };
+    return { _tag: "Found", site, tenantId: data.id, theme };
   } catch (err) {
     const msg = err instanceof Error ? truncateForLog(err.message, 80) : "unexpected";
     console.error(`[site-engine] public_resolver_error kind=${msg}`);
     return buildNotFound("NO_TENANT", { slug: slugForLog, host: hostForLog });
   }
 }
-
-type ThemeColumnsRaw = {
-  theme_primary: string | null;
-  theme_background: string | null;
-  theme_foreground: string | null;
-  theme_muted: string | null;
-  theme_radius: string | null;
-  theme_heading_font_preset: string | null;
-  theme_body_font_preset: string | null;
-};
 
 function mapTheme(bp: ThemeColumnsRaw): PublicTheme {
   const parsed = themeTokensSchema.safeParse({
@@ -313,38 +348,10 @@ export async function resolvePublicSiteContent(params: {
     return { _tag: "NotFound", reason: base.reason };
   }
   const site = base.site;
+  const slugForLog = site.slug;
+  const themeRaw = base.theme;
+  const tenantId: string | null = base.tenantId ?? null;
   const supabase = createSupabaseAnonReadonlyClient();
-
-  let themeRaw: ThemeColumnsRaw = {
-    theme_primary: null,
-    theme_background: null,
-    theme_foreground: null,
-    theme_muted: null,
-    theme_radius: null,
-    theme_heading_font_preset: null,
-    theme_body_font_preset: null,
-  };
-  let tenantId: string | null = null;
-
-  {
-    const { data, error } = await supabase
-      .from("tenants")
-      .select(
-        `id, business_profiles (
-          theme_primary, theme_background, theme_foreground, theme_muted,
-          theme_radius, theme_heading_font_preset, theme_body_font_preset
-        )`,
-      )
-      .eq("slug", site.slug)
-      .limit(1)
-      .single();
-    if (!error && data) {
-      tenantId = data.id;
-      const bpRaw = (data as unknown as { business_profiles?: unknown }).business_profiles;
-      const bp = (Array.isArray(bpRaw) ? bpRaw[0] : bpRaw) as ThemeColumnsRaw | null | undefined;
-      if (bp && typeof bp === "object") themeRaw = bp;
-    }
-  }
 
   let rows: SectionRow[] = [];
   const services: PublicService[] = [];
@@ -377,6 +384,8 @@ export async function resolvePublicSiteContent(params: {
     }
   }
 
+  const skipped: Array<{ type: string; pos: number; reason: string }> = [];
+
   if (rows.length === 0) {
     rows = buildDefaultDeterministicSections(
       { description: site.description },
@@ -394,10 +403,16 @@ export async function resolvePublicSiteContent(params: {
       .sort((a, b) => a.position - b.position || a.section_type.localeCompare(b.section_type));
     const seen = new Set<SectionType>();
     rows = rowsSorted.filter((r) => {
-      if (!SECTION_TYPES.includes(r.section_type as SectionType)) return false;
+      if (!SECTION_TYPES.includes(r.section_type as SectionType)) {
+        skipped.push({ type: r.section_type, pos: r.position, reason: "unknown_type" });
+        return false;
+      }
       const ty = r.section_type as SectionType;
       if (isSingletonSection(ty)) {
-        if (seen.has(ty)) return false;
+        if (seen.has(ty)) {
+          skipped.push({ type: ty, pos: r.position, reason: "duplicate_singleton" });
+          return false;
+        }
         seen.add(ty);
       }
       return true;
@@ -409,13 +424,22 @@ export async function resolvePublicSiteContent(params: {
 
   for (const r of rows) {
     const ty = r.section_type as SectionType;
-    if (!SECTION_TYPES.includes(ty)) continue;
+    if (!SECTION_TYPES.includes(ty)) {
+      skipped.push({ type: ty, pos: r.position, reason: "unknown_type_filter" });
+      continue;
+    }
     if (isSingletonSection(ty)) {
-      if (seenSingletons.has(ty)) continue;
+      if (seenSingletons.has(ty)) {
+        skipped.push({ type: ty, pos: r.position, reason: "dup_singleton_filter" });
+        continue;
+      }
       seenSingletons.add(ty);
     }
     const parsed = parseSectionSettings(ty, r.settings);
-    if (!parsed.ok) continue;
+    if (!parsed.ok) {
+      skipped.push({ type: ty, pos: r.position, reason: "invalid_settings" });
+      continue;
+    }
 
     const variant = safeVariant(r.variant);
 
@@ -493,6 +517,20 @@ export async function resolvePublicSiteContent(params: {
         break;
       }
     }
+  }
+
+  if (skipped.length > 0) {
+    const reasons = new Map<string, number>();
+    for (const s of skipped) {
+      reasons.set(s.reason, (reasons.get(s.reason) ?? 0) + 1);
+    }
+    const summary = [...reasons.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => `${k}=${v}`)
+      .join(",");
+    console.warn(
+      `[site-engine] section_skipped slug=${slugForLog} total=${skipped.length} reasons=${summary}`,
+    );
   }
 
   const theme = mapTheme(themeRaw);

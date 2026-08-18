@@ -190,10 +190,93 @@ Una modifica al core DB è considerata pronta solo se:
 11. migration: si usa nuova migration append-only, MAI modifica migration
     distribuita.
 
-## 12. Future work
+## 12. FASE 5 — Site Sections Public Engine (Freeze 2026-08-18)
+
+Aggiunto in FASE 5: motore di rendering pubblico **data-driven**,
+**tenant-driven**, **type-safe**, **secure**.
+Documentazione dettagliata → `docs/site-sections.md`.
+
+### 12.1 Stack aggiuntivo FASE 5
+
+| Componente    | Scelta                                                                  |
+| ------------- | ----------------------------------------------------------------------- |
+| Rendering     | Next.js 16 RSC Server Components **solo**. 7 renderer × NO "use client" |
+| ISR Cache     | `/s/[slug]` `revalidate = 300` (5 min per-slug, tenant-safe)            |
+| Validazione   | Zod strict ×7 settings schemas in `src/lib/server/content-engine.ts`    |
+| DB Structured | `site_sections` + `services` (migration 020…023)                        |
+| Theme         | 7 colonne strutturate `business_profiles.theme_*` → CSS vars            |
+| Registry      | `SECTION_RENDERERS: Record<type, RenderFn>` (NoSwitch pattern)          |
+| Logging       | `console.warn` sanitizzati (slug + count + reason enum)                 |
+
+### 12.2 Source of Truth FASE 5
+
+```
+businessName    → business_profiles.display_name  (structured)
+slug            → tenants.slug
+publication     → tenants.status=active AND tenants.published=true
+section config  → site_sections table (enabled, position, variant)
+settings JSONB  → presentation-only, strict Zod allowlist
+contacts        → business_profiles (phone, email, address, city, ...)
+services        → services table (active=true, tenant-scoped, structured price)
+staff pub.      → safe-empty (future dedicated table. MAI memberships!)
+reviews         → safe-empty (future dedicated table. MAI fake names!)
+theme tokens    → business_profiles.theme_primary / theme_* structured.
+```
+
+Vedi matrice completa §4 in `docs/site-sections.md`.
+
+### 12.3 Performance (miglioramenti FASE 5)
+
+- **Query count da 4 → 3** tramite JOIN tenants+business_profiles
+  (elimina query ridondante bp+theme).
+- sections + services: `Promise.all` parallelo.
+- Client JS pubblico: 594.6 KB / 15 chunks (in linea Next.js baseline).
+- Routes: 3 Static + 6 Dynamic; `/s/[slug]` ISR 300s.
+- No N+1 queries. Zero renderer client-side (tutti Server Components).
+
+### 12.4 Security & Fail-safe
+
+- **RLS anon read-only published-only** su tenants/bp/site_sections/services.
+- **Anon writes denied**.
+- Cross-tenant isolation verificato FASE1 test multi-tenant-rls **49/49**.
+- Theme isolation verificato E31 (A≠B primary).
+- **Settings JSON invalido NON crasha**: sezione skippata + log sanitizzato.
+- **CTA protocol allowlist**: tel/mailto/http/https/path interni → safe.
+- XSS safe: 0 × dangerouslySetInnerHTML in tutti i 7 renderer.
+- **Public DTO strict**: memberships / auth data NON raggiungibili dal pubblico.
+
+### 12.5 Testing FASE 5 baseline
+
+| Livello           | File                                |  PASS  |
+| ----------------- | ----------------------------------- | :----: |
+| DB RLS            | `tests/db/multi-tenant-rls.test.ts` |   49   |
+| DB Resolver       | `tests/db/site-engine.test.ts`      |   11   |
+| DB Content        | `tests/db/content-model.test.ts`    |   18   |
+| Unit Zod/DTO      | `tests/unit/`                       |   81   |
+| Integration       | `tests/integration/`                |   26   |
+| E2E Chromium dev  | `e2e/site-public.spec.ts` E1–E37    |   52   |
+| E2E Chromium prod | `test:e2e:prod` (pnpm start)        |   52   |
+| Health            | `/api/health`                       | 200 OK |
+| Secret scan       | git tracked files (5 patterns)      | 0 leak |
+
+Regression complete F1–F5: **185/185 PASS**.
+Second clean run: risultati **identici** (DB counts invariati, E2E 52/52 due volte).
+
+### 12.6 Build classification FASE 5 finale
+
+Static routes: `/`, `/_not-found`, `/login` (3).
+Dynamic routes: `/api/health`, `/app`, `/app/settings`, `/dashboard`, `/onboarding` (5).
+ISR dynamic: `/s/[slug]` revalidate=300s (1).
+**Middleware proxy** attivo come da build report.
+
+---
+
+## 13. Future work
 
 - Sostituire la sessione Cloud `dgekfjkuvnofwdwxflms` con ambienti dedicati
-  (DEV → STAGING → PRODUCTION) al termine della FASE 2.
-- Introdurre `import "server-only"` in più file quando necessario.
+  (DEV → STAGING → PRODUCTION).
+- Introdurre `import "server-only"` in più file server-side.
 - Centralizzare entitlement (feature flags per piano).
 - Introdurre pgTAP per test strutturali alongside Vitest.
+- FASE 6+ bookings engine, payments, staff & reviews reali, custom domains,
+  sitemap, OG meta per-tenant, storage upload gallery immagini.
