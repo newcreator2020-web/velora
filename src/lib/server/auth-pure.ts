@@ -99,6 +99,47 @@ export const onboardingSchema = z.object({
 
 export type OnboardingInput = z.infer<typeof onboardingSchema>;
 
+function emptyToNull(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v !== "string") return String(v).trim() === "" ? null : String(v).trim();
+  const t = v.trim();
+  return t.length === 0 ? null : t;
+}
+function emptyOrString(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  return typeof v === "string" ? v : String(v);
+}
+
+export const businessProfileUpdateSchema = z
+  .object({
+    business_name: z.preprocess(
+      emptyOrString,
+      z.string().trim().min(2, "Nome attività obbligatorio").max(120),
+    ),
+    phone: z.preprocess(emptyToNull, z.string().trim().max(32).nullable().optional()),
+    email: z.preprocess((v) => {
+      const n = emptyToNull(v);
+      return n === null ? undefined : n;
+    }, z.string().trim().email("Formato email non valido").max(160).optional().or(z.null())),
+    address: z.preprocess(emptyToNull, z.string().trim().max(190).nullable().optional()),
+    city: z.preprocess(emptyToNull, z.string().trim().max(80).nullable().optional()),
+    province: z.preprocess(emptyToNull, z.string().trim().max(4).nullable().optional()),
+    postal_code: z.preprocess(emptyToNull, z.string().trim().max(16).nullable().optional()),
+    description: z.preprocess(emptyToNull, z.string().trim().max(1000).nullable().optional()),
+  })
+  .transform((d) => ({
+    business_name: (d["business_name"] as string).trim(),
+    phone: d["phone"] as string | null | undefined,
+    email: d["email"] as string | null | undefined,
+    address_line1: d["address"] as string | null | undefined,
+    city: d["city"] as string | null | undefined,
+    province: d["province"] as string | null | undefined,
+    postal_code: d["postal_code"] as string | null | undefined,
+    description: d["description"] as string | null | undefined,
+  }));
+
+export type BusinessProfileUpdateInput = z.infer<typeof businessProfileUpdateSchema>;
+
 export function loginErrorMessage(code?: string, details?: string): string {
   const c = code?.toLowerCase() ?? "";
   const d = details?.toLowerCase() ?? "";

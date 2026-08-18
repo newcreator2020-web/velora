@@ -1,0 +1,36 @@
+import { initialSettingsResult } from "./actions";
+import { SettingsForm } from "./SettingsForm";
+
+export const metadata = { title: "Impostazioni attività — VELORA" };
+
+export default async function SettingsPage() {
+  const initial = await initialSettingsResult();
+  return (
+    <main
+      style={{
+        minHeight: "100dvh",
+        background: "#f8fafc",
+        padding: 24,
+      }}
+    >
+      <div
+        style={{
+          maxWidth: 960,
+          margin: "0 auto",
+        }}
+      >
+        <section
+          style={{
+            background: "white",
+            borderRadius: 12,
+            padding: 24,
+            border: "1px solid #e5e7eb",
+            boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
+          }}
+        >
+          <SettingsForm initialPromise={Promise.resolve(initial)} />
+        </section>
+      </div>
+    </main>
+  );
+}
