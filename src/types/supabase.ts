@@ -267,6 +267,10 @@ export interface Database {
           name: string;
           slug: string;
           status: string;
+          published: boolean;
+          temporary_domain: string | null;
+          custom_domain: string | null;
+          published_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -275,6 +279,10 @@ export interface Database {
           name: string;
           slug: string;
           status?: string;
+          published?: boolean;
+          temporary_domain?: string | null;
+          custom_domain?: string | null;
+          published_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -283,6 +291,10 @@ export interface Database {
           name?: string;
           slug?: string;
           status?: string;
+          published?: boolean;
+          temporary_domain?: string | null;
+          custom_domain?: string | null;
+          published_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
