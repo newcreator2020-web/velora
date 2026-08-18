@@ -147,14 +147,15 @@ async function cleanupFixture(tenantId: string) {
   await pg!.query(`DELETE FROM public.tenants WHERE id = $1`, [tenantId]);
 }
 
-describe("FASE4 · P1-P10 Public anonymous RLS + Site Engine Data Access", () => {
+describe("FASE4 · P1-P11 Public anonymous RLS + Site Engine Data Access", () => {
   let tA: PublicFixtureTenant;
   let tB: PublicFixtureTenant;
   let tC: PublicFixtureTenant;
   let tD: PublicFixtureTenant;
+  let tE: PublicFixtureTenant;
 
   beforeEach(async () => {
-    [tA, tB, tC, tD] = await Promise.all([
+    const base = await Promise.all([
       makePublicTenant({
         slug: "velora-test-barber-roma",
         name: "Barber Roma Srl",
@@ -205,7 +206,23 @@ describe("FASE4 · P1-P10 Public anonymous RLS + Site Engine Data Access", () =>
         published: true,
         status: "suspended",
       }),
+      makePublicTenant({
+        slug: "velora-test-incomplete-bp",
+        name: "Incomplete Ancona Srl",
+        businessName: "Nome transitorio da annullare",
+        category: "Sconosciuto",
+        description: "",
+        city: "Ancona",
+        province: "AN",
+        published: true,
+        status: "active",
+      }),
     ]);
+    [tA, tB, tC, tD, tE] = base;
+    await pg!.query(
+      `UPDATE public.business_profiles SET display_name = NULL, description = NULL WHERE tenant_id = $1`,
+      [tE.tenantId],
+    );
   }, 45000);
 
   afterEach(async () => {
@@ -214,6 +231,7 @@ describe("FASE4 · P1-P10 Public anonymous RLS + Site Engine Data Access", () =>
       cleanupFixture(tB.tenantId),
       cleanupFixture(tC.tenantId),
       cleanupFixture(tD.tenantId),
+      cleanupFixture(tE.tenantId),
     ]);
   }, 45000);
 
@@ -323,5 +341,34 @@ describe("FASE4 · P1-P10 Public anonymous RLS + Site Engine Data Access", () =>
 
     const after = await anon.from("tenants").select("slug").eq("slug", tA.slug).maybeSingle();
     expect(after.data).toBeNull();
+  });
+
+  it("P11: published active ma display_name NULL → resolver deve rifiutare (Dati Pubblici Incompleti)", async () => {
+    const anon = createTestAnonSupabase();
+    const withBp = await anon
+      .from("tenants")
+      .select(`slug,business_profiles(display_name)`)
+      .eq("slug", tE.slug)
+      .maybeSingle();
+    expect(withBp.error).toBeNull();
+    expect(withBp.data).not.toBeNull();
+    const raw = withBp.data as { business_profiles?: { display_name?: unknown } | unknown };
+    const bpObj =
+      typeof raw.business_profiles === "object" && raw.business_profiles !== null
+        ? (raw.business_profiles as { display_name?: unknown })
+        : null;
+    const displayName = bpObj?.display_name;
+    const missing =
+      displayName === null ||
+      displayName === undefined ||
+      (typeof displayName === "string" && displayName.trim().length === 0);
+    expect(missing).toBe(true);
+
+    const countWithBp = await anon
+      .from("tenants")
+      .select("slug", { count: "exact", head: true })
+      .eq("slug", tE.slug)
+      .not("business_profiles.display_name", "is", null);
+    expect(countWithBp.count ?? 0).toBe(0);
   });
 });
