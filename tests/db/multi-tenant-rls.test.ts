@@ -1213,6 +1213,109 @@ describe("FASE 1 — Multi-tenant RLS", () => {
   });
 
   // -------------------------------------------------------------------------
+  // PUNTO 5 FASE 3C — Settings security runtime (S1-S6).
+  // Verifica RLS REALE sulle scritture business_profiles / tenants usando
+  // l'impersonificazione via test_rls() (authenticated role + request.jwt sub).
+  // Nessun service role viene usato per le query sotto test; il service
+  // role serve soltanto a invocare la RPC di test TRANSIENT che imposta
+  // request.jwt.* e SET LOCAL ROLE authenticated, esattamente come avverebbe
+  // lato PostgREST quando riceve un JWT.
+  // -------------------------------------------------------------------------
+  describe("Group 11: Settings security runtime S1-S6 (user-bound identity, RLS attivo)", () => {
+    it("S1. Manager A updates Business Profile A → ALLOWED", async () => {
+      const newValue = "S1 manager A own tenant BP description";
+      const r = await runRls("manager_a", "update:bp.description", {
+        tenant_id: FIXTURE.tenants.A,
+        new_description: newValue,
+      });
+      expectAllowed(r.error, r.data, "S1 manager -> own BP ALLOW");
+      const pg = await getPgClient();
+      const row = await pg.query(
+        `SELECT description FROM public.business_profiles WHERE tenant_id=$1::uuid`,
+        [FIXTURE.tenants.A],
+      );
+      expect(row.rows?.[0]?.description).toBe(newValue);
+    });
+
+    it("S2. Staff A updates Business Profile A → DENIED (role insufficient)", async () => {
+      const r = await runRls("staff_a", "update:bp.description", {
+        tenant_id: FIXTURE.tenants.A,
+        new_description: "S2 staff should not write BP",
+      });
+      expectDenied(r.error, r.data, "S2 staff -> own BP DENY");
+      const pg = await getPgClient();
+      const row = await pg.query(
+        `SELECT description FROM public.business_profiles WHERE tenant_id=$1::uuid`,
+        [FIXTURE.tenants.A],
+      );
+      expect(row.rows?.[0]?.description).not.toBe("S2 staff should not write BP");
+    });
+
+    it("S3. Manager A updates Business Profile B (cross-tenant) → DENIED", async () => {
+      const r = await runRls("manager_a", "update:bp.description", {
+        tenant_id: FIXTURE.tenants.B,
+        new_description: "S3 manager A cross-tenant B tamper",
+      });
+      expectDenied(r.error, r.data, "S3 manager A -> BP B cross-tenant DENY");
+      const pg = await getPgClient();
+      const row = await pg.query(
+        `SELECT description FROM public.business_profiles WHERE tenant_id=$1::uuid`,
+        [FIXTURE.tenants.B],
+      );
+      expect(row.rows?.[0]?.description).not.toBe("S3 manager A cross-tenant B tamper");
+    });
+
+    it("S4. Owner B updates Business Profile A (cross-tenant) → DENIED", async () => {
+      const r = await runRls("owner_b", "update:bp.description", {
+        tenant_id: FIXTURE.tenants.A,
+        new_description: "S4 owner B cross-tenant A tamper",
+      });
+      expectDenied(r.error, r.data, "S4 owner B -> BP A cross-tenant DENY");
+      const pg = await getPgClient();
+      const row = await pg.query(
+        `SELECT description FROM public.business_profiles WHERE tenant_id=$1::uuid`,
+        [FIXTURE.tenants.A],
+      );
+      expect(row.rows?.[0]?.description).not.toBe("S4 owner B cross-tenant A tamper");
+    });
+
+    it("S5. No-membership user updates Business Profile A → DENIED", async () => {
+      const r = await runRls("no_member", "update:bp.description", {
+        tenant_id: FIXTURE.tenants.A,
+        new_description: "S5 no-member tamper A BP",
+      });
+      expectDenied(r.error, r.data, "S5 no-member -> BP A DENY");
+      const pg = await getPgClient();
+      const row = await pg.query(
+        `SELECT description FROM public.business_profiles WHERE tenant_id=$1::uuid`,
+        [FIXTURE.tenants.A],
+      );
+      expect(row.rows?.[0]?.description).not.toBe("S5 no-member tamper A BP");
+    });
+
+    it("S6. Anon client updates any Business Profile → DENIED (no session, 401/0 rows)", async () => {
+      const anon = makeAnonClient();
+      const { data, error } = await anon
+        .from("business_profiles")
+        .update({ description: "S6 anon tamper" } as never)
+        .eq("tenant_id", FIXTURE.tenants.A as never);
+      const denied =
+        error != null ||
+        (data as unknown) == null ||
+        (Array.isArray(data as unknown) && (data as unknown as unknown[]).length === 0);
+      expect(denied, `S6 anon update denied: err=${inspect(error)} data=${inspect(data)}`).toBe(
+        true,
+      );
+      const pg = await getPgClient();
+      const row = await pg.query(
+        `SELECT description FROM public.business_profiles WHERE tenant_id=$1::uuid`,
+        [FIXTURE.tenants.A],
+      );
+      expect(row.rows?.[0]?.description).not.toBe("S6 anon tamper");
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Group 10: test-only RPC cleanup (afterAll) — structural proof.
   // -------------------------------------------------------------------------
   describe("Group 10: Post-suite cleanup contract", () => {
