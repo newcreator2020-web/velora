@@ -1,4 +1,4 @@
-import { initialSettingsResult } from "./actions";
+import { initialSettingsResult, type SettingsActionResult } from "./actions";
 import { SettingsForm } from "./SettingsForm";
 
 export const metadata = { title: "Impostazioni attività — VELORA" };
@@ -28,7 +28,11 @@ export default async function SettingsPage() {
             boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
           }}
         >
-          <SettingsForm initialPromise={Promise.resolve(initial)} />
+          <SettingsForm
+            initial={
+              initial as SettingsActionResult & { values: Partial<Record<string, string | null>> }
+            }
+          />
         </section>
       </div>
     </main>

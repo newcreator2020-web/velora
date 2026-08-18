@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useFormState as useActionStateCompat, useFormStatus } from "react-dom";
-import { initialSettingsResult, settingsAction, type SettingsActionResult } from "./actions";
+import { settingsAction, type SettingsActionResult } from "./actions";
 
 type Props = {
-  initialPromise: ReturnType<typeof initialSettingsResult>;
+  initial: SettingsActionResult & { values: Partial<Record<string, string | null>> };
 };
 
 function Submit() {
@@ -122,8 +122,7 @@ function Field({
   );
 }
 
-export function SettingsForm({ initialPromise }: Props) {
-  const initial = useInitialResult(initialPromise);
+export function SettingsForm({ initial }: Props) {
   const [state, action] = useActionStateCompat(settingsAction, initial as SettingsActionResult);
 
   const values = (state.values ?? initial.values ?? {}) as Partial<Record<string, string | null>>;
@@ -309,18 +308,4 @@ export function SettingsForm({ initialPromise }: Props) {
       </form>
     </div>
   );
-}
-
-import { use } from "react";
-function useInitialResult(p: ReturnType<typeof initialSettingsResult>) {
-  const safePromise = p.then(
-    (value) => value,
-    () =>
-      ({
-        ok: false,
-        error: "",
-        values: {},
-      }) as SettingsActionResult & { values: Partial<Record<string, string | null>> },
-  );
-  return use(safePromise);
 }
