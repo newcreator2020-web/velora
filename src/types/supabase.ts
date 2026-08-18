@@ -1,61 +1,40 @@
-/**
- * Supabase types for the `public` schema.
- *
- * Structure matches what `supabase gen types typescript` produces exactly
- * (`Database.public.Tables<T>.Row/Insert/Update`, composite Enums as string
- * unions, Relationships array, Functions returns, JSON aliased type...).
- *
- * Written by hand because `supabase gen types typescript` needs a
- * SUPABASE_ACCESS_TOKEN not available in this sandbox session. Once a
- * personal access token is configured, regenerate authoritatively with:
- *
- *   pnpm db:types
- */
-
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
-export interface Database {
+export type Database = {
   public: {
     Tables: {
       audit_logs: {
         Row: {
-          id: string;
-          tenant_id: string | null;
-          actor_user_id: string | null;
           action: string;
-          entity_type: string | null;
-          entity_id: string | null;
-          metadata: Json;
+          actor_user_id: string | null;
           created_at: string;
+          entity_id: string | null;
+          entity_type: string | null;
+          id: string;
+          metadata: Json;
+          tenant_id: string | null;
         };
         Insert: {
-          id?: string;
-          tenant_id?: string | null;
-          actor_user_id?: string | null;
           action: string;
-          entity_type?: string | null;
-          entity_id?: string | null;
-          metadata?: Json;
+          actor_user_id?: string | null;
           created_at?: string;
+          entity_id?: string | null;
+          entity_type?: string | null;
+          id?: string;
+          metadata?: Json;
+          tenant_id?: string | null;
         };
         Update: {
-          id?: string;
-          tenant_id?: string | null;
-          actor_user_id?: string | null;
           action?: string;
-          entity_type?: string | null;
-          entity_id?: string | null;
-          metadata?: Json;
+          actor_user_id?: string | null;
           created_at?: string;
+          entity_id?: string | null;
+          entity_type?: string | null;
+          id?: string;
+          metadata?: Json;
+          tenant_id?: string | null;
         };
         Relationships: [
-          {
-            foreignKeyName: "audit_logs_tenant_id_fkey";
-            columns: ["tenant_id"];
-            isOneToOne: false;
-            referencedRelation: "tenants";
-            referencedColumns: ["id"];
-          },
           {
             foreignKeyName: "audit_logs_actor_user_id_fkey";
             columns: ["actor_user_id"];
@@ -63,77 +42,105 @@ export interface Database {
             referencedRelation: "profiles";
             referencedColumns: ["id"];
           },
+          {
+            foreignKeyName: "audit_logs_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
         ];
       };
       business_profiles: {
         Row: {
-          tenant_id: string;
-          display_name: string | null;
-          legal_name: string | null;
-          category: string | null;
-          description: string | null;
-          phone: string | null;
-          whatsapp: string | null;
-          email: string | null;
-          website_url: string | null;
           address_line1: string | null;
           address_line2: string | null;
+          category: string | null;
           city: string | null;
-          province: string | null;
-          postal_code: string | null;
           country_code: string | null;
-          latitude: number | null;
-          longitude: number | null;
-          timezone: string;
-          locale: string;
           created_at: string;
+          description: string | null;
+          display_name: string | null;
+          email: string | null;
+          latitude: number | null;
+          legal_name: string | null;
+          locale: string;
+          longitude: number | null;
+          phone: string | null;
+          postal_code: string | null;
+          province: string | null;
+          tenant_id: string;
+          theme_background: string | null;
+          theme_body_font_preset: string | null;
+          theme_foreground: string | null;
+          theme_heading_font_preset: string | null;
+          theme_muted: string | null;
+          theme_primary: string | null;
+          theme_radius: string | null;
+          timezone: string;
           updated_at: string;
+          website_url: string | null;
+          whatsapp: string | null;
         };
         Insert: {
-          tenant_id: string;
-          display_name?: string | null;
-          legal_name?: string | null;
-          category?: string | null;
-          description?: string | null;
-          phone?: string | null;
-          whatsapp?: string | null;
-          email?: string | null;
-          website_url?: string | null;
           address_line1?: string | null;
           address_line2?: string | null;
+          category?: string | null;
           city?: string | null;
-          province?: string | null;
-          postal_code?: string | null;
           country_code?: string | null;
-          latitude?: number | null;
-          longitude?: number | null;
-          timezone?: string;
-          locale?: string;
           created_at?: string;
+          description?: string | null;
+          display_name?: string | null;
+          email?: string | null;
+          latitude?: number | null;
+          legal_name?: string | null;
+          locale?: string;
+          longitude?: number | null;
+          phone?: string | null;
+          postal_code?: string | null;
+          province?: string | null;
+          tenant_id: string;
+          theme_background?: string | null;
+          theme_body_font_preset?: string | null;
+          theme_foreground?: string | null;
+          theme_heading_font_preset?: string | null;
+          theme_muted?: string | null;
+          theme_primary?: string | null;
+          theme_radius?: string | null;
+          timezone?: string;
           updated_at?: string;
+          website_url?: string | null;
+          whatsapp?: string | null;
         };
         Update: {
-          tenant_id?: string;
-          display_name?: string | null;
-          legal_name?: string | null;
-          category?: string | null;
-          description?: string | null;
-          phone?: string | null;
-          whatsapp?: string | null;
-          email?: string | null;
-          website_url?: string | null;
           address_line1?: string | null;
           address_line2?: string | null;
+          category?: string | null;
           city?: string | null;
-          province?: string | null;
-          postal_code?: string | null;
           country_code?: string | null;
-          latitude?: number | null;
-          longitude?: number | null;
-          timezone?: string;
-          locale?: string;
           created_at?: string;
+          description?: string | null;
+          display_name?: string | null;
+          email?: string | null;
+          latitude?: number | null;
+          legal_name?: string | null;
+          locale?: string;
+          longitude?: number | null;
+          phone?: string | null;
+          postal_code?: string | null;
+          province?: string | null;
+          tenant_id?: string;
+          theme_background?: string | null;
+          theme_body_font_preset?: string | null;
+          theme_foreground?: string | null;
+          theme_heading_font_preset?: string | null;
+          theme_muted?: string | null;
+          theme_primary?: string | null;
+          theme_radius?: string | null;
+          timezone?: string;
           updated_at?: string;
+          website_url?: string | null;
+          whatsapp?: string | null;
         };
         Relationships: [
           {
@@ -147,34 +154,27 @@ export interface Database {
       };
       platform_admins: {
         Row: {
-          user_id: string;
-          status: string;
-          grant_reason: string | null;
           created_at: string;
           created_by: string | null;
+          grant_reason: string | null;
+          status: string;
+          user_id: string;
         };
         Insert: {
-          user_id: string;
-          status?: string;
-          grant_reason?: string | null;
           created_at?: string;
           created_by?: string | null;
+          grant_reason?: string | null;
+          status?: string;
+          user_id: string;
         };
         Update: {
-          user_id?: string;
-          status?: string;
-          grant_reason?: string | null;
           created_at?: string;
           created_by?: string | null;
+          grant_reason?: string | null;
+          status?: string;
+          user_id?: string;
         };
         Relationships: [
-          {
-            foreignKeyName: "platform_admins_user_id_fkey";
-            columns: ["user_id"];
-            isOneToOne: true;
-            referencedRelation: "profiles";
-            referencedColumns: ["id"];
-          },
           {
             foreignKeyName: "platform_admins_created_by_fkey";
             columns: ["created_by"];
@@ -182,67 +182,160 @@ export interface Database {
             referencedRelation: "profiles";
             referencedColumns: ["id"];
           },
+          {
+            foreignKeyName: "platform_admins_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: true;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
         ];
       };
       profiles: {
         Row: {
-          id: string;
-          display_name: string | null;
           avatar_url: string | null;
           created_at: string;
+          display_name: string | null;
+          id: string;
           updated_at: string;
         };
         Insert: {
-          id: string;
-          display_name?: string | null;
           avatar_url?: string | null;
           created_at?: string;
+          display_name?: string | null;
+          id: string;
           updated_at?: string;
         };
         Update: {
-          id?: string;
-          display_name?: string | null;
           avatar_url?: string | null;
           created_at?: string;
+          display_name?: string | null;
+          id?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      services: {
+        Row: {
+          active: boolean;
+          created_at: string;
+          currency: string;
+          description: string | null;
+          duration_minutes: number | null;
+          id: string;
+          name: string;
+          position: number;
+          price_from: number | null;
+          tenant_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          active?: boolean;
+          created_at?: string;
+          currency?: string;
+          description?: string | null;
+          duration_minutes?: number | null;
+          id?: string;
+          name: string;
+          position?: number;
+          price_from?: number | null;
+          tenant_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          active?: boolean;
+          created_at?: string;
+          currency?: string;
+          description?: string | null;
+          duration_minutes?: number | null;
+          id?: string;
+          name?: string;
+          position?: number;
+          price_from?: number | null;
+          tenant_id?: string;
           updated_at?: string;
         };
         Relationships: [
           {
-            foreignKeyName: "profiles_id_fkey";
-            columns: ["id"];
-            isOneToOne: true;
-            referencedRelation: "users";
+            foreignKeyName: "services_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      site_sections: {
+        Row: {
+          created_at: string;
+          enabled: boolean;
+          id: string;
+          position: number;
+          section_type: string;
+          settings: Json;
+          tenant_id: string;
+          updated_at: string;
+          variant: string;
+        };
+        Insert: {
+          created_at?: string;
+          enabled?: boolean;
+          id?: string;
+          position?: number;
+          section_type: string;
+          settings?: Json;
+          tenant_id: string;
+          updated_at?: string;
+          variant?: string;
+        };
+        Update: {
+          created_at?: string;
+          enabled?: boolean;
+          id?: string;
+          position?: number;
+          section_type?: string;
+          settings?: Json;
+          tenant_id?: string;
+          updated_at?: string;
+          variant?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "site_sections_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
             referencedColumns: ["id"];
           },
         ];
       };
       tenant_memberships: {
         Row: {
+          created_at: string;
           id: string;
-          tenant_id: string;
-          user_id: string;
           role: string;
           status: string;
-          created_at: string;
+          tenant_id: string;
           updated_at: string;
+          user_id: string;
         };
         Insert: {
-          id?: string;
-          tenant_id: string;
-          user_id: string;
-          role: string;
-          status?: string;
           created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
           id?: string;
-          tenant_id?: string;
-          user_id?: string;
           role?: string;
           status?: string;
-          created_at?: string;
+          tenant_id: string;
           updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          created_at?: string;
+          id?: string;
+          role?: string;
+          status?: string;
+          tenant_id?: string;
+          updated_at?: string;
+          user_id?: string;
         };
         Relationships: [
           {
@@ -263,39 +356,39 @@ export interface Database {
       };
       tenants: {
         Row: {
+          created_at: string;
+          custom_domain: string | null;
           id: string;
           name: string;
+          published: boolean;
+          published_at: string | null;
           slug: string;
           status: string;
-          published: boolean;
           temporary_domain: string | null;
-          custom_domain: string | null;
-          published_at: string | null;
-          created_at: string;
           updated_at: string;
         };
         Insert: {
+          created_at?: string;
+          custom_domain?: string | null;
           id?: string;
           name: string;
+          published?: boolean;
+          published_at?: string | null;
           slug: string;
           status?: string;
-          published?: boolean;
           temporary_domain?: string | null;
-          custom_domain?: string | null;
-          published_at?: string | null;
-          created_at?: string;
           updated_at?: string;
         };
         Update: {
+          created_at?: string;
+          custom_domain?: string | null;
           id?: string;
           name?: string;
+          published?: boolean;
+          published_at?: string | null;
           slug?: string;
           status?: string;
-          published?: boolean;
           temporary_domain?: string | null;
-          custom_domain?: string | null;
-          published_at?: string | null;
-          created_at?: string;
           updated_at?: string;
         };
         Relationships: [];
@@ -305,55 +398,48 @@ export interface Database {
       [_ in never]: never;
     };
     Functions: {
-      is_platform_admin: {
-        Args: Record<PropertyKey, never>;
-        Returns: boolean;
-      };
-      is_tenant_member: {
-        Args: { target_tenant_id: string };
-        Returns: boolean;
-      };
-      has_tenant_role: {
-        Args: { target_tenant_id: string; allowed_roles: string[] };
-        Returns: boolean;
-      };
-      set_current_timestamp_updated_at: {
-        Args: Record<PropertyKey, never>;
-        Returns: unknown;
-      };
-      handle_new_user: {
-        Args: Record<PropertyKey, never>;
-        Returns: unknown;
-      };
-      audit_logs_immutable: {
-        Args: Record<PropertyKey, never>;
-        Returns: unknown;
-      };
-      audit_notify: {
-        Args: Record<PropertyKey, never>;
-        Returns: unknown;
-      };
       create_tenant_with_owner: {
         Args: {
+          p_business_email?: string;
           p_business_name: string;
           p_category: string;
           p_city: string;
+          p_locale?: string;
+          p_phone?: string;
           p_province: string;
-          p_phone?: string | undefined;
-          p_business_email?: string | undefined;
-          p_timezone?: string | undefined;
-          p_locale?: string | undefined;
+          p_timezone?: string;
         };
         Returns: Json;
       };
-      test_provision_user: {
-        Args: { p_email: string; p_password: string; p_meta?: Json };
+      dearmor: { Args: { "": string }; Returns: string };
+      gen_random_uuid: { Args: never; Returns: string };
+      gen_salt: { Args: { "": string }; Returns: string };
+      has_tenant_role: {
+        Args: { allowed_roles: string[]; target_tenant_id: string };
+        Returns: boolean;
+      };
+      is_platform_admin: { Args: never; Returns: boolean };
+      is_tenant_member: { Args: { target_tenant_id: string }; Returns: boolean };
+      pgp_armor_headers: {
+        Args: { "": string };
+        Returns: Record<string, unknown>[];
+      };
+      uuid_generate_v1: { Args: never; Returns: string };
+      uuid_generate_v1mc: { Args: never; Returns: string };
+      uuid_generate_v3: {
+        Args: { name: string; namespace: string };
         Returns: string;
       };
-      test_rls: {
-        Args: { p_user_id: string; p_action: string; p_args?: Json };
-        Returns: Json;
+      uuid_generate_v4: { Args: never; Returns: string };
+      uuid_generate_v5: {
+        Args: { name: string; namespace: string };
+        Returns: string;
       };
+      uuid_nil: { Args: never; Returns: string };
+      uuid_ns_dns: { Args: never; Returns: string };
+      uuid_ns_oid: { Args: never; Returns: string };
+      uuid_ns_url: { Args: never; Returns: string };
+      uuid_ns_x500: { Args: never; Returns: string };
     };
     Enums: {
       [_ in never]: never;
@@ -362,28 +448,33 @@ export interface Database {
       [_ in never]: never;
     };
   };
-}
+};
 
-type PublicSchema = Database[Extract<keyof Database, "public">];
+type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">;
+
+type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">];
 
 export type Tables<
-  PublicTableNameOrOptions extends
-    keyof (PublicSchema["Tables"] & PublicSchema["Views"]) | { schema: keyof Database },
-  TableName extends (PublicTableNameOrOptions extends {
-    schema: keyof Database;
+  DefaultSchemaTableNameOrOptions extends
+    | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
+    | { schema: keyof DatabaseWithoutInternals },
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals;
   }
-    ? keyof (Database[PublicTableNameOrOptions["schema"]]["Tables"] &
-        Database[PublicTableNameOrOptions["schema"]]["Views"])
+    ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+        DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
     : never) = never,
-> = PublicTableNameOrOptions extends { schema: keyof Database }
-  ? (Database[PublicTableNameOrOptions["schema"]]["Tables"] &
-      Database[PublicTableNameOrOptions["schema"]]["Views"])[TableName] extends {
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals;
+}
+  ? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
+      DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
       Row: infer R;
     }
     ? R
     : never
-  : PublicTableNameOrOptions extends keyof (PublicSchema["Tables"] & PublicSchema["Views"])
-    ? (PublicSchema["Tables"] & PublicSchema["Views"])[PublicTableNameOrOptions] extends {
+  : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
+    ? (DefaultSchema["Tables"] & DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
         Row: infer R;
       }
       ? R
@@ -391,20 +482,23 @@ export type Tables<
     : never;
 
 export type TablesInsert<
-  PublicTableNameOrOptions extends keyof PublicSchema["Tables"] | { schema: keyof Database },
-  TableName extends (PublicTableNameOrOptions extends {
-    schema: keyof Database;
+  DefaultSchemaTableNameOrOptions extends
+    keyof DefaultSchema["Tables"] | { schema: keyof DatabaseWithoutInternals },
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals;
   }
-    ? keyof Database[PublicTableNameOrOptions["schema"]]["Tables"]
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
     : never) = never,
-> = PublicTableNameOrOptions extends { schema: keyof Database }
-  ? Database[PublicTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals;
+}
+  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
       Insert: infer I;
     }
     ? I
     : never
-  : PublicTableNameOrOptions extends keyof PublicSchema["Tables"]
-    ? PublicSchema["Tables"][PublicTableNameOrOptions] extends {
+  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
+    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
         Insert: infer I;
       }
       ? I
@@ -412,20 +506,23 @@ export type TablesInsert<
     : never;
 
 export type TablesUpdate<
-  PublicTableNameOrOptions extends keyof PublicSchema["Tables"] | { schema: keyof Database },
-  TableName extends (PublicTableNameOrOptions extends {
-    schema: keyof Database;
+  DefaultSchemaTableNameOrOptions extends
+    keyof DefaultSchema["Tables"] | { schema: keyof DatabaseWithoutInternals },
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals;
   }
-    ? keyof Database[PublicTableNameOrOptions["schema"]]["Tables"]
+    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
     : never) = never,
-> = PublicTableNameOrOptions extends { schema: keyof Database }
-  ? Database[PublicTableNameOrOptions["schema"]]["Tables"][TableName] extends {
+> = DefaultSchemaTableNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals;
+}
+  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
       Update: infer U;
     }
     ? U
     : never
-  : PublicTableNameOrOptions extends keyof PublicSchema["Tables"]
-    ? PublicSchema["Tables"][PublicTableNameOrOptions] extends {
+  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
+    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
         Update: infer U;
       }
       ? U
@@ -433,44 +530,39 @@ export type TablesUpdate<
     : never;
 
 export type Enums<
-  PublicEnumNameOrOptions extends keyof PublicSchema["Enums"] | { schema: keyof Database },
-  EnumName extends (PublicEnumNameOrOptions extends { schema: keyof Database }
-    ? keyof Database[PublicEnumNameOrOptions["schema"]]["Enums"]
+  DefaultSchemaEnumNameOrOptions extends
+    keyof DefaultSchema["Enums"] | { schema: keyof DatabaseWithoutInternals },
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals;
+  }
+    ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
     : never) = never,
-> = PublicEnumNameOrOptions extends { schema: keyof Database }
-  ? Database[PublicEnumNameOrOptions["schema"]]["Enums"][EnumName]
-  : PublicEnumNameOrOptions extends keyof PublicSchema["Enums"]
-    ? PublicSchema["Enums"][PublicEnumNameOrOptions]
+> = DefaultSchemaEnumNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals;
+}
+  ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
+  : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
+    ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
     : never;
 
-// Convenience domain types mirrored from the CHECK-constrained TEXT columns.
-export const TENANT_STATUS = {
-  ONBOARDING: "onboarding",
-  ACTIVE: "active",
-  SUSPENDED: "suspended",
-  CANCELLED: "cancelled",
-} as const;
-export type TenantStatus = (typeof TENANT_STATUS)[keyof typeof TENANT_STATUS];
+export type CompositeTypes<
+  PublicCompositeTypeNameOrOptions extends
+    keyof DefaultSchema["CompositeTypes"] | { schema: keyof DatabaseWithoutInternals },
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
+    schema: keyof DatabaseWithoutInternals;
+  }
+    ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
+    : never) = never,
+> = PublicCompositeTypeNameOrOptions extends {
+  schema: keyof DatabaseWithoutInternals;
+}
+  ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
+  : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
+    ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
+    : never;
 
-export const MEMBERSHIP_ROLE = {
-  OWNER: "owner",
-  MANAGER: "manager",
-  STAFF: "staff",
+export const Constants = {
+  public: {
+    Enums: {},
+  },
 } as const;
-export type MembershipRole = (typeof MEMBERSHIP_ROLE)[keyof typeof MEMBERSHIP_ROLE];
-
-export const MEMBERSHIP_STATUS = {
-  ACTIVE: "active",
-  INVITED: "invited",
-  SUSPENDED: "suspended",
-  REVOKED: "revoked",
-} as const;
-export type MembershipStatus = (typeof MEMBERSHIP_STATUS)[keyof typeof MEMBERSHIP_STATUS];
-
-export const PLATFORM_ADMIN_STATUS = {
-  ACTIVE: "active",
-  SUSPENDED: "suspended",
-  REVOKED: "revoked",
-} as const;
-export type PlatformAdminStatus =
-  (typeof PLATFORM_ADMIN_STATUS)[keyof typeof PLATFORM_ADMIN_STATUS];

@@ -45,16 +45,27 @@ export async function onboardingAction(
 
   const supabase = await createSupabaseServerClient();
 
-  const { data, error } = await supabase.rpc("create_tenant_with_owner", {
+  const rpcParams: {
+    p_business_name: string;
+    p_category: string;
+    p_city: string;
+    p_province: string;
+    p_phone?: string;
+    p_business_email?: string;
+    p_timezone?: string;
+    p_locale?: string;
+  } = {
     p_business_name: parsed.data.business_name,
     p_category: parsed.data.category,
     p_city: parsed.data.city,
     p_province: parsed.data.province,
-    p_phone: parsed.data.phone ?? undefined,
-    p_business_email: parsed.data.business_email ?? undefined,
-    p_timezone: parsed.data.timezone,
-    p_locale: parsed.data.locale,
-  });
+  };
+  if (parsed.data.phone) rpcParams.p_phone = parsed.data.phone;
+  if (parsed.data.business_email) rpcParams.p_business_email = parsed.data.business_email;
+  if (parsed.data.timezone) rpcParams.p_timezone = parsed.data.timezone;
+  if (parsed.data.locale) rpcParams.p_locale = parsed.data.locale;
+
+  const { data, error } = await supabase.rpc("create_tenant_with_owner", rpcParams);
 
   if (error || !data) {
     const code =

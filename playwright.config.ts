@@ -30,8 +30,8 @@ export default defineConfig({
   ],
   webServer: {
     command: useProduction ? `pnpm.cmd start -p ${PORT}` : `pnpm.cmd dev -p ${PORT}`,
-    url: `${baseURL}/api/health`,
+    url: `${baseURL}/`,
     reuseExistingServer: !isCI,
-    timeout: 120_000,
+    timeout: 180_000,
   },
 });

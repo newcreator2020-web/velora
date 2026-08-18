@@ -1,6 +1,29 @@
 import { z } from "zod";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAnonReadonlyClient } from "@/lib/supabase/server";
 import { normalizeSlug } from "@/lib/server/auth-pure";
+import {
+  buildDefaultDeterministicSections,
+  isSingletonSection,
+  parseSectionSettings,
+  themeTokensSchema,
+  normalizePublicLink,
+  SECTION_TYPES,
+  ALLOWED_VARIANTS,
+  heroSettingsSchema,
+  aboutSettingsSchema,
+  servicesSettingsSchema,
+  gallerySettingsSchema,
+  staffSettingsSchema,
+  reviewsSettingsSchema,
+  contactSettingsSchema,
+} from "@/lib/server/content-engine";
+import type {
+  PublicSite,
+  PublicSection,
+  PublicService,
+  PublicTheme,
+  SectionType,
+} from "@/lib/server/content-engine";
 
 const SLUG_MAX_LEN = 60;
 
@@ -102,7 +125,7 @@ export async function resolvePublicTenant(params: {
     }
     if (hostnameNormalized) hostForLog = hostnameNormalized;
 
-    const supabase = await createSupabaseServerClient();
+    const supabase = createSupabaseAnonReadonlyClient();
     let query = supabase
       .from("tenants")
       .select(
@@ -205,3 +228,275 @@ export async function resolvePublicTenant(params: {
     return buildNotFound("NO_TENANT", { slug: slugForLog, host: hostForLog });
   }
 }
+
+type ThemeColumnsRaw = {
+  theme_primary: string | null;
+  theme_background: string | null;
+  theme_foreground: string | null;
+  theme_muted: string | null;
+  theme_radius: string | null;
+  theme_heading_font_preset: string | null;
+  theme_body_font_preset: string | null;
+};
+
+function mapTheme(bp: ThemeColumnsRaw): PublicTheme {
+  const parsed = themeTokensSchema.safeParse({
+    primary: bp.theme_primary,
+    background: bp.theme_background,
+    foreground: bp.theme_foreground,
+    muted: bp.theme_muted,
+    radius: bp.theme_radius,
+    headingFont: bp.theme_heading_font_preset,
+    bodyFont: bp.theme_body_font_preset,
+  });
+  return parsed.success ? parsed.data : {};
+}
+
+type SectionRow = {
+  section_type: string;
+  position: number;
+  enabled: boolean;
+  variant: string;
+  settings: unknown;
+};
+
+type ServiceRow = {
+  name: string;
+  description: string | null;
+  price_from: string | number | null;
+  currency: string;
+  duration_minutes: number | null;
+};
+
+function safeVariant(v: string): (typeof ALLOWED_VARIANTS)[number] {
+  return ALLOWED_VARIANTS.includes(v as (typeof ALLOWED_VARIANTS)[number])
+    ? (v as (typeof ALLOWED_VARIANTS)[number])
+    : "default";
+}
+
+function mapServices(rows: ServiceRow[]): PublicService[] {
+  const out: PublicService[] = [];
+  for (const r of rows) {
+    if (typeof r.name !== "string" || r.name.trim().length === 0) continue;
+    const pf = r.price_from;
+    const priceNum =
+      pf == null ? null : typeof pf === "number" ? pf : typeof pf === "string" ? Number(pf) : null;
+    out.push({
+      name: r.name.trim().slice(0, 120),
+      description: typeof r.description === "string" ? r.description.slice(0, 1000) : null,
+      priceFrom: priceNum != null && isFinite(priceNum) && priceNum >= 0 ? priceNum : null,
+      currency:
+        typeof r.currency === "string" && ["EUR", "USD", "GBP", "CHF"].includes(r.currency)
+          ? r.currency
+          : "EUR",
+      durationMinutes:
+        r.duration_minutes != null &&
+        isFinite(r.duration_minutes) &&
+        r.duration_minutes >= 1 &&
+        r.duration_minutes <= 1440
+          ? Math.round(r.duration_minutes)
+          : null,
+    });
+  }
+  return out;
+}
+
+export async function resolvePublicSiteContent(params: {
+  slug?: unknown;
+  hostname?: unknown;
+}): Promise<
+  | { readonly _tag: "NotFound"; reason: PublicTenantNotFound["reason"] }
+  | { readonly _tag: "Found"; publicSite: PublicSite }
+> {
+  const base = await resolvePublicTenant(params);
+  if (base._tag !== "Found") {
+    return { _tag: "NotFound", reason: base.reason };
+  }
+  const site = base.site;
+  const supabase = createSupabaseAnonReadonlyClient();
+
+  let themeRaw: ThemeColumnsRaw = {
+    theme_primary: null,
+    theme_background: null,
+    theme_foreground: null,
+    theme_muted: null,
+    theme_radius: null,
+    theme_heading_font_preset: null,
+    theme_body_font_preset: null,
+  };
+  let tenantId: string | null = null;
+
+  {
+    const { data, error } = await supabase
+      .from("tenants")
+      .select(
+        `id, business_profiles (
+          theme_primary, theme_background, theme_foreground, theme_muted,
+          theme_radius, theme_heading_font_preset, theme_body_font_preset
+        )`,
+      )
+      .eq("slug", site.slug)
+      .limit(1)
+      .single();
+    if (!error && data) {
+      tenantId = data.id;
+      const bpRaw = (data as unknown as { business_profiles?: unknown }).business_profiles;
+      const bp = (Array.isArray(bpRaw) ? bpRaw[0] : bpRaw) as ThemeColumnsRaw | null | undefined;
+      if (bp && typeof bp === "object") themeRaw = bp;
+    }
+  }
+
+  let rows: SectionRow[] = [];
+  const services: PublicService[] = [];
+
+  if (tenantId) {
+    const [sectionsRes, servicesRes] = await Promise.all([
+      supabase
+        .from("site_sections")
+        .select("section_type,position,enabled,variant,settings")
+        .eq("tenant_id", tenantId)
+        .order("position", { ascending: true }),
+      supabase
+        .from("services")
+        .select("name,description,price_from,currency,duration_minutes")
+        .eq("tenant_id", tenantId)
+        .eq("active", true)
+        .order("position", { ascending: true }),
+    ]);
+    if (!sectionsRes.error && sectionsRes.data) {
+      rows = sectionsRes.data.map((r) => ({
+        section_type: String(r.section_type),
+        position: Number(r.position ?? 0),
+        enabled: Boolean(r.enabled),
+        variant: String(r.variant ?? "default"),
+        settings: r.settings ?? {},
+      }));
+    }
+    if (!servicesRes.error && servicesRes.data) {
+      services.push(...mapServices(servicesRes.data as ServiceRow[]));
+    }
+  }
+
+  if (rows.length === 0) {
+    rows = buildDefaultDeterministicSections(
+      { description: site.description },
+      services.length,
+    ).map((r) => ({
+      section_type: r.section_type,
+      position: r.position,
+      enabled: r.enabled,
+      variant: r.variant,
+      settings: r.settings,
+    }));
+  } else {
+    const rowsSorted = [...rows]
+      .filter((r) => r.enabled)
+      .sort((a, b) => a.position - b.position || a.section_type.localeCompare(b.section_type));
+    const seen = new Set<SectionType>();
+    rows = rowsSorted.filter((r) => {
+      if (!SECTION_TYPES.includes(r.section_type as SectionType)) return false;
+      const ty = r.section_type as SectionType;
+      if (isSingletonSection(ty)) {
+        if (seen.has(ty)) return false;
+        seen.add(ty);
+      }
+      return true;
+    });
+  }
+
+  const sections: PublicSection[] = [];
+  const seenSingletons = new Set<SectionType>();
+
+  for (const r of rows) {
+    const ty = r.section_type as SectionType;
+    if (!SECTION_TYPES.includes(ty)) continue;
+    if (isSingletonSection(ty)) {
+      if (seenSingletons.has(ty)) continue;
+      seenSingletons.add(ty);
+    }
+    const parsed = parseSectionSettings(ty, r.settings);
+    if (!parsed.ok) continue;
+
+    const variant = safeVariant(r.variant);
+
+    switch (ty) {
+      case "hero":
+        sections.push({
+          type: "hero",
+          variant,
+          settings: parsed.value as z.infer<typeof heroSettingsSchema>,
+          data: { businessName: site.businessName },
+        });
+        break;
+      case "about":
+        if (site.description && site.description.trim().length > 0) {
+          sections.push({
+            type: "about",
+            variant,
+            settings: parsed.value as z.infer<typeof aboutSettingsSchema>,
+            data: { description: site.description, businessName: site.businessName },
+          });
+        }
+        break;
+      case "services":
+        if (services.length > 0) {
+          sections.push({
+            type: "services",
+            variant,
+            settings: parsed.value as z.infer<typeof servicesSettingsSchema>,
+            data: { services },
+          });
+        }
+        break;
+      case "gallery":
+        sections.push({
+          type: "gallery",
+          variant,
+          settings: parsed.value as z.infer<typeof gallerySettingsSchema>,
+          data: { assets: [] },
+        });
+        break;
+      case "staff":
+        sections.push({
+          type: "staff",
+          variant,
+          settings: parsed.value as z.infer<typeof staffSettingsSchema>,
+          data: { members: [] },
+        });
+        break;
+      case "reviews":
+        sections.push({
+          type: "reviews",
+          variant,
+          settings: parsed.value as z.infer<typeof reviewsSettingsSchema>,
+          data: { reviews: [] },
+        });
+        break;
+      case "contact": {
+        const hasAny = site.phone || site.email || site.address || site.city;
+        if (hasAny) {
+          sections.push({
+            type: "contact",
+            variant,
+            settings: parsed.value as z.infer<typeof contactSettingsSchema>,
+            data: {
+              phone: site.phone,
+              email: site.email,
+              address: site.address,
+              city: site.city,
+              province: site.province,
+              postalCode: site.postalCode,
+              countryCode: site.countryCode,
+            },
+          });
+        }
+        break;
+      }
+    }
+  }
+
+  const theme = mapTheme(themeRaw);
+  return { _tag: "Found", publicSite: { business: site, theme, sections } };
+}
+
+export { normalizePublicLink };

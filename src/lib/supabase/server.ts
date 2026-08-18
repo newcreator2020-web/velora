@@ -1,4 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import type { NextRequest, NextResponse } from "next/server";
 import type { Database } from "@/types/supabase";
@@ -37,6 +38,19 @@ export async function createSupabaseServerClient() {
         }
       },
     },
+  });
+}
+
+/**
+ * Lightweight Supabase anon client for readonly public queries when
+ * no request context is available (e.g. background jobs, tests, CLI).
+ * Never exposes service role; uses public anon key + public RLS boundaries.
+ */
+export function createSupabaseAnonReadonlyClient() {
+  const url = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
+  const anon = requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  return createClient<Database>(url, anon, {
+    auth: { persistSession: false, autoRefreshToken: false },
   });
 }
 
