@@ -321,6 +321,19 @@ export interface Database {
         Args: Record<PropertyKey, never>;
         Returns: unknown;
       };
+      create_tenant_with_owner: {
+        Args: {
+          p_business_name: string;
+          p_category: string;
+          p_city: string;
+          p_province: string;
+          p_phone?: string | undefined;
+          p_business_email?: string | undefined;
+          p_timezone?: string | undefined;
+          p_locale?: string | undefined;
+        };
+        Returns: Json;
+      };
       test_provision_user: {
         Args: { p_email: string; p_password: string; p_meta?: Json };
         Returns: string;

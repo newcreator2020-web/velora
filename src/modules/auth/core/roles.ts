@@ -25,7 +25,10 @@ export function roleRank(role: MembershipRole | "platform_admin"): number {
   return ROLE_RANK[role];
 }
 
-export function isAtLeastRole(actor: MembershipRole, required: MembershipRole): boolean {
+export function isAtLeastRole(
+  actor: MembershipRole | "platform_admin",
+  required: MembershipRole,
+): boolean {
   return ROLE_RANK[actor] >= ROLE_RANK[required];
 }
 
