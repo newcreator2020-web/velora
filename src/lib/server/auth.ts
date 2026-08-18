@@ -245,7 +245,7 @@ export async function updateBusinessProfile(
       await supabaseAudit.from("audit_logs").insert({
         tenant_id: tid,
         actor_user_id: actor,
-        action: "business_profile_updated",
+        action: "business_profile.updated",
         entity_type: "business_profile",
         entity_id: tid,
         metadata: auditMeta as unknown as import("@/types/supabase").Json,
