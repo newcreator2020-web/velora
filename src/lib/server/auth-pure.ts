@@ -140,6 +140,98 @@ export const businessProfileUpdateSchema = z
 
 export type BusinessProfileUpdateInput = z.infer<typeof businessProfileUpdateSchema>;
 
+export type BpWritePayloads = {
+  tenantUpdate: { name?: string | undefined };
+  bpUpdate: Partial<{
+    display_name: string | null;
+    phone: string | null;
+    email: string | null;
+    address_line1: string | null;
+    city: string | null;
+    province: string | null;
+    postal_code: string | null;
+    description: string | null;
+  }>;
+};
+
+export function buildBusinessUpdatePayloads(
+  parsed: z.infer<typeof businessProfileUpdateSchema>,
+): BpWritePayloads {
+  const tenantUpdate: BpWritePayloads["tenantUpdate"] = {};
+  const bpUpdate: BpWritePayloads["bpUpdate"] = {};
+
+  if (parsed.business_name) tenantUpdate.name = parsed.business_name;
+
+  const maybeSet = (key: keyof BpWritePayloads["bpUpdate"], value: unknown) => {
+    if (
+      Object.prototype.hasOwnProperty.call(parsed, key === "address_line1" ? "address_line1" : key)
+    ) {
+      bpUpdate[key] = (value as BpWritePayloads["bpUpdate"][typeof key]) ?? null;
+    }
+  };
+
+  maybeSet("phone", parsed.phone);
+  maybeSet("email", parsed.email);
+  maybeSet("address_line1", parsed.address_line1);
+  maybeSet("city", parsed.city);
+  maybeSet("province", parsed.province);
+  maybeSet("postal_code", parsed.postal_code);
+  maybeSet("description", parsed.description);
+  if (parsed.business_name) bpUpdate.display_name = parsed.business_name;
+
+  return { tenantUpdate, bpUpdate };
+}
+
+export type AuditMetadata = Record<string, unknown>;
+
+export function maskAuditMetadata(bp: BpWritePayloads["bpUpdate"]): AuditMetadata {
+  const meta: AuditMetadata = {};
+  if (Object.prototype.hasOwnProperty.call(bp, "display_name") && bp.display_name !== undefined) {
+    meta["display_name"] = bp.display_name;
+  }
+  if (Object.prototype.hasOwnProperty.call(bp, "phone")) {
+    meta["phone"] = bp.phone ? "[phone masked]" : null;
+  }
+  if (Object.prototype.hasOwnProperty.call(bp, "email")) {
+    meta["email"] = bp.email ? "[email masked]" : null;
+  }
+  if (Object.prototype.hasOwnProperty.call(bp, "city")) {
+    meta["city"] = bp.city ? "[city masked]" : null;
+  }
+  if (Object.prototype.hasOwnProperty.call(bp, "province")) {
+    meta["province"] = bp.province ? "[province masked]" : null;
+  }
+  if (Object.prototype.hasOwnProperty.call(bp, "postal_code")) {
+    meta["postal_code"] = bp.postal_code ? "[postal masked]" : null;
+  }
+  if (Object.prototype.hasOwnProperty.call(bp, "address_line1")) {
+    meta["address_line1"] = bp.address_line1 ? "[address masked]" : null;
+  }
+  if (Object.prototype.hasOwnProperty.call(bp, "description")) {
+    meta["description_len"] = (bp.description as string | null)?.length ?? 0;
+  }
+  return meta;
+}
+
+export const BUSINESS_PROFILE_ALLOWED_INPUT_KEYS: ReadonlySet<string> = new Set([
+  "business_name",
+  "phone",
+  "email",
+  "address",
+  "city",
+  "province",
+  "postal_code",
+  "description",
+]);
+
+export function stripTamperedFields(raw: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(raw)) {
+    if (BUSINESS_PROFILE_ALLOWED_INPUT_KEYS.has(k)) out[k] = raw[k];
+  }
+  return out;
+}
+
 export function loginErrorMessage(code?: string, details?: string): string {
   const c = code?.toLowerCase() ?? "";
   const d = details?.toLowerCase() ?? "";
