@@ -66,7 +66,7 @@ export type EditorialInitialState = {
 
 export async function initialEditorialState(): Promise<EditorialInitialState> {
   const ctx = await requireTenantMembership();
-  const draft = await loadEditorialDraft(ctx as any);
+  const draft = await loadEditorialDraft(ctx as Parameters<typeof loadEditorialDraft>[0]);
 
   const rawValues = {
     sections: draft.sections as StudioDraftSection[],
@@ -130,7 +130,7 @@ export async function saveEditorialAction(
   const res = (await saveEditorialDraft(formData)) as SaveDraftResult;
   if (res.ok) {
     const ctx = await requireTenantMembership();
-    const fresh = await loadEditorialDraft(ctx as any);
+    const fresh = await loadEditorialDraft(ctx as Parameters<typeof loadEditorialDraft>[0]);
     return {
       ok: true,
       revision: res.revision,
@@ -173,7 +173,7 @@ export async function publishEditorialAction(
   const res = (await publishSiteDraft(revision)) as PublishResult;
   if (res.ok) {
     const ctx = await requireTenantMembership();
-    const fresh = await loadEditorialDraft(ctx as any);
+    const fresh = await loadEditorialDraft(ctx as Parameters<typeof loadEditorialDraft>[0]);
     return {
       ok: true,
       revision: fresh.revision ?? "",
@@ -207,7 +207,7 @@ export async function unpublishEditorialAction(): Promise<EditorialActionResult>
   const res = await unpublishSite();
   if (res.ok) {
     const ctx = await requireTenantMembership();
-    const fresh = await loadEditorialDraft(ctx as any);
+    const fresh = await loadEditorialDraft(ctx as Parameters<typeof loadEditorialDraft>[0]);
     return {
       ok: true,
       revision: fresh.revision ?? "",

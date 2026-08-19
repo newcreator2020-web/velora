@@ -103,7 +103,7 @@ describe("§36 FASE 6 ERROR INJECTION + SAFETY (pure functions, NO backdoor)", (
       } as unknown as StudioDraftSection;
       const norm = normalizeSectionsForDb([badVariant]);
       expect(norm).toHaveLength(1);
-      expect(norm[0].variant).toBe("default");
+      expect(norm.at(0)?.variant).toBe("default");
     });
 
     it("SINGLETON hero due volte → secondo hero RIMOSSO (duplicate dedup)", () => {
@@ -137,9 +137,30 @@ describe("§36 FASE 6 ERROR INJECTION + SAFETY (pure functions, NO backdoor)", (
     });
 
     it("REORDER con gap e duplicati position: A(99),B(5),C(5) → cursor 0,1,2 (no UNIQUE collision)", () => {
-      const sA = { id: null, section_type: "hero", enabled: true, position: 99, variant: "default", settings: {} } as StudioDraftSection;
-      const sB = { id: null, section_type: "about", enabled: true, position: 5, variant: "default", settings: {} } as StudioDraftSection;
-      const sC = { id: null, section_type: "services", enabled: true, position: 5, variant: "default", settings: {} } as StudioDraftSection;
+      const sA = {
+        id: null,
+        section_type: "hero",
+        enabled: true,
+        position: 99,
+        variant: "default",
+        settings: {},
+      } as StudioDraftSection;
+      const sB = {
+        id: null,
+        section_type: "about",
+        enabled: true,
+        position: 5,
+        variant: "default",
+        settings: {},
+      } as StudioDraftSection;
+      const sC = {
+        id: null,
+        section_type: "services",
+        enabled: true,
+        position: 5,
+        variant: "default",
+        settings: {},
+      } as StudioDraftSection;
       const norm = normalizeSectionsForDb([sA, sB, sC]);
       expect(norm.map((r) => r.position)).toStrictEqual([0, 1, 2]);
     });
@@ -171,10 +192,10 @@ describe("§36 FASE 6 ERROR INJECTION + SAFETY (pure functions, NO backdoor)", (
         duration_minutes: 30,
         position: 0,
         active: true,
-      } as StudioDraftService;
+      } as unknown as StudioDraftService;
       const norm = normalizeServicesForDb([badPrice]);
       expect(norm).toHaveLength(1);
-      expect(norm[0].price_from).toBeNull();
+      expect(norm.at(0)?.price_from).toBeNull();
     });
 
     it("currency non ammessa (XBT) → fallback a EUR, nessun success fake", () => {
@@ -187,9 +208,9 @@ describe("§36 FASE 6 ERROR INJECTION + SAFETY (pure functions, NO backdoor)", (
         duration_minutes: 30,
         position: 0,
         active: true,
-      } as StudioDraftService;
+      } as unknown as StudioDraftService;
       const norm = normalizeServicesForDb([bad]);
-      expect(norm[0].currency).toBe("EUR");
+      expect(norm.at(0)?.currency).toBe("EUR");
     });
 
     it("NaN / Infinity prezzo → price_from=null", () => {
@@ -209,9 +230,9 @@ describe("§36 FASE 6 ERROR INJECTION + SAFETY (pure functions, NO backdoor)", (
         position: 1,
         active: true,
       };
-      const norm = normalizeServicesForDb([nanP, infP] as StudioDraftService[]);
-      expect(norm[0].price_from).toBeNull();
-      expect(norm[1].price_from).toBeNull();
+      const norm = normalizeServicesForDb([nanP, infP] as unknown as StudioDraftService[]);
+      expect(norm.at(0)?.price_from).toBeNull();
+      expect(norm.at(1)?.price_from).toBeNull();
     });
   });
 
@@ -237,7 +258,9 @@ describe("§36 FASE 6 ERROR INJECTION + SAFETY (pure functions, NO backdoor)", (
         styleInject: "body{color:red}",
       } as unknown as Parameters<typeof studioThemeSchema.safeParse>[0]);
       expect(r.success).toBe(true);
-      expect((r as { success: true; data: Record<string, unknown> }).data).not.toHaveProperty("styleInject");
+      expect((r as { success: true; data: Record<string, unknown> }).data).not.toHaveProperty(
+        "styleInject",
+      );
     });
   });
 
@@ -245,7 +268,10 @@ describe("§36 FASE 6 ERROR INJECTION + SAFETY (pure functions, NO backdoor)", (
     it("ritorna solo counts + theme_fields; NO nome servizi, NO testi liberi", () => {
       const audit = maskEditorialAudit({
         sections: [{}, {}, {}],
-        services: [{ name: "Mario Rossi Visita Privata" }, { phone: "+393331234567" } as unknown as unknown[]],
+        services: [
+          { name: "Mario Rossi Visita Privata" },
+          { phone: "+393331234567" } as unknown as unknown[],
+        ],
         theme: { primary: "#111", background: "#222", headingFont: "Inter" },
       });
       expect(audit["sections_count"]).toBe(3);

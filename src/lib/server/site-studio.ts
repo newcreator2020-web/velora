@@ -39,6 +39,35 @@ export type EditorialState = {
   updated_at: string | null;
 };
 
+type EditorialStateRow = {
+  tenant_id: string;
+  sections: unknown;
+  services: unknown;
+  theme: unknown;
+  draft_revision: string;
+  updated_at: string;
+};
+
+type PublishSiteDraftRow = {
+  ok: boolean;
+  code: string | null;
+  message: string | null;
+  new_published_at: string | null;
+  sections_applied: number;
+  services_applied: number;
+  theme_applied: boolean;
+};
+
+type BusinessProfileThemeRow = {
+  theme_primary: unknown;
+  theme_background: unknown;
+  theme_foreground: unknown;
+  theme_muted: unknown;
+  theme_radius: unknown;
+  theme_heading_font_preset: unknown;
+  theme_body_font_preset: unknown;
+};
+
 export type SaveDraftResult =
   | { ok: true; revision: string; updated_at: string }
   | {
@@ -94,29 +123,28 @@ export async function loadEditorialDraft(
   },
 ): Promise<EditorialState> {
   const tid = ctx.tenant.id;
-  const supabaseAny = (await createSupabaseServerClient()) as any;
-  const { data, error } = await supabaseAny
-    .from("site_editorial_state")
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("site_editorial_state" as never)
     .select("sections,services,theme,draft_revision,updated_at")
-    .eq("tenant_id", tid)
+    .eq("tenant_id" as never, tid)
     .limit(1)
     .maybeSingle();
 
   if (!error && data) {
-    const d = data as any;
+    const d: EditorialStateRow = data as unknown as EditorialStateRow;
     return {
-      sections: Array.isArray(d["sections"]) ? (d["sections"] as StudioDraftSection[]) : [],
-      services: Array.isArray(d["services"]) ? (d["services"] as StudioDraftService[]) : [],
+      sections: Array.isArray(d.sections) ? (d.sections as StudioDraftSection[]) : [],
+      services: Array.isArray(d.services) ? (d.services as StudioDraftService[]) : [],
       theme:
-        d["theme"] && typeof d["theme"] === "object" && !Array.isArray(d["theme"])
-          ? (d["theme"] as StudioDraftTheme)
+        d.theme && typeof d.theme === "object" && !Array.isArray(d.theme)
+          ? (d.theme as StudioDraftTheme)
           : {},
-      revision: (d["draft_revision"] as string | null) ?? null,
-      updated_at: (d["updated_at"] as string | null) ?? null,
+      revision: (d.draft_revision as string | null) ?? null,
+      updated_at: (d.updated_at as string | null) ?? null,
     };
   }
 
-  const supabase = await createSupabaseServerClient();
   const [sectionsRes, servicesRes] = await Promise.all([
     supabase
       .from("site_sections")
@@ -132,16 +160,16 @@ export async function loadEditorialDraft(
 
   const sectionsDraft: StudioDraftSection[] =
     !sectionsRes.error && sectionsRes.data
-      ? sectionsRes.data.map((r: any) => ({
+      ? sectionsRes.data.map((r) => ({
           id: (r.id ?? null) as string | null,
           section_type: r.section_type as SectionType,
           enabled: Boolean(r.enabled),
           position: Number(r.position ?? 0),
           variant: String(r.variant ?? "default") as StudioDraftSection["variant"],
-          settings: (r.settings && typeof r.settings === "object" ? r.settings : {}) as Record<
-            string,
-            unknown
-          >,
+          settings:
+            r.settings && typeof r.settings === "object"
+              ? (r.settings as Record<string, unknown>)
+              : {},
         }))
       : buildDefaultDeterministicSections(
           { description: ctx.business_profile.description ?? null },
@@ -156,37 +184,47 @@ export async function loadEditorialDraft(
 
   const servicesDraft: StudioDraftService[] =
     !servicesRes.error && servicesRes.data
-      ? servicesRes.data.map((r: any) => ({
-          id: (r.id ?? null) as string | null,
-          name: String(r.name ?? ""),
-          description: typeof r.description === "string" ? r.description : null,
-          price_from:
-            r.price_from !== null && r.price_from !== undefined ? Number(r.price_from) : null,
-          currency: CURRENCY_ALLOWED.includes(String(r.currency) as any)
-            ? (String(r.currency) as any)
-            : "EUR",
-          duration_minutes:
-            r.duration_minutes !== null && r.duration_minutes !== undefined
-              ? Number(r.duration_minutes)
-              : null,
-          position: Number(r.position ?? 0),
-          active: Boolean(r.active),
-        }))
+      ? servicesRes.data.map((r) => {
+          const cur = String(r.currency ?? "EUR") as StudioDraftService["currency"];
+          return {
+            id: (r.id ?? null) as string | null,
+            name: String(r.name ?? ""),
+            description: typeof r.description === "string" ? r.description : null,
+            price_from:
+              r.price_from !== null && r.price_from !== undefined ? Number(r.price_from) : null,
+            currency: CURRENCY_ALLOWED.includes(cur) ? cur : "EUR",
+            duration_minutes:
+              r.duration_minutes !== null && r.duration_minutes !== undefined
+                ? Number(r.duration_minutes)
+                : null,
+            position: Number(r.position ?? 0),
+            active: Boolean(r.active),
+          };
+        })
       : [];
 
   const bp = ctx.business_profile as Tables<"business_profiles">;
+  const bpt = bp as unknown as BusinessProfileThemeRow;
+  const radiusVal = (
+    typeof bpt.theme_radius === "string" ? bpt.theme_radius : null
+  ) as StudioDraftTheme["radius"];
+  const headingVal = (
+    typeof bpt.theme_heading_font_preset === "string" ? bpt.theme_heading_font_preset : null
+  ) as StudioDraftTheme["headingFont"];
+  const bodyVal = (
+    typeof bpt.theme_body_font_preset === "string" ? bpt.theme_body_font_preset : null
+  ) as StudioDraftTheme["bodyFont"];
   const theme: StudioDraftTheme = {
     primary: validateHexColorStr(bp.theme_primary) ? bp.theme_primary : null,
     background: validateHexColorStr(bp.theme_background) ? bp.theme_background : null,
     foreground: validateHexColorStr(bp.theme_foreground) ? bp.theme_foreground : null,
     muted: validateHexColorStr(bp.theme_muted) ? bp.theme_muted : null,
-    radius: RADIUS_ALLOWED.includes(bp.theme_radius as any) ? (bp.theme_radius as any) : null,
-    headingFont: FONT_HEADING_ALLOWED.includes(bp.theme_heading_font_preset as any)
-      ? (bp.theme_heading_font_preset as any)
-      : null,
-    bodyFont: FONT_BODY_ALLOWED.includes(bp.theme_body_font_preset as any)
-      ? (bp.theme_body_font_preset as any)
-      : null,
+    radius: typeof radiusVal === "string" && RADIUS_ALLOWED.includes(radiusVal) ? radiusVal : null,
+    headingFont:
+      typeof headingVal === "string" && FONT_HEADING_ALLOWED.includes(headingVal)
+        ? headingVal
+        : null,
+    bodyFont: typeof bodyVal === "string" && FONT_BODY_ALLOWED.includes(bodyVal) ? bodyVal : null,
   };
 
   return {
@@ -258,20 +296,20 @@ export async function saveEditorialDraft(
   const now = new Date().toISOString();
   const newRev = crypto.randomUUID();
 
-  const supabaseAny = (await createSupabaseServerClient()) as any;
+  const supabase = await createSupabaseServerClient();
 
   try {
-    const row: Record<string, unknown> = {
+    const row: EditorialStateRow = {
       tenant_id: tid,
-      sections: sectionsDb as any,
-      services: servicesDb as any,
-      theme: parsed.data.theme as any,
+      sections: sectionsDb,
+      services: servicesDb,
+      theme: parsed.data.theme,
       draft_revision: newRev,
       updated_at: now,
     };
-    const { error } = await supabaseAny.from("site_editorial_state").upsert(row, {
-      onConflict: "tenant_id",
-    });
+    const { error } = await supabase
+      .from("site_editorial_state" as never)
+      .upsert(row as never, { onConflict: "tenant_id" } as never);
 
     if (error) {
       if ((error.code ?? "") === "42501") {
@@ -317,15 +355,16 @@ export async function publishSiteDraft(expected_revision?: string | null): Promi
   const slug = ctx.tenant.slug;
   const actor = ctx.user.id;
 
-  const supabaseAny = (await createSupabaseServerClient()) as any;
+  const supabase = await createSupabaseServerClient();
   try {
     const args: Record<string, unknown> = { p_tenant_id: tid };
     if (typeof expected_revision === "string" && expected_revision.length > 0) {
       args["p_expected_revision"] = expected_revision;
     }
-    const { data, error } = await supabaseAny.rpc("publish_site_draft", args);
+    const { data, error } = await supabase.rpc("publish_site_draft" as never, args as never);
 
-    if (error || !data || (Array.isArray(data) && data.length === 0)) {
+    const raw = data as unknown as PublishSiteDraftRow | PublishSiteDraftRow[] | null;
+    if (error || !raw || (Array.isArray(raw) && raw.length === 0)) {
       const c = (error as { code?: string } | undefined)?.code ?? "";
       if (c === "42501") {
         return { ok: false, code: "AUTHZ", message: "Non autorizzato." };
@@ -336,7 +375,9 @@ export async function publishSiteDraft(expected_revision?: string | null): Promi
         message: "Pubblicazione fallita. Riprova tra un momento.",
       };
     }
-    const row = Array.isArray(data) ? (data[0] as any) : (data as any);
+    const row: PublishSiteDraftRow = (
+      Array.isArray(raw) ? (raw[0] as unknown) : (raw as unknown)
+    ) as PublishSiteDraftRow;
     if (!row.ok) {
       type RpcCode = Exclude<Extract<PublishResult, { ok: false }>["code"], undefined>;
       const codeMap: Record<string, RpcCode> = {
@@ -441,7 +482,7 @@ export async function resolveDraftSiteForPreview(): Promise<
     return { _tag: "NotFound", reason: "INCOMPLETE_PUBLIC_DATA" };
   }
 
-  const draft = await loadEditorialDraft(ctx as any);
+  const draft = await loadEditorialDraft(ctx as Parameters<typeof loadEditorialDraft>[0]);
 
   const site: PublicSiteData = {
     slug: tenant.slug,
@@ -525,7 +566,7 @@ export async function resolveDraftSiteForPreview(): Promise<
         sections.push({
           type: "hero",
           variant,
-          settings: parsedSet.value as any,
+          settings: parsedSet.value as PublicSection["settings"],
           data: { businessName: site.businessName },
         });
         break;
@@ -534,7 +575,7 @@ export async function resolveDraftSiteForPreview(): Promise<
           sections.push({
             type: "about",
             variant,
-            settings: parsedSet.value as any,
+            settings: parsedSet.value as PublicSection["settings"],
             data: { description: site.description, businessName: site.businessName },
           });
         }
@@ -544,7 +585,7 @@ export async function resolveDraftSiteForPreview(): Promise<
           sections.push({
             type: "services",
             variant,
-            settings: parsedSet.value as any,
+            settings: parsedSet.value as PublicSection["settings"],
             data: { services },
           });
         }
@@ -553,7 +594,7 @@ export async function resolveDraftSiteForPreview(): Promise<
         sections.push({
           type: "gallery",
           variant,
-          settings: parsedSet.value as any,
+          settings: parsedSet.value as PublicSection["settings"],
           data: { assets: [] },
         });
         break;
@@ -561,7 +602,7 @@ export async function resolveDraftSiteForPreview(): Promise<
         sections.push({
           type: "staff",
           variant,
-          settings: parsedSet.value as any,
+          settings: parsedSet.value as PublicSection["settings"],
           data: { members: [] },
         });
         break;
@@ -569,7 +610,7 @@ export async function resolveDraftSiteForPreview(): Promise<
         sections.push({
           type: "reviews",
           variant,
-          settings: parsedSet.value as any,
+          settings: parsedSet.value as PublicSection["settings"],
           data: { reviews: [] },
         });
         break;
@@ -579,7 +620,7 @@ export async function resolveDraftSiteForPreview(): Promise<
           sections.push({
             type: "contact",
             variant,
-            settings: parsedSet.value as any,
+            settings: parsedSet.value as PublicSection["settings"],
             data: {
               phone: site.phone,
               email: site.email,

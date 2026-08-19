@@ -105,6 +105,9 @@ export default [
           caughtErrorsIgnorePattern: "^_",
         },
       ],
+      "react/prop-types": "off",
+      "react/require-default-props": "off",
+      "react/no-unused-prop-types": "off",
     },
   },
 

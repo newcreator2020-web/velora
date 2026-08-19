@@ -9,8 +9,8 @@ import {
   RADIUS_ALLOWED,
   validateHexColor,
   type SectionType,
+  type PublicTheme,
 } from "./content-engine";
-import type { PublicTheme } from "./content-engine";
 
 export const CURRENCY_ALLOWED = ["EUR", "USD", "GBP", "CHF"] as const;
 export type Currency = (typeof CURRENCY_ALLOWED)[number];

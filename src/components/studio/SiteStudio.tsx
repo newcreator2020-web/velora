@@ -1,7 +1,7 @@
 "use client";
 
 import { useFormState, useFormStatus } from "react-dom";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   saveEditorialAction,
   publishEditorialAction,
@@ -19,11 +19,12 @@ import {
   type SectionType,
 } from "@/lib/server/content-engine";
 type SectionVariant = (typeof ALLOWED_VARIANTS)[number];
-import { CURRENCY_ALLOWED, type Currency } from "@/lib/server/site-studio-pure";
-import type {
-  StudioDraftSection,
-  StudioDraftService,
-  StudioDraftTheme,
+import {
+  CURRENCY_ALLOWED,
+  type Currency,
+  type StudioDraftSection,
+  type StudioDraftService,
+  type StudioDraftTheme,
 } from "@/lib/server/site-studio-pure";
 
 type Props = EditorialInitialState;
@@ -263,22 +264,62 @@ export function SiteStudio(props: Props) {
           ? (unpublishState as { values: NonNullable<typeof saveState.values> }).values
           : props.values) ?? props.values;
 
-  const [sections, setSections] = useState<StudioDraftSection[]>(currentValues.sections);
-  const [services, setServices] = useState<StudioDraftService[]>(currentValues.services);
-  const [theme, setTheme] = useState<StudioDraftTheme>(currentValues.theme);
-
-  useEffect(() => {
-    setSections(currentValues.sections);
-    setServices(currentValues.services);
-    setTheme(currentValues.theme);
-  }, [currentValues]);
-
   const revision = useMemo<string | null>(() => {
     if (saveState.ok) return saveState.revision;
     if (publishState.ok) return publishState.revision;
     if (unpublishState.ok) return unpublishState.revision;
     return props.state.revision;
   }, [saveState, publishState, unpublishState, props.state.revision]);
+
+  return (
+    <SiteStudioInner
+      key={revision ?? "initial-studio-mount"}
+      outer={{
+        props,
+        saveState,
+        saveAction,
+        publishState,
+        publishAction,
+        unpublishState,
+        unpublishAction,
+        currentValues,
+        revision,
+      }}
+    />
+  );
+}
+
+type InnerOuter = {
+  props: Props;
+  saveState: SaveState;
+  saveAction: ReturnType<typeof useFormState<SaveState, FormData>>[1];
+  publishState: PublishState;
+  publishAction: ReturnType<typeof useFormState<PublishState, FormData>>[1];
+  unpublishState: UnpublishState;
+  unpublishAction: ReturnType<typeof useFormState<UnpublishState, FormData>>[1];
+  currentValues: {
+    sections: StudioDraftSection[];
+    services: StudioDraftService[];
+    theme: StudioDraftTheme;
+  };
+  revision: string | null;
+};
+
+function SiteStudioInner({ outer }: { outer: InnerOuter }) {
+  const {
+    props,
+    saveState,
+    saveAction,
+    publishState,
+    publishAction,
+    unpublishState,
+    unpublishAction,
+    currentValues,
+    revision,
+  } = outer;
+  const [sections, setSections] = useState<StudioDraftSection[]>(currentValues.sections);
+  const [services, setServices] = useState<StudioDraftService[]>(currentValues.services);
+  const [theme, setTheme] = useState<StudioDraftTheme>(currentValues.theme);
 
   const publishedNow = publishState.ok && publishState.info?.kind === "PUBLISHED";
   const unpublishedNow = unpublishState.ok && unpublishState.info?.kind === "UNPUBLISHED";
