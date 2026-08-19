@@ -65,3 +65,4 @@ CLAUDE_todo*.md
 
 # Supabase CLI sandbox home workaround (FASE 4 Windows EPERM)
 .supabase-home/
+supabase/.home/

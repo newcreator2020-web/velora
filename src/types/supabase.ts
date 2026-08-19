@@ -265,6 +265,41 @@ export type Database = {
           },
         ];
       };
+      site_editorial_state: {
+        Row: {
+          draft_revision: string;
+          sections: Json;
+          services: Json;
+          tenant_id: string;
+          theme: Json;
+          updated_at: string;
+        };
+        Insert: {
+          draft_revision?: string;
+          sections?: Json;
+          services?: Json;
+          tenant_id: string;
+          theme?: Json;
+          updated_at?: string;
+        };
+        Update: {
+          draft_revision?: string;
+          sections?: Json;
+          services?: Json;
+          tenant_id?: string;
+          theme?: Json;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "site_editorial_state_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: true;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       site_sections: {
         Row: {
           created_at: string;
@@ -423,6 +458,18 @@ export type Database = {
       pgp_armor_headers: {
         Args: { "": string };
         Returns: Record<string, unknown>[];
+      };
+      publish_site_draft: {
+        Args: { p_expected_revision?: string; p_tenant_id: string };
+        Returns: {
+          code: string;
+          message: string;
+          new_published_at: string;
+          ok: boolean;
+          sections_applied: number;
+          services_applied: number;
+          theme_applied: boolean;
+        }[];
       };
       uuid_generate_v1: { Args: never; Returns: string };
       uuid_generate_v1mc: { Args: never; Returns: string };
