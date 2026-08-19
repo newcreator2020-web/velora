@@ -42,6 +42,11 @@ export async function loginAction(
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error || !data.user) {
+    console.error("[loginAction] Supabase Auth error:", {
+      name: error?.name,
+      message: error?.message,
+      status: (error as unknown as { status?: number })?.status,
+    });
     return {
       ok: false,
       error: loginErrorMessage(error?.name, error?.message),

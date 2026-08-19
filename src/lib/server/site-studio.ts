@@ -9,6 +9,8 @@ import {
   editorialDraftInputSchema,
   stripEditorialTamperedFields,
   maskEditorialAudit,
+  studioSectionSchema,
+  studioServiceSchema,
   type StudioDraftSection,
   type StudioDraftService,
   type StudioDraftTheme,
@@ -273,13 +275,52 @@ export async function saveEditorialDraft(
 
   const sanitized = stripEditorialTamperedFields(input);
   const parsed = editorialDraftInputSchema.safeParse(sanitized);
+  const fieldErrors: Record<string, string[]> = {};
   if (!parsed.success) {
-    const fieldErrors: Record<string, string[]> = {};
     for (const iss of parsed.error.issues) {
       const path = iss.path.join(".") || "_";
       const arr = fieldErrors[path] ?? (fieldErrors[path] = []);
       arr.push(iss.message);
     }
+  }
+
+  const rawSectionsArr = Array.isArray(sanitized["sections"]) ? sanitized["sections"] : [];
+  const rawServicesArr = Array.isArray(sanitized["services"]) ? sanitized["services"] : [];
+
+  for (let i = 0; i < rawSectionsArr.length; i += 1) {
+    const raw = rawSectionsArr[i];
+    const r = studioSectionSchema.safeParse(raw);
+    if (!r.success) {
+      for (const iss of r.error.issues) {
+        const path = `sections.${i}${iss.path.length ? `.${iss.path.join(".")}` : ""}`;
+        const arr = fieldErrors[path] ?? (fieldErrors[path] = []);
+        arr.push(iss.message);
+      }
+    }
+  }
+
+  for (let i = 0; i < rawServicesArr.length; i += 1) {
+    const raw = rawServicesArr[i];
+    const r = studioServiceSchema.safeParse(raw);
+    if (!r.success) {
+      for (const iss of r.error.issues) {
+        const path = `services.${i}${iss.path.length ? `.${iss.path.join(".")}` : ""}`;
+        const arr = fieldErrors[path] ?? (fieldErrors[path] = []);
+        arr.push(iss.message);
+      }
+    }
+  }
+
+  if (Object.keys(fieldErrors).length > 0) {
+    return {
+      ok: false,
+      code: "VALIDATION",
+      message: "Controlla i dati inseriti.",
+      fieldErrors,
+    };
+  }
+
+  if (!parsed.success) {
     return {
       ok: false,
       code: "VALIDATION",

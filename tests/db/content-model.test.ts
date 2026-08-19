@@ -559,39 +559,92 @@ describe("FASE5 §37 DB SECURITY MATRIX D1..D18 (site_sections/services)", () =>
     expect(error).not.toBeNull();
   });
 
-  it("D10. anon UPDATE enabled → DENIED", async () => {
+  it("D10. anon UPDATE enabled → DENIED (Before===After, 0 rows affected)", async () => {
     const anon = makeAnon();
     const svc = makeService();
     const row = await svc
       .from("site_sections")
-      .select("id")
+      .select("*")
       .eq("tenant_id", TENANT_A)
       .eq("section_type", "hero")
       .limit(1)
       .single();
-    expect(row.error).toBeNull();
+    expect(row.error, "precondition service must read hero A").toBeNull();
+    expect(row.data, "hero A must exist before D10").not.toBeNull();
     if (!row.data) return;
-    const { error } = await anon
+    const BEFORE = JSON.stringify(row.data, Object.keys(row.data).sort());
+
+    const result = await anon
       .from("site_sections")
       .update({ enabled: false })
-      .eq("id", row.data.id);
-    expect(error).not.toBeNull();
+      .eq("id", row.data.id)
+      .select();
+
+    // Supabase RLS denial on UPDATE via anon yields: error = null + 0 rows returned/affected
+    // NON è una eccezione SQL. Assertion obbligatoria FASE 6G §3 pattern.
+    const affectedCount = Number.isFinite((result as unknown as { count?: number }).count)
+      ? ((result as unknown as { count?: number }).count ?? 0)
+      : (result.data?.length ?? 0);
+    expect(affectedCount, "anon UPDATE site_sections must touch 0 rows").toBe(0);
+
+    const after = await svc
+      .from("site_sections")
+      .select("*")
+      .eq("id", row.data.id)
+      .limit(1)
+      .single();
+    expect(after.error, "after read must succeed").toBeNull();
+    expect(after.data, "target row must still exist after anon UPDATE deny").not.toBeNull();
+    if (!after.data) return;
+    const AFTER = JSON.stringify(after.data, Object.keys(after.data).sort());
+    expect(
+      AFTER,
+      "row content Before === After semantically invariant after anon UPDATE deny",
+    ).toBe(BEFORE);
+    expect(
+      after.data.enabled,
+      "enabled column unchanged after anon UPDATE denial (RLS enforcement)",
+    ).toBe(true);
   });
 
-  it("D11. anon DELETE section → DENIED", async () => {
+  it("D11. anon DELETE section → DENIED (Before===After, row exists still, 0 affected)", async () => {
     const anon = makeAnon();
     const svc = makeService();
     const row = await svc
       .from("site_sections")
-      .select("id")
+      .select("*")
       .eq("tenant_id", TENANT_A)
       .eq("section_type", "about")
       .limit(1)
       .single();
-    expect(row.error).toBeNull();
+    expect(row.error, "precondition service must read about A").toBeNull();
+    expect(row.data, "about A must exist before D11").not.toBeNull();
     if (!row.data) return;
-    const { error } = await anon.from("site_sections").delete().eq("id", row.data.id);
-    expect(error).not.toBeNull();
+    const BEFORE = JSON.stringify(row.data, Object.keys(row.data).sort());
+
+    const result = await anon.from("site_sections").delete().eq("id", row.data.id).select();
+
+    const affectedCount = Number.isFinite((result as unknown as { count?: number }).count)
+      ? ((result as unknown as { count?: number }).count ?? 0)
+      : (result.data?.length ?? 0);
+    expect(affectedCount, "anon DELETE site_sections must touch 0 rows").toBe(0);
+
+    const after = await svc
+      .from("site_sections")
+      .select("*")
+      .eq("id", row.data.id)
+      .limit(1)
+      .single();
+    expect(after.error, "after read must succeed").toBeNull();
+    expect(
+      after.data,
+      "target row MUST EXIST STILL after anon DELETE (RLS deny proven via after-read)",
+    ).not.toBeNull();
+    if (!after.data) return;
+    const AFTER = JSON.stringify(after.data, Object.keys(after.data).sort());
+    expect(AFTER, "row Before === After semantically invariant after anon DELETE deny").toBe(
+      BEFORE,
+    );
   });
 
   it("D12 cross-tenant cache none: A section row not present in B listing service-role filtered by B tenant_id", async () => {

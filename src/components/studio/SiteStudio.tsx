@@ -1,7 +1,7 @@
 "use client";
 
 import { useFormState, useFormStatus } from "react-dom";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   saveEditorialAction,
   publishEditorialAction,
@@ -115,7 +115,12 @@ function Card({
   );
 }
 
-type RowProps = { label: string; htmlFor?: string; error?: string; children: React.ReactNode };
+type RowProps = {
+  label: string;
+  htmlFor?: string;
+  error?: string | undefined;
+  children: React.ReactNode;
+};
 function Row({ label, htmlFor, error, children }: RowProps) {
   const id = htmlFor;
   const errId = error && id ? `${id}-err` : undefined;
@@ -134,7 +139,9 @@ function Row({ label, htmlFor, error, children }: RowProps) {
   );
 }
 
-type InputProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, "error"> & { error?: string };
+type InputProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, "error"> & {
+  error?: string | undefined;
+};
 const Input = ({ error, className, id, "aria-describedby": des, ...rest }: InputProps) => {
   const errId = error && id ? `${id}-err` : undefined;
   return (
@@ -159,7 +166,9 @@ const Textarea = ({
   className,
   id,
   ...rest
-}: Omit<React.TextareaHTMLAttributes<HTMLTextAreaElement>, "error"> & { error?: string }) => {
+}: Omit<React.TextareaHTMLAttributes<HTMLTextAreaElement>, "error"> & {
+  error?: string | undefined;
+}) => {
   const errId = error && id ? `${id}-err` : undefined;
   return (
     <textarea
@@ -183,7 +192,9 @@ const Select = ({
   className,
   id,
   ...rest
-}: Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "error"> & { error?: string }) => {
+}: Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "error"> & {
+  error?: string | undefined;
+}) => {
   const errId = error && id ? `${id}-err` : undefined;
   return (
     <select
@@ -305,6 +316,67 @@ type InnerOuter = {
   revision: string | null;
 };
 
+type FieldErrors = Partial<Record<string, string[]>>;
+
+function fieldErrorFor(fieldErrors: FieldErrors | undefined, path: string): string | undefined {
+  if (!fieldErrors) return undefined;
+  const arr = fieldErrors[path];
+  if (!arr || arr.length === 0) return undefined;
+  return arr[0];
+}
+
+function fieldErrorsDomId(path: string): string | null {
+  // sections.0.section_type -> sect-0-type
+  // services.0.name -> svc-0-name
+  // theme.primary -> theme-primary-text
+  // theme.background -> theme-bg-text
+  // theme.foreground -> theme-fg-text
+  // theme.muted -> theme-muted-text
+  // theme.radius -> theme-radius
+  // theme.headingFont -> theme-head
+  // theme.bodyFont -> theme-body
+  const sec = /^sections\.(\d+)\.(section_type|variant|enabled)$/.exec(path);
+  if (sec) {
+    const i = sec[1];
+    const k = sec[2] === "section_type" ? "type" : sec[2];
+    return `sect-${i}-${k}`;
+  }
+  const svc =
+    /^services\.(\d+)\.(name|price_from|duration_minutes|currency|active|description)$/.exec(path);
+  if (svc) {
+    const i = svc[1] as string;
+    const svcField = svc[2] as
+      "name" | "price_from" | "duration_minutes" | "currency" | "active" | "description";
+    const map: Record<typeof svcField, string> = {
+      name: "name",
+      price_from: "price",
+      duration_minutes: "dur",
+      currency: "currency",
+      active: "active",
+      description: "desc",
+    };
+    return `svc-${i}-${map[svcField]}`;
+  }
+  const th = /^theme\.(primary|background|foreground|muted|radius|headingFont|bodyFont)$/.exec(
+    path,
+  );
+  if (th) {
+    const k = th[1] as
+      "primary" | "background" | "foreground" | "muted" | "radius" | "headingFont" | "bodyFont";
+    const map: Record<typeof k, string> = {
+      primary: "theme-primary-text",
+      background: "theme-bg-text",
+      foreground: "theme-fg-text",
+      muted: "theme-muted-text",
+      radius: "theme-radius",
+      headingFont: "theme-head",
+      bodyFont: "theme-body",
+    };
+    return map[k];
+  }
+  return null;
+}
+
 function SiteStudioInner({ outer }: { outer: InnerOuter }) {
   const {
     props,
@@ -320,6 +392,7 @@ function SiteStudioInner({ outer }: { outer: InnerOuter }) {
   const [sections, setSections] = useState<StudioDraftSection[]>(currentValues.sections);
   const [services, setServices] = useState<StudioDraftService[]>(currentValues.services);
   const [theme, setTheme] = useState<StudioDraftTheme>(currentValues.theme);
+  const focusOnceRef = useRef<string | null>(null);
 
   const publishedNow = publishState.ok && publishState.info?.kind === "PUBLISHED";
   const unpublishedNow = unpublishState.ok && unpublishState.info?.kind === "UNPUBLISHED";
@@ -334,6 +407,33 @@ function SiteStudioInner({ outer }: { outer: InnerOuter }) {
   const saveErr = saveState.ok ? "" : ((saveState as { error?: string }).error ?? "");
   const pubErr = publishState.ok ? "" : ((publishState as { error?: string }).error ?? "");
   const unpubErr = unpublishState.ok ? "" : ((unpublishState as { error?: string }).error ?? "");
+
+  const fieldErrors: FieldErrors | undefined =
+    (!saveState.ok && (saveState as { fieldErrors?: FieldErrors }).fieldErrors) ||
+    (!publishState.ok && (publishState as { fieldErrors?: FieldErrors }).fieldErrors) ||
+    undefined;
+
+  const stamp =
+    (saveState as { updated_at?: string }).updated_at ||
+    (publishState as { updated_at?: string }).updated_at ||
+    "";
+  useEffect(() => {
+    if (!fieldErrors) return;
+    const paths = Object.keys(fieldErrors);
+    if (paths.length === 0) return;
+    const token = `${stamp}|${paths.join(",")}`;
+    if (focusOnceRef.current === token) return;
+    focusOnceRef.current = token;
+    for (const p of paths) {
+      const id = fieldErrorsDomId(p);
+      if (!id) continue;
+      const el = document.getElementById(id);
+      if (el && typeof (el as HTMLElement).focus === "function") {
+        (el as HTMLElement).focus({ preventScroll: false });
+        return;
+      }
+    }
+  }, [fieldErrors, stamp]);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -494,6 +594,7 @@ function SiteStudioInner({ outer }: { outer: InnerOuter }) {
                   section={s}
                   sections={sections}
                   setSections={setSections}
+                  fieldErrors={fieldErrors}
                 />
               ))}
             </div>
@@ -537,13 +638,14 @@ function SiteStudioInner({ outer }: { outer: InnerOuter }) {
                   service={s}
                   services={services}
                   setServices={setServices}
+                  fieldErrors={fieldErrors}
                 />
               ))}
             </div>
           </Card>
 
           <Card title="Tema">
-            <ThemeEditor theme={theme} setTheme={setTheme} />
+            <ThemeEditor theme={theme} setTheme={setTheme} fieldErrors={fieldErrors} />
           </Card>
         </div>
 
@@ -583,11 +685,13 @@ function SectionsEditorItem({
   section,
   sections,
   setSections,
+  fieldErrors,
 }: {
   index: number;
   section: StudioDraftSection;
   sections: StudioDraftSection[];
   setSections: React.Dispatch<React.SetStateAction<StudioDraftSection[]>>;
+  fieldErrors?: FieldErrors | undefined;
 }) {
   const usedSingletons = useMemo(() => {
     return new Set(
@@ -647,11 +751,16 @@ function SectionsEditorItem({
     <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/40">
       <div className="flex flex-wrap gap-3 items-start">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1 min-w-0">
-          <Row label="Tipo sezione" htmlFor={`sect-${index}-type`}>
+          <Row
+            label="Tipo sezione"
+            htmlFor={`sect-${index}-type`}
+            error={fieldErrorFor(fieldErrors, `sections.${index}.section_type`)}
+          >
             <Select
               id={`sect-${index}-type`}
               value={section.section_type}
               onChange={(e) => patch({ section_type: e.target.value as SectionType })}
+              error={fieldErrorFor(fieldErrors, `sections.${index}.section_type`)}
             >
               {SECTION_TYPES.map((t) => {
                 const isSingleton = SINGLETON_TYPES.includes(t as (typeof SINGLETON_TYPES)[number]);
@@ -666,11 +775,16 @@ function SectionsEditorItem({
             </Select>
           </Row>
 
-          <Row label="Variante" htmlFor={`sect-${index}-variant`}>
+          <Row
+            label="Variante"
+            htmlFor={`sect-${index}-variant`}
+            error={fieldErrorFor(fieldErrors, `sections.${index}.variant`)}
+          >
             <Select
               id={`sect-${index}-variant`}
               value={section.variant || "default"}
               onChange={(e) => patch({ variant: e.target.value as SectionVariant })}
+              error={fieldErrorFor(fieldErrors, `sections.${index}.variant`)}
             >
               {ALLOWED_VARIANTS.map((v) => (
                 <option key={v} value={v}>
@@ -727,11 +841,13 @@ function ServicesEditorItem({
   service,
   services,
   setServices,
+  fieldErrors,
 }: {
   index: number;
   service: StudioDraftService;
   services: StudioDraftService[];
   setServices: React.Dispatch<React.SetStateAction<StudioDraftService[]>>;
+  fieldErrors?: FieldErrors | undefined;
 }) {
   const patch = (partial: Partial<StudioDraftService>) => {
     setServices((prev) => {
@@ -784,19 +900,28 @@ function ServicesEditorItem({
     <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/40">
       <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">
         <div className="md:col-span-12">
-          <Row label="Nome servizio" htmlFor={`svc-${index}-name`}>
+          <Row
+            label="Nome servizio"
+            htmlFor={`svc-${index}-name`}
+            error={fieldErrorFor(fieldErrors, `services.${index}.name`)}
+          >
             <Input
               id={`svc-${index}-name`}
               value={service.name}
               maxLength={120}
               onChange={(e) => patch({ name: e.target.value })}
               placeholder="es. Taglio uomo"
+              error={fieldErrorFor(fieldErrors, `services.${index}.name`)}
             />
           </Row>
         </div>
 
         <div className="md:col-span-4">
-          <Row label="Prezzo da (€/$/…)" htmlFor={`svc-${index}-price`}>
+          <Row
+            label="Prezzo da (€/$/…)"
+            htmlFor={`svc-${index}-price`}
+            error={fieldErrorFor(fieldErrors, `services.${index}.price_from`)}
+          >
             <Input
               id={`svc-${index}-price`}
               type="number"
@@ -814,16 +939,22 @@ function ServicesEditorItem({
                 if (Number.isNaN(n)) return;
                 patch({ price_from: Math.max(0, n) });
               }}
+              error={fieldErrorFor(fieldErrors, `services.${index}.price_from`)}
             />
           </Row>
         </div>
 
         <div className="md:col-span-2">
-          <Row label="Valuta" htmlFor={`svc-${index}-currency`}>
+          <Row
+            label="Valuta"
+            htmlFor={`svc-${index}-currency`}
+            error={fieldErrorFor(fieldErrors, `services.${index}.currency`)}
+          >
             <Select
               id={`svc-${index}-currency`}
               value={service.currency}
               onChange={(e) => patch({ currency: e.target.value as Currency })}
+              error={fieldErrorFor(fieldErrors, `services.${index}.currency`)}
             >
               {CURRENCY_ALLOWED.map((c) => (
                 <option key={c} value={c}>
@@ -835,7 +966,11 @@ function ServicesEditorItem({
         </div>
 
         <div className="md:col-span-3">
-          <Row label="Durata (minuti)" htmlFor={`svc-${index}-dur`}>
+          <Row
+            label="Durata (minuti)"
+            htmlFor={`svc-${index}-dur`}
+            error={fieldErrorFor(fieldErrors, `services.${index}.duration_minutes`)}
+          >
             <Input
               id={`svc-${index}-dur`}
               type="number"
@@ -853,6 +988,7 @@ function ServicesEditorItem({
                 if (Number.isNaN(n)) return;
                 patch({ duration_minutes: Math.max(1, Math.min(1440, Math.round(n))) });
               }}
+              error={fieldErrorFor(fieldErrors, `services.${index}.duration_minutes`)}
             />
           </Row>
         </div>
@@ -895,13 +1031,18 @@ function ServicesEditorItem({
         </div>
 
         <div className="md:col-span-12">
-          <Row label="Descrizione (opzionale)" htmlFor={`svc-${index}-desc`}>
+          <Row
+            label="Descrizione (opzionale)"
+            htmlFor={`svc-${index}-desc`}
+            error={fieldErrorFor(fieldErrors, `services.${index}.description`)}
+          >
             <Textarea
               id={`svc-${index}-desc`}
               rows={2}
               maxLength={1000}
               value={service.description ?? ""}
               onChange={(e) => patch({ description: e.target.value || null })}
+              error={fieldErrorFor(fieldErrors, `services.${index}.description`)}
             />
           </Row>
         </div>
@@ -913,9 +1054,11 @@ function ServicesEditorItem({
 function ThemeEditor({
   theme,
   setTheme,
+  fieldErrors,
 }: {
   theme: StudioDraftTheme;
   setTheme: React.Dispatch<React.SetStateAction<StudioDraftTheme>>;
+  fieldErrors?: FieldErrors | undefined;
 }) {
   const [hexErrors, setHexErrors] = useState<
     Partial<Record<"primary" | "background" | "foreground" | "muted", string>>
@@ -930,17 +1073,20 @@ function ThemeEditor({
     setTheme((prev) => ({ ...prev, [k]: v.length > 0 && ok ? v : prev[k] }));
   };
 
-  const pErr = hexErrors.primary ? hexErrors.primary : undefined;
-  const bErr = hexErrors.background ? hexErrors.background : undefined;
-  const fErr = hexErrors.foreground ? hexErrors.foreground : undefined;
-  const mErr = hexErrors.muted ? hexErrors.muted : undefined;
+  const pErr = hexErrors.primary || fieldErrorFor(fieldErrors, "theme.primary") || undefined;
+  const bErr = hexErrors.background || fieldErrorFor(fieldErrors, "theme.background") || undefined;
+  const fErr = hexErrors.foreground || fieldErrorFor(fieldErrors, "theme.foreground") || undefined;
+  const mErr = hexErrors.muted || fieldErrorFor(fieldErrors, "theme.muted") || undefined;
+  const rErr = fieldErrorFor(fieldErrors, "theme.radius") || undefined;
+  const hErr = fieldErrorFor(fieldErrors, "theme.headingFont") || undefined;
+  const bfErr = fieldErrorFor(fieldErrors, "theme.bodyFont") || undefined;
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      <Row label="Colore primario" htmlFor="theme-primary">
+      <Row label="Colore primario" htmlFor="theme-primary-text" error={pErr}>
         <div className="flex gap-2">
           <input
-            id="theme-primary"
+            id="theme-primary-color"
             type="color"
             className="h-10 w-16 rounded border border-slate-300 bg-white"
             value={
@@ -949,31 +1095,23 @@ function ThemeEditor({
                 : "#4f46e5"
             }
             onChange={(e) => setHex("primary", e.target.value)}
-            aria-label="Colore primario"
+            aria-label="Colore primario (picker)"
           />
-          {pErr ? (
-            <Input
-              type="text"
-              value={theme.primary ?? ""}
-              onChange={(e) => setHex("primary", e.target.value.trim())}
-              placeholder="#RRGGBB"
-              error={pErr}
-            />
-          ) : (
-            <Input
-              type="text"
-              value={theme.primary ?? ""}
-              onChange={(e) => setHex("primary", e.target.value.trim())}
-              placeholder="#RRGGBB"
-            />
-          )}
+          <Input
+            id="theme-primary-text"
+            type="text"
+            value={theme.primary ?? ""}
+            onChange={(e) => setHex("primary", e.target.value.trim())}
+            placeholder="#RRGGBB"
+            error={pErr}
+          />
         </div>
       </Row>
 
-      <Row label="Sfondo" htmlFor="theme-bg">
+      <Row label="Sfondo" htmlFor="theme-bg-text" error={bErr}>
         <div className="flex gap-2">
           <input
-            id="theme-bg"
+            id="theme-bg-color"
             type="color"
             className="h-10 w-16 rounded border border-slate-300 bg-white"
             value={
@@ -982,30 +1120,23 @@ function ThemeEditor({
                 : "#ffffff"
             }
             onChange={(e) => setHex("background", e.target.value)}
+            aria-label="Sfondo (picker)"
           />
-          {bErr ? (
-            <Input
-              type="text"
-              value={theme.background ?? ""}
-              onChange={(e) => setHex("background", e.target.value.trim())}
-              placeholder="#ffffff"
-              error={bErr}
-            />
-          ) : (
-            <Input
-              type="text"
-              value={theme.background ?? ""}
-              onChange={(e) => setHex("background", e.target.value.trim())}
-              placeholder="#ffffff"
-            />
-          )}
+          <Input
+            id="theme-bg-text"
+            type="text"
+            value={theme.background ?? ""}
+            onChange={(e) => setHex("background", e.target.value.trim())}
+            placeholder="#ffffff"
+            error={bErr}
+          />
         </div>
       </Row>
 
-      <Row label="Testo principale" htmlFor="theme-fg">
+      <Row label="Testo principale" htmlFor="theme-fg-text" error={fErr}>
         <div className="flex gap-2">
           <input
-            id="theme-fg"
+            id="theme-fg-color"
             type="color"
             className="h-10 w-16 rounded border border-slate-300 bg-white"
             value={
@@ -1014,30 +1145,23 @@ function ThemeEditor({
                 : "#0f172a"
             }
             onChange={(e) => setHex("foreground", e.target.value)}
+            aria-label="Testo principale (picker)"
           />
-          {fErr ? (
-            <Input
-              type="text"
-              value={theme.foreground ?? ""}
-              onChange={(e) => setHex("foreground", e.target.value.trim())}
-              placeholder="#0f172a"
-              error={fErr}
-            />
-          ) : (
-            <Input
-              type="text"
-              value={theme.foreground ?? ""}
-              onChange={(e) => setHex("foreground", e.target.value.trim())}
-              placeholder="#0f172a"
-            />
-          )}
+          <Input
+            id="theme-fg-text"
+            type="text"
+            value={theme.foreground ?? ""}
+            onChange={(e) => setHex("foreground", e.target.value.trim())}
+            placeholder="#0f172a"
+            error={fErr}
+          />
         </div>
       </Row>
 
-      <Row label="Secondario / Muted" htmlFor="theme-muted">
+      <Row label="Secondario / Muted" htmlFor="theme-muted-text" error={mErr}>
         <div className="flex gap-2">
           <input
-            id="theme-muted"
+            id="theme-muted-color"
             type="color"
             className="h-10 w-16 rounded border border-slate-300 bg-white"
             value={
@@ -1046,27 +1170,20 @@ function ThemeEditor({
                 : "#64748b"
             }
             onChange={(e) => setHex("muted", e.target.value)}
+            aria-label="Secondario Muted (picker)"
           />
-          {mErr ? (
-            <Input
-              type="text"
-              value={theme.muted ?? ""}
-              onChange={(e) => setHex("muted", e.target.value.trim())}
-              placeholder="#64748b"
-              error={mErr}
-            />
-          ) : (
-            <Input
-              type="text"
-              value={theme.muted ?? ""}
-              onChange={(e) => setHex("muted", e.target.value.trim())}
-              placeholder="#64748b"
-            />
-          )}
+          <Input
+            id="theme-muted-text"
+            type="text"
+            value={theme.muted ?? ""}
+            onChange={(e) => setHex("muted", e.target.value.trim())}
+            placeholder="#64748b"
+            error={mErr}
+          />
         </div>
       </Row>
 
-      <Row label="Raggio angoli" htmlFor="theme-radius">
+      <Row label="Raggio angoli" htmlFor="theme-radius" error={rErr}>
         <Select
           id="theme-radius"
           value={theme.radius ?? "md"}
@@ -1076,6 +1193,7 @@ function ThemeEditor({
               radius: e.target.value as (typeof RADIUS_ALLOWED)[number],
             }))
           }
+          error={rErr}
         >
           {RADIUS_ALLOWED.map((r) => (
             <option key={r} value={r}>
@@ -1085,7 +1203,7 @@ function ThemeEditor({
         </Select>
       </Row>
 
-      <Row label="Font titoli" htmlFor="theme-head">
+      <Row label="Font titoli" htmlFor="theme-head" error={hErr}>
         <Select
           id="theme-head"
           value={theme.headingFont ?? "display"}
@@ -1095,6 +1213,7 @@ function ThemeEditor({
               headingFont: e.target.value as (typeof FONT_HEADING_ALLOWED)[number],
             }))
           }
+          error={hErr}
         >
           {FONT_HEADING_ALLOWED.map((f) => (
             <option key={f} value={f}>
@@ -1104,7 +1223,7 @@ function ThemeEditor({
         </Select>
       </Row>
 
-      <Row label="Font testo" htmlFor="theme-body">
+      <Row label="Font testo" htmlFor="theme-body" error={bfErr}>
         <Select
           id="theme-body"
           value={theme.bodyFont ?? "sans"}
@@ -1114,6 +1233,7 @@ function ThemeEditor({
               bodyFont: e.target.value as (typeof FONT_BODY_ALLOWED)[number],
             }))
           }
+          error={bfErr}
         >
           {FONT_BODY_ALLOWED.map((f) => (
             <option key={f} value={f}>

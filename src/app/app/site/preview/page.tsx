@@ -16,7 +16,11 @@ export default async function SitePreviewPage() {
   const { publicSite } = res;
   return (
     <div className="min-h-screen">
-      <div className="sticky top-0 z-50 w-full border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900 shadow-sm">
+      <div
+        role="status"
+        aria-live="polite"
+        className="sticky top-0 z-50 w-full border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900 shadow-sm"
+      >
         <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-2">
           <strong>Anteprima privata</strong>
           <span className="opacity-80">
