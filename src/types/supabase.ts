@@ -1,146 +1,150 @@
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
+export type JsonObject = { [key: string]: Json };
+
 export type Database = {
+  graphql_public: {
+    Tables: Record<string, never>;
+    Views: Record<string, never>;
+    Functions: {
+      graphql: {
+        Args: {
+          operationName?: string;
+          query?: string;
+          variables?: JsonObject;
+          extensions?: JsonObject;
+        };
+        Returns: JsonObject;
+      };
+    };
+    Enums: Record<string, never>;
+    CompositeTypes: Record<string, never>;
+  };
   public: {
     Tables: {
       audit_logs: {
         Row: {
-          action: string;
-          actor_user_id: string | null;
-          created_at: string;
-          entity_id: string | null;
-          entity_type: string | null;
           id: string;
-          metadata: Json;
           tenant_id: string | null;
+          actor_user_id: string | null;
+          action: string;
+          entity_type: string | null;
+          entity_id: string | null;
+          metadata: Json;
+          created_at: string;
         };
         Insert: {
-          action: string;
-          actor_user_id?: string | null;
-          created_at?: string;
-          entity_id?: string | null;
-          entity_type?: string | null;
           id?: string;
-          metadata?: Json;
           tenant_id?: string | null;
+          actor_user_id?: string | null;
+          action: string;
+          entity_type?: string | null;
+          entity_id?: string | null;
+          metadata?: Json;
+          created_at?: string;
         };
         Update: {
-          action?: string;
-          actor_user_id?: string | null;
-          created_at?: string;
-          entity_id?: string | null;
-          entity_type?: string | null;
           id?: string;
-          metadata?: Json;
           tenant_id?: string | null;
+          actor_user_id?: string | null;
+          action?: string;
+          entity_type?: string | null;
+          entity_id?: string | null;
+          metadata?: Json;
+          created_at?: string;
         };
-        Relationships: [
-          {
-            foreignKeyName: "audit_logs_actor_user_id_fkey";
-            columns: ["actor_user_id"];
-            isOneToOne: false;
-            referencedRelation: "profiles";
-            referencedColumns: ["id"];
-          },
-          {
-            foreignKeyName: "audit_logs_tenant_id_fkey";
-            columns: ["tenant_id"];
-            isOneToOne: false;
-            referencedRelation: "tenants";
-            referencedColumns: ["id"];
-          },
-        ];
+        Relationships: [];
       };
       business_profiles: {
         Row: {
+          tenant_id: string;
+          display_name: string | null;
+          legal_name: string | null;
+          category: string | null;
+          description: string | null;
+          phone: string | null;
+          whatsapp: string | null;
+          email: string | null;
+          website_url: string | null;
           address_line1: string | null;
           address_line2: string | null;
-          category: string | null;
           city: string | null;
-          country_code: string | null;
-          created_at: string;
-          description: string | null;
-          display_name: string | null;
-          email: string | null;
-          latitude: number | null;
-          legal_name: string | null;
-          locale: string;
-          longitude: number | null;
-          phone: string | null;
-          postal_code: string | null;
           province: string | null;
-          tenant_id: string;
-          theme_background: string | null;
-          theme_body_font_preset: string | null;
-          theme_foreground: string | null;
-          theme_heading_font_preset: string | null;
-          theme_muted: string | null;
-          theme_primary: string | null;
-          theme_radius: string | null;
+          postal_code: string | null;
+          country_code: string | null;
+          latitude: number | null;
+          longitude: number | null;
           timezone: string;
+          locale: string;
+          created_at: string;
           updated_at: string;
-          website_url: string | null;
-          whatsapp: string | null;
+          theme_primary: string | null;
+          theme_background: string | null;
+          theme_foreground: string | null;
+          theme_muted: string | null;
+          theme_radius: string | null;
+          theme_heading_font_preset: string | null;
+          theme_body_font_preset: string | null;
         };
         Insert: {
+          tenant_id: string;
+          display_name?: string | null;
+          legal_name?: string | null;
+          category?: string | null;
+          description?: string | null;
+          phone?: string | null;
+          whatsapp?: string | null;
+          email?: string | null;
+          website_url?: string | null;
           address_line1?: string | null;
           address_line2?: string | null;
-          category?: string | null;
           city?: string | null;
-          country_code?: string | null;
-          created_at?: string;
-          description?: string | null;
-          display_name?: string | null;
-          email?: string | null;
-          latitude?: number | null;
-          legal_name?: string | null;
-          locale?: string;
-          longitude?: number | null;
-          phone?: string | null;
-          postal_code?: string | null;
           province?: string | null;
-          tenant_id: string;
-          theme_background?: string | null;
-          theme_body_font_preset?: string | null;
-          theme_foreground?: string | null;
-          theme_heading_font_preset?: string | null;
-          theme_muted?: string | null;
-          theme_primary?: string | null;
-          theme_radius?: string | null;
+          postal_code?: string | null;
+          country_code?: string | null;
+          latitude?: number | null;
+          longitude?: number | null;
           timezone?: string;
+          locale?: string;
+          created_at?: string;
           updated_at?: string;
-          website_url?: string | null;
-          whatsapp?: string | null;
+          theme_primary?: string | null;
+          theme_background?: string | null;
+          theme_foreground?: string | null;
+          theme_muted?: string | null;
+          theme_radius?: string | null;
+          theme_heading_font_preset?: string | null;
+          theme_body_font_preset?: string | null;
         };
         Update: {
+          tenant_id?: string;
+          display_name?: string | null;
+          legal_name?: string | null;
+          category?: string | null;
+          description?: string | null;
+          phone?: string | null;
+          whatsapp?: string | null;
+          email?: string | null;
+          website_url?: string | null;
           address_line1?: string | null;
           address_line2?: string | null;
-          category?: string | null;
           city?: string | null;
-          country_code?: string | null;
-          created_at?: string;
-          description?: string | null;
-          display_name?: string | null;
-          email?: string | null;
-          latitude?: number | null;
-          legal_name?: string | null;
-          locale?: string;
-          longitude?: number | null;
-          phone?: string | null;
-          postal_code?: string | null;
           province?: string | null;
-          tenant_id?: string;
-          theme_background?: string | null;
-          theme_body_font_preset?: string | null;
-          theme_foreground?: string | null;
-          theme_heading_font_preset?: string | null;
-          theme_muted?: string | null;
-          theme_primary?: string | null;
-          theme_radius?: string | null;
+          postal_code?: string | null;
+          country_code?: string | null;
+          latitude?: number | null;
+          longitude?: number | null;
           timezone?: string;
+          locale?: string;
+          created_at?: string;
           updated_at?: string;
-          website_url?: string | null;
-          whatsapp?: string | null;
+          theme_primary?: string | null;
+          theme_background?: string | null;
+          theme_foreground?: string | null;
+          theme_muted?: string | null;
+          theme_radius?: string | null;
+          theme_heading_font_preset?: string | null;
+          theme_body_font_preset?: string | null;
         };
         Relationships: [
           {
@@ -154,105 +158,90 @@ export type Database = {
       };
       platform_admins: {
         Row: {
+          user_id: string;
+          status: string;
+          grant_reason: string | null;
           created_at: string;
           created_by: string | null;
-          grant_reason: string | null;
-          status: string;
-          user_id: string;
         };
         Insert: {
+          user_id: string;
+          status?: string;
+          grant_reason?: string | null;
           created_at?: string;
           created_by?: string | null;
-          grant_reason?: string | null;
-          status?: string;
-          user_id: string;
         };
         Update: {
+          user_id?: string;
+          status?: string;
+          grant_reason?: string | null;
           created_at?: string;
           created_by?: string | null;
-          grant_reason?: string | null;
-          status?: string;
-          user_id?: string;
         };
-        Relationships: [
-          {
-            foreignKeyName: "platform_admins_created_by_fkey";
-            columns: ["created_by"];
-            isOneToOne: false;
-            referencedRelation: "profiles";
-            referencedColumns: ["id"];
-          },
-          {
-            foreignKeyName: "platform_admins_user_id_fkey";
-            columns: ["user_id"];
-            isOneToOne: true;
-            referencedRelation: "profiles";
-            referencedColumns: ["id"];
-          },
-        ];
+        Relationships: [];
       };
       profiles: {
         Row: {
+          id: string;
+          display_name: string | null;
           avatar_url: string | null;
           created_at: string;
-          display_name: string | null;
-          id: string;
           updated_at: string;
         };
         Insert: {
+          id: string;
+          display_name?: string | null;
           avatar_url?: string | null;
           created_at?: string;
-          display_name?: string | null;
-          id: string;
           updated_at?: string;
         };
         Update: {
+          id?: string;
+          display_name?: string | null;
           avatar_url?: string | null;
           created_at?: string;
-          display_name?: string | null;
-          id?: string;
           updated_at?: string;
         };
         Relationships: [];
       };
       services: {
         Row: {
-          active: boolean;
-          created_at: string;
-          currency: string;
-          description: string | null;
-          duration_minutes: number | null;
           id: string;
-          name: string;
-          position: number;
-          price_from: number | null;
           tenant_id: string;
+          name: string;
+          description: string | null;
+          price_from: number | null;
+          currency: string;
+          duration_minutes: number | null;
+          active: boolean;
+          position: number;
+          created_at: string;
           updated_at: string;
         };
         Insert: {
-          active?: boolean;
-          created_at?: string;
-          currency?: string;
-          description?: string | null;
-          duration_minutes?: number | null;
           id?: string;
-          name: string;
-          position?: number;
-          price_from?: number | null;
           tenant_id: string;
+          name: string;
+          description?: string | null;
+          price_from?: number | null;
+          currency?: string;
+          duration_minutes?: number | null;
+          active?: boolean;
+          position?: number;
+          created_at?: string;
           updated_at?: string;
         };
         Update: {
-          active?: boolean;
-          created_at?: string;
-          currency?: string;
-          description?: string | null;
-          duration_minutes?: number | null;
           id?: string;
-          name?: string;
-          position?: number;
-          price_from?: number | null;
           tenant_id?: string;
+          name?: string;
+          description?: string | null;
+          price_from?: number | null;
+          currency?: string;
+          duration_minutes?: number | null;
+          active?: boolean;
+          position?: number;
+          created_at?: string;
           updated_at?: string;
         };
         Relationships: [
@@ -267,27 +256,27 @@ export type Database = {
       };
       site_editorial_state: {
         Row: {
-          draft_revision: string;
+          tenant_id: string;
           sections: Json;
           services: Json;
-          tenant_id: string;
           theme: Json;
+          draft_revision: string;
           updated_at: string;
         };
         Insert: {
-          draft_revision?: string;
+          tenant_id: string;
           sections?: Json;
           services?: Json;
-          tenant_id: string;
           theme?: Json;
+          draft_revision?: string;
           updated_at?: string;
         };
         Update: {
-          draft_revision?: string;
+          tenant_id?: string;
           sections?: Json;
           services?: Json;
-          tenant_id?: string;
           theme?: Json;
+          draft_revision?: string;
           updated_at?: string;
         };
         Relationships: [
@@ -302,37 +291,37 @@ export type Database = {
       };
       site_sections: {
         Row: {
-          created_at: string;
-          enabled: boolean;
           id: string;
-          position: number;
-          section_type: string;
-          settings: Json;
           tenant_id: string;
-          updated_at: string;
+          section_type: string;
+          position: number;
+          enabled: boolean;
           variant: string;
+          settings: Json;
+          created_at: string;
+          updated_at: string;
         };
         Insert: {
-          created_at?: string;
-          enabled?: boolean;
           id?: string;
-          position?: number;
-          section_type: string;
-          settings?: Json;
           tenant_id: string;
-          updated_at?: string;
+          section_type: string;
+          position?: number;
+          enabled?: boolean;
           variant?: string;
+          settings?: Json;
+          created_at?: string;
+          updated_at?: string;
         };
         Update: {
-          created_at?: string;
-          enabled?: boolean;
           id?: string;
-          position?: number;
-          section_type?: string;
-          settings?: Json;
           tenant_id?: string;
-          updated_at?: string;
+          section_type?: string;
+          position?: number;
+          enabled?: boolean;
           variant?: string;
+          settings?: Json;
+          created_at?: string;
+          updated_at?: string;
         };
         Relationships: [
           {
@@ -346,31 +335,31 @@ export type Database = {
       };
       tenant_memberships: {
         Row: {
-          created_at: string;
           id: string;
+          tenant_id: string;
+          user_id: string;
           role: string;
           status: string;
-          tenant_id: string;
+          created_at: string;
           updated_at: string;
-          user_id: string;
         };
         Insert: {
-          created_at?: string;
           id?: string;
+          tenant_id: string;
+          user_id: string;
           role?: string;
           status?: string;
-          tenant_id: string;
+          created_at?: string;
           updated_at?: string;
-          user_id: string;
         };
         Update: {
-          created_at?: string;
           id?: string;
+          tenant_id?: string;
+          user_id?: string;
           role?: string;
           status?: string;
-          tenant_id?: string;
+          created_at?: string;
           updated_at?: string;
-          user_id?: string;
         };
         Relationships: [
           {
@@ -391,225 +380,95 @@ export type Database = {
       };
       tenants: {
         Row: {
-          created_at: string;
-          custom_domain: string | null;
           id: string;
           name: string;
-          published: boolean;
-          published_at: string | null;
           slug: string;
           status: string;
-          temporary_domain: string | null;
+          created_at: string;
           updated_at: string;
+          published: boolean;
+          temporary_domain: string | null;
+          custom_domain: string | null;
+          published_at: string | null;
         };
         Insert: {
-          created_at?: string;
-          custom_domain?: string | null;
           id?: string;
           name: string;
-          published?: boolean;
-          published_at?: string | null;
           slug: string;
           status?: string;
-          temporary_domain?: string | null;
+          created_at?: string;
           updated_at?: string;
+          published?: boolean;
+          temporary_domain?: string | null;
+          custom_domain?: string | null;
+          published_at?: string | null;
         };
         Update: {
-          created_at?: string;
-          custom_domain?: string | null;
           id?: string;
           name?: string;
-          published?: boolean;
-          published_at?: string | null;
           slug?: string;
           status?: string;
-          temporary_domain?: string | null;
+          created_at?: string;
           updated_at?: string;
+          published?: boolean;
+          temporary_domain?: string | null;
+          custom_domain?: string | null;
+          published_at?: string | null;
         };
         Relationships: [];
       };
     };
-    Views: {
-      [_ in never]: never;
-    };
+    Views: Record<string, never>;
     Functions: {
       create_tenant_with_owner: {
         Args: {
-          p_business_email?: string;
           p_business_name: string;
           p_category: string;
           p_city: string;
-          p_locale?: string;
-          p_phone?: string;
           p_province: string;
+          p_phone?: string;
+          p_business_email?: string;
           p_timezone?: string;
+          p_locale?: string;
         };
         Returns: Json;
       };
-      dearmor: { Args: { "": string }; Returns: string };
-      gen_random_uuid: { Args: never; Returns: string };
-      gen_salt: { Args: { "": string }; Returns: string };
-      has_tenant_role: {
-        Args: { allowed_roles: string[]; target_tenant_id: string };
-        Returns: boolean;
-      };
-      is_platform_admin: { Args: never; Returns: boolean };
-      is_tenant_member: { Args: { target_tenant_id: string }; Returns: boolean };
-      pgp_armor_headers: {
-        Args: { "": string };
-        Returns: Record<string, unknown>[];
-      };
       publish_site_draft: {
-        Args: { p_expected_revision?: string; p_tenant_id: string };
+        Args: {
+          p_tenant_id: string;
+          p_expected_revision?: string;
+        };
         Returns: {
+          ok: boolean;
           code: string;
           message: string;
           new_published_at: string;
-          ok: boolean;
           sections_applied: number;
           services_applied: number;
           theme_applied: boolean;
         }[];
       };
-      uuid_generate_v1: { Args: never; Returns: string };
-      uuid_generate_v1mc: { Args: never; Returns: string };
-      uuid_generate_v3: {
-        Args: { name: string; namespace: string };
-        Returns: string;
-      };
-      uuid_generate_v4: { Args: never; Returns: string };
-      uuid_generate_v5: {
-        Args: { name: string; namespace: string };
-        Returns: string;
-      };
-      uuid_nil: { Args: never; Returns: string };
-      uuid_ns_dns: { Args: never; Returns: string };
-      uuid_ns_oid: { Args: never; Returns: string };
-      uuid_ns_url: { Args: never; Returns: string };
-      uuid_ns_x500: { Args: never; Returns: string };
     };
-    Enums: {
-      [_ in never]: never;
-    };
-    CompositeTypes: {
-      [_ in never]: never;
-    };
+    Enums: Record<string, never>;
+    CompositeTypes: Record<string, never>;
   };
 };
 
-type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">;
+type SchemaName = keyof Database;
 
-type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">];
+type PublicSchemaName = Extract<SchemaName, "public">;
 
-export type Tables<
-  DefaultSchemaTableNameOrOptions extends
-    | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
-    | { schema: keyof DatabaseWithoutInternals },
-  TableName extends (DefaultSchemaTableNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals;
-  }
-    ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
-        DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never) = never,
-> = DefaultSchemaTableNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals;
-}
-  ? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
-      DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
-      Row: infer R;
-    }
-    ? R
-    : never
-  : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
-    ? (DefaultSchema["Tables"] & DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
-        Row: infer R;
-      }
-      ? R
-      : never
-    : never;
+type TableInfo<S extends SchemaName> = Database[S]["Tables"];
 
-export type TablesInsert<
-  DefaultSchemaTableNameOrOptions extends
-    keyof DefaultSchema["Tables"] | { schema: keyof DatabaseWithoutInternals },
-  TableName extends (DefaultSchemaTableNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals;
-  }
-    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never) = never,
-> = DefaultSchemaTableNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals;
-}
-  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
-      Insert: infer I;
-    }
-    ? I
-    : never
-  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
-    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
-        Insert: infer I;
-      }
-      ? I
-      : never
-    : never;
+type PublicTableName = keyof TableInfo<PublicSchemaName>;
 
-export type TablesUpdate<
-  DefaultSchemaTableNameOrOptions extends
-    keyof DefaultSchema["Tables"] | { schema: keyof DatabaseWithoutInternals },
-  TableName extends (DefaultSchemaTableNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals;
-  }
-    ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never) = never,
-> = DefaultSchemaTableNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals;
-}
-  ? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
-      Update: infer U;
-    }
-    ? U
-    : never
-  : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
-    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
-        Update: infer U;
-      }
-      ? U
-      : never
-    : never;
+export type Tables<T extends PublicTableName> = Database["public"]["Tables"][T]["Row"];
 
-export type Enums<
-  DefaultSchemaEnumNameOrOptions extends
-    keyof DefaultSchema["Enums"] | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals;
-  }
-    ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never) = never,
-> = DefaultSchemaEnumNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals;
-}
-  ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
-  : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
-    ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
-    : never;
+export type TablesInsert<T extends PublicTableName> = Database["public"]["Tables"][T]["Insert"];
 
-export type CompositeTypes<
-  PublicCompositeTypeNameOrOptions extends
-    keyof DefaultSchema["CompositeTypes"] | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
-    schema: keyof DatabaseWithoutInternals;
-  }
-    ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never) = never,
-> = PublicCompositeTypeNameOrOptions extends {
-  schema: keyof DatabaseWithoutInternals;
-}
-  ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
-  : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
-    ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
-    : never;
+export type TablesUpdate<T extends PublicTableName> = Database["public"]["Tables"][T]["Update"];
 
-export const Constants = {
-  public: {
-    Enums: {},
-  },
-} as const;
+export type Enums<E extends keyof Database["public"]["Enums"]> = Database["public"]["Enums"][E];
+
+export type Functions<F extends keyof Database["public"]["Functions"]> =
+  Database["public"]["Functions"][F];

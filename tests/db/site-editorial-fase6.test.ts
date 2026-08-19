@@ -307,6 +307,28 @@ beforeAll(async () => {
   UID.no_member = await provisionUser(EMAILS.no_member);
   UID.platform_admin = await provisionUser(EMAILS.platform_admin);
 
+  // Profiles (required by FK tenant_memberships.user_id -> profiles.id)
+  await pg.query(
+    `INSERT INTO public.profiles (id, display_name) VALUES
+       ($1::uuid,'Owner A'),
+       ($2::uuid,'Manager A'),
+       ($3::uuid,'Staff A'),
+       ($4::uuid,'Owner B'),
+       ($5::uuid,'Staff B'),
+       ($6::uuid,'No Member'),
+       ($7::uuid,'Platform Admin')
+     ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name, updated_at = NOW()`,
+    [
+      UID.owner_a,
+      UID.manager_a,
+      UID.staff_a,
+      UID.owner_b,
+      UID.staff_b,
+      UID.no_member,
+      UID.platform_admin,
+    ],
+  );
+
   // Memberships
   await pg.query(
     `INSERT INTO public.tenant_memberships(id, tenant_id, user_id, role, status) VALUES
@@ -498,6 +520,57 @@ async function readDraftByTenantDirect(tenantId: string): Promise<EditorialRow |
   );
   return r.rows[0] ?? null;
 }
+
+// ======================= SANITY HARNESS §6 =======================
+describe("§6 · SANITY impersonation harness (FASE 6F audit)", () => {
+  it("SAN1. asUser owner_a: auth.uid() === UID.owner_a + current_user=authenticated", async () => {
+    expect(UID.owner_a.length, "UID owner_a provisioned").toBeGreaterThan(5);
+    const r = await asUser("owner_a", async () => {
+      const uidRow = await pg!.query<{ uid: string }>(`SELECT auth.uid()::text AS uid`);
+      const roleRow = await pg!.query<{ role: string }>(`SELECT current_user AS role`);
+      const claimsRow = await pg!.query<{ sub: string; rl: string }>(
+        `SELECT current_setting('request.jwt.claim.sub', true) AS sub, current_setting('request.jwt.claim.role', true) AS rl`,
+      );
+      return {
+        uid: uidRow.rows[0]?.uid ?? "",
+        role: roleRow.rows[0]?.role ?? "",
+        sub: claimsRow.rows[0]?.sub ?? "",
+        rl: claimsRow.rows[0]?.rl ?? "",
+      };
+    });
+    expect(r.uid, "auth.uid() == owner_a").toBe(UID.owner_a);
+    expect(r.sub, "jwt.claim.sub == owner_a").toBe(UID.owner_a);
+    expect(r.role, "current_user = authenticated").toBe("authenticated");
+    expect(r.rl, "jwt.claim.role = authenticated").toBe("authenticated");
+  });
+
+  it("SAN2. Post-impersonation rollback: connection torna a role=postgres, auth.uid() NULL", async () => {
+    await asUser("owner_a", async () => {
+      const roleRow = await pg!.query<{ r: string }>(`SELECT current_user AS r`);
+      expect(roleRow.rows[0]?.r).toBe("authenticated");
+      return roleRow;
+    });
+    const afterRole = await pg!.query<{ r: string; uid: string | null }>(
+      `SELECT current_user AS r, auth.uid()::text AS uid`,
+    );
+    expect(afterRole.rows[0]?.r, "connection post-asUser = postgres").toBe("postgres");
+    expect(afterRole.rows[0]?.uid, "auth.uid post-asUser NULL").toBeNull();
+  });
+
+  it("SAN3. is_tenant_member(TENANT_A) true per owner_a; is_tenant_member(TENANT_B) false per owner_a (cross)", async () => {
+    const r = await asUser("owner_a", async () => {
+      const a = await pg!.query<{ ok: boolean }>(`SELECT is_tenant_member($1::uuid) AS ok`, [
+        TENANT_A,
+      ]);
+      const b = await pg!.query<{ ok: boolean }>(`SELECT is_tenant_member($1::uuid) AS ok`, [
+        TENANT_B,
+      ]);
+      return { inA: a.rows[0]?.ok, inB: b.rows[0]?.ok };
+    });
+    expect(r.inA, "owner_a member of A").toBe(true);
+    expect(r.inB, "owner_a NON member of B").toBe(false);
+  });
+});
 
 // ======================= GRUPPO R1-R16: RLS FASE 6 =======================
 describe("§9 · R1-R16 RLS Editorial FASE 6 (user-bound identity, RLS attivo)", () => {

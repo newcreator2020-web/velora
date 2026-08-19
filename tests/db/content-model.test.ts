@@ -253,11 +253,22 @@ async function provision(): Promise<void> {
     [TENANT_A, TENANT_B],
   );
 
-  // Auth users + public profiles via test_provision_user (auth.users + public.profiles create automatically)
+  // Auth users
   USER_A_OWNER = await provisionUser(USER_A_OWNER_EMAIL);
   USER_A_MANAGER = await provisionUser(USER_A_MANAGER_EMAIL);
   USER_A_STAFF = await provisionUser(USER_A_STAFF_EMAIL);
   USER_B_OWNER = await provisionUser(USER_B_OWNER_EMAIL);
+
+  // Profiles (required by FK tenant_memberships.user_id -> profiles.id)
+  await pg.query(
+    `INSERT INTO public.profiles (id, display_name) VALUES
+       ($1::uuid,'CM Owner A'),
+       ($2::uuid,'CM Manager A'),
+       ($3::uuid,'CM Staff A'),
+       ($4::uuid,'CM Owner B')
+     ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name, updated_at = NOW()`,
+    [USER_A_OWNER, USER_A_MANAGER, USER_A_STAFF, USER_B_OWNER],
+  );
 
   // Tenant Memberships
   await pg.query(

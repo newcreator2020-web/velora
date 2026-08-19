@@ -16,7 +16,8 @@ export default defineConfig({
       include: ["src/**/*.{ts,tsx}"],
       exclude: ["src/**/*.d.ts", "src/app/**/*.{ts,tsx}", "src/**/*.{test,spec}.{ts,tsx}"],
     },
-    setupFiles: [],
+    setupFiles: ["dotenv/config"],
+    envDir: ".",
   },
   resolve: {
     alias: {
