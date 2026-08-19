@@ -390,6 +390,7 @@ export type Database = {
           temporary_domain: string | null;
           custom_domain: string | null;
           published_at: string | null;
+          plan_id: "base" | "pro" | "internal_test";
         };
         Insert: {
           id?: string;
@@ -402,6 +403,7 @@ export type Database = {
           temporary_domain?: string | null;
           custom_domain?: string | null;
           published_at?: string | null;
+          plan_id?: "base" | "pro" | "internal_test";
         };
         Update: {
           id?: string;
@@ -414,6 +416,7 @@ export type Database = {
           temporary_domain?: string | null;
           custom_domain?: string | null;
           published_at?: string | null;
+          plan_id?: "base" | "pro" | "internal_test";
         };
         Relationships: [];
       };

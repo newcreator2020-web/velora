@@ -503,11 +503,62 @@ function SiteStudioInner({ outer }: { outer: InnerOuter }) {
               </time>
             </span>
           ) : null}
+          {props.entitlements ? (
+            <div
+              className={[
+                "ml-auto inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border",
+                props.entitlements.planId === "pro" || props.entitlements.planId === "internal_test"
+                  ? "bg-indigo-50 text-indigo-800 border-indigo-200"
+                  : "bg-slate-100 text-slate-700 border-slate-300",
+              ].join(" ")}
+              role="status"
+            >
+              <span aria-hidden>◈</span>
+              <span>
+                Piano:{" "}
+                <strong className="uppercase tracking-wide">
+                  {props.entitlements.planId === "internal_test"
+                    ? "TEST"
+                    : props.entitlements.planId}
+                </strong>
+              </span>
+              <span className="text-[11px] opacity-80">
+                {(props.entitlements.limits.maxServices === null
+                  ? "Servizi: illimitati"
+                  : `Servizi: ${services.length}/${props.entitlements.limits.maxServices}`) +
+                  " · " +
+                  (props.entitlements.limits.maxSections === null
+                    ? "Sezioni: illimitate"
+                    : `Sezioni: ${sections.length}/${props.entitlements.limits.maxSections}`)}
+              </span>
+            </div>
+          ) : null}
         </div>
       </header>
 
       <main id="main" className="mx-auto max-w-6xl px-4 sm:px-6 py-6 sm:py-8 space-y-6">
         <div className="grid grid-cols-1 gap-4">
+          {!saveState.ok && saveState.code === "LIMIT_REACHED" ? (
+            <Alert
+              kind="error"
+              title="Limite raggiunto"
+              message={saveState.error || "Hai superato il massimo consentito dal piano corrente."}
+            />
+          ) : null}
+          {!saveState.ok && saveState.code === "ENTITLEMENT_DENIED" ? (
+            <Alert
+              kind="error"
+              title="Funzionalità non disponibile"
+              message={saveState.error || "Questa funzionalità non è inclusa nel tuo piano."}
+            />
+          ) : null}
+          {!publishState.ok && publishState.code === "ENTITLEMENT_DENIED" ? (
+            <Alert
+              kind="error"
+              title="Pubblicazione non consentita"
+              message={publishState.error || "Il tuo piano non include la pubblicazione del sito."}
+            />
+          ) : null}
           {savedNow || publishState.ok || unpublishState.ok ? (
             <Alert
               kind="success"

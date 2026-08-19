@@ -15,6 +15,7 @@ import type {
   StudioDraftService,
   StudioDraftTheme,
 } from "@/lib/server/site-studio-pure";
+import { resolveTenantEntitlements, type EntitlementsSnapshot } from "@/lib/server/entitlements";
 
 export type EditorialActionResult =
   | {
@@ -34,7 +35,15 @@ export type EditorialActionResult =
   | {
       ok: false;
       error: string;
-      code?: "VALIDATION" | "AUTH" | "INTERNAL" | "CONCURRENT" | "AUTHZ" | "NO_DRAFT";
+      code?:
+        | "VALIDATION"
+        | "AUTH"
+        | "INTERNAL"
+        | "CONCURRENT"
+        | "AUTHZ"
+        | "NO_DRAFT"
+        | "ENTITLEMENT_DENIED"
+        | "LIMIT_REACHED";
       fieldErrors?: Partial<Record<string, string[]>>;
       values?: {
         sections: StudioDraftSection[];
@@ -62,11 +71,13 @@ export type EditorialInitialState = {
     updated_at: string | null;
     business_name: string;
   };
+  entitlements: EntitlementsSnapshot;
 };
 
 export async function initialEditorialState(): Promise<EditorialInitialState> {
   const ctx = await requireTenantMembership();
   const draft = await loadEditorialDraft(ctx as Parameters<typeof loadEditorialDraft>[0]);
+  const entitlements = await resolveTenantEntitlements(ctx);
 
   const rawValues = {
     sections: draft.sections as StudioDraftSection[],
@@ -90,6 +101,7 @@ export async function initialEditorialState(): Promise<EditorialInitialState> {
       business_name:
         (ctx.business_profile?.display_name as string) ?? (ctx.tenant?.name as string) ?? "",
     },
+    entitlements,
   };
 }
 
@@ -146,7 +158,8 @@ export async function saveEditorialAction(
   const errorResult: {
     ok: false;
     error: string;
-    code: "VALIDATION" | "AUTH" | "INTERNAL" | "CONCURRENT";
+    code:
+      "VALIDATION" | "AUTH" | "INTERNAL" | "CONCURRENT" | "ENTITLEMENT_DENIED" | "LIMIT_REACHED";
     values: {
       sections: StudioDraftSection[];
       services: StudioDraftService[];
@@ -156,7 +169,7 @@ export async function saveEditorialAction(
   } = {
     ok: false,
     error: res.message,
-    code: res.code,
+    code: res.code as Extract<(typeof errorResult)["code"], (typeof res)["code"]>,
     values: snapshot,
   };
   if (res.fieldErrors) {

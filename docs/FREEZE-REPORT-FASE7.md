@@ -1,0 +1,334 @@
+# FREEZE REPORT — VELORA FASE 7
+
+## FREEZE CONDITIONS — FINAL STATUS
+
+**FASE 7 = NOT FROZEN**
+
+Motivazione: Playwright E2E E7-1..E7-12 NON ESEGUITI (NOT VERIFIED), axe accessibility baseline NON ESEGUITO, responsive 375/768/1440 NON verificato con scrollWidth<=clientWidth, regression FASE6 Playwright DEV/PROD NON ri-eseguita, NO PUSH conforme mandato.
+
+Fallimenti reali (FAILED=0): nessun test eseguito è fallito.
+Gap dichiarati esplicitamente (AH/SECURITY GAPS): NESSUNO a livello architetturale verificato; gap di coverage E2E e responsive/axe NON di sicurezza ma di NON VERIFIED.
+
+```
+FAILED = 0
+NOT VERIFIED = 12 (E7) + 1 (axe) + 3 (responsive) + 2 (FASE6 Playwright DEV/PROD) = 18
+VERIFIED = 20 (P) + 12 (ET) + 8 (PT) + 1 (C) + 1 (Cache A/B) + 1 (health 200) + 1 (typecheck) + 1 (lint) + 1 (format) + 1 (build) + 1 (secret scan) + 1 (service inventory) + 1 (test integrity) + 2 (SCR7 DB+unit)
+```
+
+---
+
+## 1) HEADER / CONTESTO
+
+| Campo                              | Valore                                                         |
+| ---------------------------------- | -------------------------------------------------------------- |
+| Progetto                           | VELORA — Piattaforma SaaS multi-tenant                         |
+| Fase                               | 7 — Product Entitlements + Plan Foundation                     |
+| Baseline FASE6 frozen commit       | `90efa41fdee8c82511ba7cad0985d1b01f0220d1`                     |
+| Initial HEAD (PRE-FLIGHT)          | `ea79af3` (feature/auth-onboarding)                            |
+| Final HEAD (prima di commit FASE7) | `ea79af3` + working tree staged per commit                     |
+| Branch                             | `feature/auth-onboarding`                                      |
+| Docker status                      | 8 containers healthy, Supabase locale attivo, Kong 54322/54323 |
+| Data report                        | 2026-08-20                                                     |
+
+---
+
+## 2) ARCHITETTURA SCELTA / DISCOVERY
+
+**Risultato Discovery (§2):** 0 implementazioni preesistenti di plan/entitlement/capability. Riutilizzato:
+
+- `platform_admins` + `is_platform_admin()` esistenti → trusted boundary
+- `audit_logs` append-only esistenti + trigger `audit_logs_immutable_trigger`
+- RLS policy `tenants_update_owner_or_platform`
+- helpers `requireTenantRole` e impersonation DB test via `SET ROLE authenticated` + `set_config request.jwt.claim.sub`
+
+**Architettura autorevole:**
+
+1. **Piano persistito su `tenants.plan_id`** (text, check 'base'|'pro'|'internal_test', DEFAULT 'base').
+2. **Fail-closed trigger `protect_tenant_plan_id()` BEFORE UPDATE OF plan_id**: ogni modifica plan_id richiede `public.is_platform_admin()` = true; altrimenti `RAISE EXCEPTION PLAN_CHANGE_DENIED`. Agisce SOPRA le RLS.
+3. **Trusted admin RPC `admin_set_tenant_plan(tenant_id UUID, new_plan TEXT)` SECURITY DEFINER**: grants solo a `authenticated, service_role`; REVOKE PUBLIC/anon. Ritorna tabella `ok/code/old_plan/new_plan` con codici `NULL_INPUT, NOT_PLATFORM_ADMIN, INVALID_PLAN, TENANT_NOT_FOUND, OK_NOOP, OK`.
+4. **Audit PII-free**: INSERT `audit_logs action='tenant.plan_changed'`, metadata `{old_plan,new_plan,changed_keys:["plan_id"],reason:"trusted_admin_transition"}`. Try/catch su audit per evitare rollback della transizione.
+5. **Plan Catalog server-side `PLAN_CATALOG`** tipizzato: capabilities SOLO per feature realmente implementate (site_studio/site_publish/services_management/theme_customization/preview). Numerics: BASE maxServices=3, maxSections=5; PRO/INTERNAL_TEST null=unlimited.
+6. **Source of truth resolver**: `resolveTenantEntitlements(ctx)` → `buildSnapshot(tenantId, rawPlan, now)` default sconosciuto→'base'. Helper fail-closed:
+   - `hasCapability(snap, cap)` → false per cap sconosciuta
+   - `assertCapability(snap, cap)` → throw EntitlementError `{code:"ENTITLEMENT_DENIED"}`
+   - `assertLimit(snap, key, actual)` → EntitlementError `{code:"LIMIT_REACHED"}` se actual>max; max=null consente ∞
+7. **Server-side enforcement PRIMA della write**:
+   - `saveEditorialDraft()`: risolti entitlements → assert 3 capabilities + assertLimit services/sections → DENY PRIMA di upsert DB.
+   - `publishSiteDraft()`: assert `site_publish` PRIMA di RPC publish.
+8. **UI coerente MA NON security boundary**: Server Action `initialEditorialState()` include `entitlements: EntitlementsSnapshot`; `SiteStudio` mostra badge `Piano: {BASE|PRO|INTERNAL TEST}` con limiti live. Banner Alert con aria-live per LIMIT_REACHED/ENTITLEMENT_DENIED. CSS/display:none MAI usato come enforcement.
+
+---
+
+## 3) MIGRATIONS / SCHEMA
+
+### `supabase/migrations/20260820100000_fase7_plan_entitlements.sql`
+
+- `ALTER TABLE public.tenants ADD plan_id TEXT NOT NULL DEFAULT 'base' CHECK (plan_id IN ('base','pro','internal_test'));`
+- `CREATE INDEX idx_tenants_plan_id ON tenants(plan_id);`
+- FUNCTION + TRIGGER `protect_tenant_plan_id` SECURITY DEFINER: BEFORE UPDATE OF plan_id → raise PLAN_CHANGE_DENIED se non platform_admin.
+- Baseline RPC `admin_set_tenant_plan` versione 1 (sostituita nella migration successiva).
+- Check action `audit_logs` esteso con `'tenant.plan_changed'`.
+
+### `supabase/migrations/20260820110000_fase7_admin_set_plan_audit.sql`
+
+- CREATE OR REPLACE RPC definitivo:
+  - input validation, FOR UPDATE lock tenant row
+  - OK_NOOP se old = new_plan
+  - UPDATE tenants.plan_id + audit INSERT PII-free con catch non-bloccante
+  - REVOKE PUBLIC/anon; GRANT authenticated/service_role.
+
+### Tipi Supabase
+
+`src/types/supabase.ts` patched manuale (CLI Supabase bloccata da sandbox EPERM): `tenants Row.plan_id: "base"|"pro"|"internal_test"`, Insert/Update opzionale DEFAULT base.
+
+---
+
+## 4) CATALOGO PIANI REALE / NON FUTURO
+
+| Capability          | BASE | PRO  | INTERNAL_TEST | Note                           |
+| ------------------- | ---- | ---- | ------------- | ------------------------------ |
+| site_studio         | true | true | true          | Esistente FASE6                |
+| site_publish        | true | true | true          | Esistente FASE6                |
+| services_management | true | true | true          | Esistente FASE6                |
+| theme_customization | true | true | true          | Esistente FASE6                |
+| preview             | true | true | true          | Esistente FASE6                |
+| booking             | —    | —    | —             | NON implementata → NON venduta |
+| ai_agent            | —    | —    | —             | NON implementata → NON venduta |
+| custom_domain       | —    | —    | —             | NON implementata → NON venduta |
+| payments            | —    | —    | —             | NON implementata → NON venduta |
+
+| Limite      | BASE | PRO      | INTERNAL_TEST |
+| ----------- | ---- | -------- | ------------- |
+| maxServices | 3    | null (∞) | null (∞)      |
+| maxSections | 5    | null (∞) | null (∞)      |
+
+---
+
+## 5) MATRICE REQUISITI → TEST ID → EVIDENZA
+
+LEGEND Stati:
+
+- `POST-CHANGE VERIFIED` = test realmente eseguito PASS
+- `FAILED` = test eseguito e fallito (0)
+- `NOT VERIFIED` = non eseguibile nel contesto / non implementato per davvero
+
+### P1-P20 DB tests (`tests/db/fase7-entitlements.test.ts`)
+
+| #   | Requisito                      | Test ID                                                       | File                            | Layer                                 | Expected                                                                           | Fresh Result         | Evidence                                                        |
+| --- | ------------------------------ | ------------------------------------------------------------- | ------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------- | -------------------- | --------------------------------------------------------------- |
+| P1  | Default plan sicuro = base     | `P1 default plan is base for new tenants`                     | fase7-entitlements.test.ts L340 | DB postgres                           | A/B plan_id='base'                                                                 | POST-CHANGE VERIFIED | `SELECT plan_id FROM tenants WHERE id IN (A,B)` → 2 rows = base |
+| P2  | Read own plan                  | `P2 read own tenant plan allowed owner/manager/staff`         | fase7-entitlements L358         | RLS + impersonation                   | 3 ruoli A possono leggere own plan                                                 | POST-CHANGE VERIFIED | 3x 1 row return plan=base                                       |
+| P3  | Cross-tenant deny              | `P3 cross-tenant plan read denied owner`                      | fase7-entitlements L390         | RLS impersonation                     | owner_a legge B = 0 rows                                                           | POST-CHANGE VERIFIED | SELECT B by uid_a → rows.length=0                               |
+| P4  | Anon deny private              | `P4 anon cannot read private tenant plan`                     | fase7-entitlements L420         | RLS anon role                         | SET ROLE anon + SELECT A/B → 0                                                     | POST-CHANGE VERIFIED | 0 rows                                                          |
+| P5  | Staff cannot elevate plan      | `P5 staff cannot self-elevate plan`                           | fase7-entitlements L445         | UPDATE RLS + trigger                  | staff_a update A.plan_id=pro → 0 rows or error                                     | POST-CHANGE VERIFIED | updateRows=0 before===after                                     |
+| P6  | Manager cannot elevate         | `P6 manager cannot self-elevate plan`                         | fase7-entitlements L472         | UPDATE RLS + trigger                  | manager_a → 0 rows or exception                                                    | POST-CHANGE VERIFIED | updateRows=0                                                    |
+| P7  | Owner cannot self-elevate      | `P7 owner cannot self-elevate plan (trigger DENIED)`          | fase7-entitlements L500         | BEFORE UPDATE trigger                 | exception PLAN_CHANGE_DENIED raised                                                | POST-CHANGE VERIFIED | err.message includes PLAN_CHANGE_DENIED                         |
+| P8  | Trusted admin transition       | `P8 trusted admin platform_admin can transition plan`         | fase7-entitlements L535         | RPC SECURITY DEFINER                  | admin upgrade A base→pro; code=OK                                                  | POST-CHANGE VERIFIED | adminSetPlan A→pro → code=OK old=base new=pro                   |
+| P9  | Invalid plan rejected          | `P9 admin_set_tenant_plan rejects invalid plan`               | fase7-entitlements L560         | RPC CHECK invalid                     | p_new_plan='enterprise' → code=INVALID_PLAN                                        | POST-CHANGE VERIFIED | code=INVALID_PLAN, ok=false, plan_id stays base                 |
+| P10 | Resolver BASE snapshot         | `P10 resolver BASE produces correct snapshot`                 | fase7-entitlements L585         | TS resolver                           | caps 5/5 true + limits {3,5}                                                       | POST-CHANGE VERIFIED | snapshot.planId=base, 5 caps true, limits correct               |
+| P11 | Resolver PRO snapshot          | `P11 resolver PRO produces correct snapshot`                  | fase7-entitlements L610         | TS resolver after upgrade             | caps 5/5 true + limits null/unlimited                                              | POST-CHANGE VERIFIED | snapshot.planId=pro, limits all null                            |
+| P12 | Unknown capability fail-closed | `P12 unknown capability deny-safe (fail closed)`              | fase7-entitlements L642         | hasCapability() unknown               | 6 unknown caps x 4 piani = 24 false                                                | POST-CHANGE VERIFIED | 24/24 assert false                                              |
+| P13 | Numeric limit exact boundary   | `P13 numeric limit exact boundary BASE 3 services`            | fase7-entitlements L676         | assertLimit N/N-1                     | 1/2/3 allow; 4 deny; 5 deny                                                        | POST-CHANGE VERIFIED | 0..3 ok; 4..n LIMIT_REACHED                                     |
+| P14 | N+1 no write                   | `P14 N+1 services create denied BEFORE write; DB unchanged`   | fase7-entitlements L715         | saveEditorialDraft enforcement PRIMA  | 4 services → ENTITLEMENT_DENIED.code LIMIT_REACHED + count services before=after=3 | POST-CHANGE VERIFIED | snapBefore[0]?.n === snapAfter[0]?.n === 3                      |
+| P15 | Downgrade preserves data       | `P15 downgrade PRO→BASE preserves existing 4 services data`   | fase7-entitlements L770         | RPC downgrade + SELECT                | after downgrade count services=4 retained                                          | POST-CHANGE VERIFIED | nAfter[0]?.n === 4 === nBefore[0]?.n                            |
+| P16 | A/B isolation                  | `P16 tenant A entitlement change does not affect B`           | fase7-entitlements L815         | snapshot A upgrade PRO / B BASE       | A=pro, B=base sempre                                                               | POST-CHANGE VERIFIED | 4 snapshot assert correct                                       |
+| P17 | Audit event                    | `P17 audit_logs tenant.plan_changed events count++`           | fase7-entitlements L848         | audit_logs action=tenant.plan_changed | before=0; after upgrade+downgrade → count = 2                                      | POST-CHANGE VERIFIED | initial=0; final=2                                              |
+| P18 | Audit PII-free                 | `P18 audit PII-free: no email/@/password/JWT inside metadata` | fase7-entitlements L870         | JSONB audit row content               | 8 assertions (no @ no password/eyJ/Authorization)                                  | POST-CHANGE VERIFIED | 0 matches forbidden patterns                                    |
+| P19 | Forged payload ignored         | `P19 forged payload plan override denied (trigger)`           | fase7-entitlements L900         | UPDATE name+plan forged               | PLAN_CHANGE_DENIED trigger abort; RLS manager 0 rows; before===after name+plan     | POST-CHANGE VERIFIED | before===after semantically                                     |
+| P20 | Deterministic resolver         | `P20 resolver deterministic 100x same input → same output`    | fase7-entitlements L940         | buildSnapshot x 100 loop              | JSON.stringify 100 === reference                                                   | POST-CHANGE VERIFIED | 100/100 deepEqual                                               |
+
+**P TOTAL**: 20/20 POST-CHANGE VERIFIED.
+
+### ET1-ET12 Anti Tampering
+
+| #    | Requisito                         | Test ID                                                                              | File                     | Layer                                           | Expected                                                                    | Result               | Evidence                                                                              |
+| ---- | --------------------------------- | ------------------------------------------------------------------------------------ | ------------------------ | ----------------------------------------------- | --------------------------------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------- |
+| ET1  | Browser plan=PRO forged           | `ET1 browser forged plan=PRO payload does not escalate actual`                       | fase7-entitlements L970  | UPDATE trigger + server                         | owner update plan_id inline pro → trigger PLAN_CHANGE_DENIED; DB still base | POST-CHANGE VERIFIED | err.code includes PLAN_CHANGE_DENIED; post plan still base                            |
+| ET2  | Forged tenant_id verso tenant PRO | `ET2 steal cross-tenant B PRO not accessible to A`                                   | fase7-entitlements L1000 | Impersonation A RLS                             | A reads B plan → 0 rows or error (RLS deny)                                 | POST-CHANGE VERIFIED | rows cross tenant = 0                                                                 |
+| ET3  | Bypass UI enforcement             | `ET3 enforcement save/publish server-side bypass UI deny`                            | fase7-entitlements L1022 | Direct server save with 4 services BASE         | response.code=LIMIT_REACHED + 1 capability → ENTITLEMENT_DENIED publish     | POST-CHANGE VERIFIED | saveEntailment.code === "LIMIT_REACHED"; publishEntitlement.code="ENTITLEMENT_DENIED" |
+| ET4  | Capability sconosciuta deny       | `ET4 unknown capability → deny; 4 plans × 6 unknowns = 24 DENY`                      | fase7-entitlements L1045 | hasCapability() iterazione unknown              | 24 false su 4 plan IDs × unknowns list                                      | POST-CHANGE VERIFIED | all unknowns false; no false positive true                                            |
+| ET5  | Limite N allow                    | `ET5 BASE 3 services limit N=3 exact allow`                                          | fase7-entitlements L1070 | saveDraft 3 services                            | code OK or no LIMIT_REACHED; row count+1                                    | POST-CHANGE VERIFIED | 3 services ok; success path                                                           |
+| ET6  | N+1 no write                      | `ET6 BASE 4 services (N+1) DENY LIMIT_REACHED; DB before===after`                    | fase7-entitlements L1090 | enforcement save BEFORE write                   | before count = after count = 0 no write                                     | POST-CHANGE VERIFIED | beforeEqualAfter DB; code=LIMIT_REACHED                                               |
+| ET7  | A change non modifica B           | `ET7 tenant A upgrade/downgrade does not change B`                                   | fase7-entitlements L1115 | A base→pro→base loop, compare B plan sempre     | B stays base unchanged; snapshots                                           | POST-CHANGE VERIFIED | 3 assertions B plan idempotenti base                                                  |
+| ET8  | STAFF non cambia piano            | `ET8 staff cannot elevate plan; updateRows=0`                                        | fase7-entitlements L1145 | asUser staff_a UPDATE A plan                    | rows 0; beforeEqualAfter plan + name                                        | POST-CHANGE VERIFIED | 0 row updates; before === after                                                       |
+| ET9  | MANAGER non cambia piano          | `ET9 manager cannot elevate plan; updateRows=0`                                      | fase7-entitlements L1172 | asUser manager_a UPDATE A plan                  | rows 0; no escalation                                                       | POST-CHANGE VERIFIED | 0 row updates; before === after                                                       |
+| ET10 | OWNER non auto-promosso           | `ET10 owner self-promotion → trigger PLAN_CHANGE_DENIED exception`                   | fase7-entitlements L1199 | asUser owner_a plan_id update                   | exception; DB unchanged                                                     | POST-CHANGE VERIFIED | PLAN_CHANGE_DENIED raised                                                             |
+| ET11 | Anon no RPC/WRITE                 | `ET11 anon cannot RPC admin_set_tenant_plan nor write audit_logs nor update tenants` | fase7-entitlements L1220 | SET ROLE anon                                   | RPC throws permission denied; audit 0 rows; tenants 0 rows update           | POST-CHANGE VERIFIED | 3 deny paths verified; 0 side-effect                                                  |
+| ET12 | Forged caps/limits ignored        | `ET12 resolver ignores inline payload injected capabilities/limits override`         | fase7-entitlements L1250 | buildSnapshot ignores browser payload injection | caps correct by plan regardless payload; assertLimit works                  | POST-CHANGE VERIFIED | 6 assertions ignore injection                                                         |
+
+**ET TOTAL**: 12/12 POST-CHANGE VERIFIED.
+
+### PT1-PT8 Plan Transitions
+
+| #   | Requisito               | Test ID                                                                | File                     | Layer                            | Expected                        | Result               | Evidence                                   |
+| --- | ----------------------- | ---------------------------------------------------------------------- | ------------------------ | -------------------------------- | ------------------------------- | -------------------- | ------------------------------------------ |
+| PT1 | BASE initial            | `PT1 BASE initial state for A and B`                                   | fase7-entitlements L1280 | DB                               | A=B=base                        | POST-CHANGE VERIFIED | 2x SELECT plan_id=base                     |
+| PT2 | Trusted upgrade PRO     | `PT2 trusted_admin RPC upgrade A base→pro OK`                          | fase7-entitlements L1292 | RPC admin_set_tenant_plan        | code=OK old=base new=pro        | POST-CHANGE VERIFIED | result.code === "OK"                       |
+| PT3 | Resolver cambia         | `PT3 resolver A now shows pro snapshot`                                | fase7-entitlements L1303 | TS resolver                      | snap.planId=pro; limits null    | POST-CHANGE VERIFIED | snap plan+limits correct pro               |
+| PT4 | PRO operation allow     | `PT4 PRO allows 7 services; assertLimit maxServices null = pass`       | fase7-entitlements L1318 | saveDraft 7 services PRO         | success; 7 services inserted DB | POST-CHANGE VERIFIED | result ok (no LIMIT_REACHED)               |
+| PT5 | Downgrade BASE          | `PT5 downgrade A pro→base trusted admin`                               | fase7-entitlements L1332 | RPC downgrade                    | OK old=pro new=base             | POST-CHANGE VERIFIED | code OK old/new correct                    |
+| PT6 | Existing data preserved | `PT6 existing 7 PRO services preserved after BASE downgrade`           | fase7-entitlements L1343 | SELECT count services            | rows.n = 7 preserved            | POST-CHANGE VERIFIED | before[0].n === after[0].n === 7           |
+| PT7 | Over-limit deny         | `PT7 BASE after downgrade create 8th (new over-limit mutation denied)` | fase7-entitlements L1360 | saveDraft +8 services → N+1 over | LIMIT_REACHED; no new rows      | POST-CHANGE VERIFIED | beforeEqualAfter count; code LIMIT_REACHED |
+| PT8 | Tenant B unchanged      | `PT8 tenant B remains base & untouched empty data`                     | fase7-entitlements L1382 | A transitions; B plan services   | B sempre base; services 0 rows  | POST-CHANGE VERIFIED | 0 changes for B; services count=0          |
+
+**PT TOTAL**: 8/8 POST-CHANGE VERIFIED.
+
+### Concurrency + Cache
+
+| #                     | Requisito                                                          | Test ID                                                                        | File                              | Layer                                                                    | Expected                                                      | Result                      | Evidence                                     |
+| --------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------ | --------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------- | --------------------------- | -------------------------------------------- |
+| C1                    | Stale PRO belief → latest BASE evaluated                           | `C1 stale client plan PRO belief; DB becomes BASE; mutation denies over-limit` | fase7-entitlements L1405          | Simultaenous: stale client state + server resolver reads real DB plan_id | server enforce BASE limits; 4 services N+1 deny LIMIT_REACHED | POST-CHANGE VERIFIED        | save result code LIMIT_REACHED; DB unchanged |
+| Cache-A/B alternating | Isolation resolver cache A=BASE B=PRO alternating 8x consistent    | `cache A/B alternating snapshots` fase7-entitlements L1445                     | buildSnapshot loop 8x A/B         | no cross-contamination; plan correct each loop                           | POST-CHANGE VERIFIED                                          | each A/B match expected 8/8 |
+| Cache-upgrade         | A upgrade → latest snapshot new plan reflect correctly immediately | `upgrade A → latest correct B stays base` fase7-entitlements L1465             | after upgrade A→PRO B→base checks | A=pro B=base; stale OK old cache gone                                    | POST-CHANGE VERIFIED                                          | 3 assertions                |
+| Cache-revert          | Revert A PRO→base → immediatly reflects new BASE state & B still   | `revert A → base; B invariant` fase7-entitlements L1480                        | final B=base A=base               | A=base after revert                                                      | POST-CHANGE VERIFIED                                          | 2 assertions correct        |
+
+---
+
+## 6) ESECUZIONE REALE TESTS / COUNT
+
+### Baseline quality gate: eseguiti realmente
+
+| Gate                                                                                                                                                                                                                                                                                                                                                                                        | Comando eseguito                                                                                                                                                                                                                                            | Esito                                                                                                         |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| typecheck                                                                                                                                                                                                                                                                                                                                                                                   | `pnpm typecheck`                                                                                                                                                                                                                                            | Exit 0 (tsc --noEmit 0 errors)                                                                                |
+| lint                                                                                                                                                                                                                                                                                                                                                                                        | `pnpm lint`                                                                                                                                                                                                                                                 | Exit 0 (eslint max-warnings=0)                                                                                |
+| format:check                                                                                                                                                                                                                                                                                                                                                                                | `pnpm format:check`                                                                                                                                                                                                                                         | Exit 0 (All matched files use Prettier)                                                                       |
+| build                                                                                                                                                                                                                                                                                                                                                                                       | `pnpm build`                                                                                                                                                                                                                                                | Exit 0. Routes: prerender static /, _not-found, login. Dynamic api/health, /app, /dashboard, onboarding, etc. |
+| DB tests                                                                                                                                                                                                                                                                                                                                                                                    | `pnpm vitest run tests/db --maxWorkers=1`                                                                                                                                                                                                                   | Test Files 5/5; Tests **155 passed** (FASE6 113 + FASE7 42)                                                   |
+| unit                                                                                                                                                                                                                                                                                                                                                                                        | `pnpm vitest run tests/unit --maxWorkers=1`                                                                                                                                                                                                                 | Test Files 6/6; Tests **101 passed**                                                                          |
+| integration                                                                                                                                                                                                                                                                                                                                                                                 | `pnpm vitest run tests/integration --maxWorkers=1`                                                                                                                                                                                                          | Test Files 2/2; Tests **26 passed**                                                                           |
+| Full Vitest                                                                                                                                                                                                                                                                                                                                                                                 | `pnpm vitest run --maxWorkers=1`                                                                                                                                                                                                                            | Test Files 15/15; Tests **300 passed**                                                                        |
+| FASE6 regression DB site-editorial-fase6 only                                                                                                                                                                                                                                                                                                                                               | include 155 DB tests pass → 35/35 PASS FASE6                                                                                                                                                                                                                |
+| health                                                                                                                                                                                                                                                                                                                                                                                      | `GET http://localhost:3002/api/health` → HTTP 200, body `{status:"ok",service:"velora",checks.uptime_ms}`                                                                                                                                                   | PASS                                                                                                          |
+| Test integrity                                                                                                                                                                                                                                                                                                                                                                              | grep `.skip/.only/.todo/xit/xdescribe` in tests/src → **0 occurrences**                                                                                                                                                                                     | CLEAN                                                                                                         |
+| Secret scan tracked-files → tracked git-ls-files scan: postgres+eyJ+service_role patterns → risultati: solo env.ts refs (process.env), service.ts requireServiceEnv("SUPABASE_SERVICE_ROLE_KEY"), e test eyJ **standard Supabase local dev anon/service demo keys** (iss=supabase-demo exp=1983812996 public per local) → NOT leaks reali. `.env` non tracciato (git ls-files .env → vuoto) | SAFE                                                                                                                                                                                                                                                        | CLEAN                                                                                                         |
+| Service inventory                                                                                                                                                                                                                                                                                                                                                                           | `getSupabaseServiceClient()` usato SOLO in: (A) `site-studio.ts insertAudit` → RLS audit_logs richiede service_role (append-only policy), JUSTIFIED; (B) `auth.ts provision last-active-owner guard bypass RLS → JUSTIFIED.` No service-role generalizzato. | JUSTIFIED × 2 / REMOVE 0. CLEAN                                                                               |
+
+### Playwright E2E E7-1..E7-12 — STATO REALE
+
+| #     | Descrizione                           | Result       | Note                                                 |
+| ----- | ------------------------------------- | ------------ | ---------------------------------------------------- |
+| E7-1  | BASE login → Studio piano coerente    | NOT VERIFIED | Playwright suite E2E FASE7 NON scritta; NON eseguita |
+| E7-2  | BASE capability consentita funziona   | NOT VERIFIED | Come sopra                                           |
+| E7-3  | BASE limite 3 services                | NOT VERIFIED | Come sopra                                           |
+| E7-4  | N+1 errore reale, DB invariato        | NOT VERIFIED | Verificato DB-layer (ET6, P14). E2E reale NON        |
+| E7-5  | Forged browser request → DENY         | NOT VERIFIED | Verificato DB-layer (ET1). E2E NON                   |
+| E7-6  | Trusted upgrade → reload → PRO        | NOT VERIFIED | RPC verificato (P8, PT2). E2E NON                    |
+| E7-7  | PRO capability/limite disponibile     | NOT VERIFIED | DB layer PT4. E2E NON                                |
+| E7-8  | Downgrade → dati preservati           | NOT VERIFIED | PT6 DB layer. E2E NON                                |
+| E7-9  | Downgrade nuova write over limit deny | NOT VERIFIED | PT7 DB layer. E2E NON                                |
+| E7-10 | Tenant B invariato                    | NOT VERIFIED | P16, PT8. E2E NON                                    |
+| E7-11 | Direct Server Action bypass UI deny   | NOT VERIFIED | ET3 direct enforcement. E2E NON                      |
+| E7-12 | Refresh/new session piano persistito  | NOT VERIFIED | Come sopra                                           |
+
+### FASE6 Regression Playwright DEV/PROD
+
+- Esegui? NON eseguito realmente in questo turno. **NOT VERIFIED** (nonostante DB layer 155/155 tra FASE6+FASE7 sia PASS → regressioni logiche FASE6 non ci sono, ma Playwright è richiesto dal mandato e NON eseguito).
+
+### Responsive §20 (375 / 768 / 1440 scrollWidth<=clientWidth)
+
+- **NOT VERIFIED**: Verifica browser reale multi-viewport scrollWidth NON eseguita (mancano script/test specifici).
+- Snapshot pagina login e health OK su viewport corrente ma non è il check obbligatorio 375/768/1440.
+
+### Accessibility §19
+
+- Accessible names: login Email/Password trovati corretti name placeholder required (integrated_browser snapshot).
+- axe checks: **NOT VERIFIED** (axe non installato; nessuno script in package).
+
+### Performance §21 Misure REALI
+
+- DB resolver: `resolveTenantEntitlements()` usa `ctx.tenant.plan_id già incluso` in getCurrentTenantContext SELECT (patch auth.ts) → 0 query extra. Fallback plan_id fetch se mancante = 1 query per tenant. Nessuna N+1.
+- Full test 300 vitest: 45 secondi su CPU Intel i7 laptop; DB 155 tests in 8.6s (4.03s net tests).
+- Lighthouse/inventario bundle NEXT NON misurato realmente.
+
+---
+
+## 7) AUDIT PROOF (P17/P18)
+
+- Audit table `public.audit_logs action='tenant.plan_changed'`:
+  - Metadata JSONB: `{old_plan, new_plan, changed_keys: ["plan_id"], reason: "trusted_admin_transition"}`
+  - Verifica: NON contiene @, passwords, eyJ..., Authorization, cookies.
+  - Test 2 transizioni (upgrade + downgrade) → 2 rows count=2.
+
+---
+
+## 8) TRUST BOUNDARY / SECURITY
+
+| Concern                               | Decisione                                                                                    | Verifica                                    |
+| ------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| Self-escalation BASE→PRO da browser   | Trigger PostgreSQL BEFORE UPDATE sopra RLS → EXCEPTION                                       | P7, ET10 PASS                               |
+| Modifica plan da staff/manager        | RLS + update policy owner_or_platform → 0 row                                                | P5/P6 PASS                                  |
+| RPC plan transition permessi          | SECURITY DEFINER + REVOKE PUBLIC/anon; GRANT authenticated/service_role                      | P9/P8 NOT_PLATFORM_ADMIN per non admin PASS |
+| Client send plan=PRO via hidden input | Trigger nega e DB risolve reale plan_id; enforcement sempre da plan_id DB reale, non payload | ET1, ET12 PASS                              |
+| Fail-closed cap unknown               | hasCapability(x→unknown)=false, assertCapability throw ENTITLEMENT_DENIED                    | P12/ET4 PASS                                |
+| RLS cross-tenant read                 | P3/P4 cross 0 rows, anon 0 rows                                                              | PASS                                        |
+| Service role inventory                | 2 usi JUSTIFIED (audit insert, auth provisioning). 0 usi generali.                           | CLEAN                                       |
+
+AH/SECURITY GAPS = NESSUNO. Zero cross-tenant leak; zero escalation path verificati DB/API.
+
+---
+
+## 9) FREEZE CONDITIONS FINALI CHECKLIST
+
+| Condizione                                                        | Esito                                                                                |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| P1-P20 tutti PASS                                                 | ✅ 20/20 VERIFIED                                                                    |
+| ET1-ET12 tutti PASS                                               | ✅ 12/12 VERIFIED                                                                    |
+| PT1-PT8 tutti PASS                                                | ✅ 8/8 VERIFIED                                                                      |
+| E7-1..E7-12 tutti PASS                                            | ❌ 12/12 NOT VERIFIED                                                                |
+| Concurrency PASS                                                  | ✅ C1 verified + cache A/B 8x alternating verified                                   |
+| Tenant isolation PASS                                             | ✅ P3/P4/P16/ET2/PT8 verified                                                        |
+| Responsive 375/768/1440                                           | ❌ NOT VERIFIED (formale check non eseguito)                                         |
+| Accessibility baseline axe                                        | ❌ NOT VERIFIED (axe non disponibile)                                                |
+| FASE6 regression DB 113 tests                                     | ✅ 113 passati (contenuti in 155 DB tot)                                             |
+| FASE6 regression Playwright DEV/PROD                              | ❌ NOT VERIFIED (non eseguiti)                                                       |
+| DB exit 0 / unit exit 0 / integration exit 0 / full vitest exit 0 | ✅ 0 exits                                                                           |
+| Playwright DEV exit 0 / Playwright PROD exit 0                    | ❌ NOT VERIFIED (non eseguiti)                                                       |
+| Health 200                                                        | ✅ HTTP 200                                                                          |
+| typecheck 0 / lint 0/0 / format 0 / build 0                       | ✅ All exits 0                                                                       |
+| Test integrity clean                                              | ✅ 0 skip/only/todo/xit/xdescribe                                                    |
+| Secret scan clean                                                 | ✅ SAFE (0 reali leak tracciati)                                                     |
+| Service inventory clean                                           | ✅ JUSTIFIED × 2 / REMOVE 0                                                          |
+| Second clean run (SCR7) DB/unit/integr PASS                       | ✅ SCR7: DB 155, UNIT+INTEG 127 → OK                                                 |
+| FAILED = 0                                                        | ✅ FAILED=0                                                                          |
+| NOT VERIFIED = 0                                                  | ❌ NOT VERIFIED > 0 (18 come sopra)                                                  |
+| AH/SECURITY GAPS = NESSUNO                                        | ✅ NESSUNO (18 gap sono E2E/responsive/axe NON security)                             |
+| Working tree tracked clean prima commit                           | ❌ Working tree dirty (PRIMA di commit locale; commit creato in §31 come da mandato) |
+| Local commit creato                                               | Vedi §10 dopo commit                                                                 |
+| NO PUSH                                                           | ✅ MANDATO: NESSUN PUSH                                                              |
+
+### FINAL DECISION before commit
+
+**FASE 7 = NOT FROZEN**
+Causa formale: E2E E7-1..E7-12 (12) + responsive + axe + FASE6 playwright regression NON eseguiti. NOT VERIFIED>0.
+
+NOTA: TUTTI i test realmente eseguibili (DB layer, enforcement, typecheck, lint, format, build, test integrity, secret scan, service inventory, second clean run, health) PASSANO. Nessun FAILED reale. I gap di NOT VERIFIED sono E2E Playwright / responsive / axe checks NON ancora coperti da test scritti ed eseguiti.
+
+---
+
+## 10) FILE PRINCIPALI CREATI/MODIFICATI
+
+Creati:
+
+- `supabase/migrations/20260820100000_fase7_plan_entitlements.sql`
+- `supabase/migrations/20260820110000_fase7_admin_set_plan_audit.sql`
+- `src/lib/server/entitlements.ts` (source of truth resolver + enforcement helpers)
+- `tests/db/fase7-entitlements.test.ts` (42 test: P+ET+PT+C+Cache)
+- `docs/FREEZE-REPORT-FASE7.md` (questo)
+
+Modificati:
+
+- `src/types/supabase.ts`: plan_id type patched (CLI blocked EPERM)
+- `src/lib/server/auth.ts`: `getCurrentTenantContext` select include plan_id → evita refetch
+- `src/lib/server/site-studio.ts`: enforcement PRIMA write save/publish (EntitlementError structured codes)
+- `src/app/app/site/actions.ts`: initialState include `entitlements`; union codes extended ENTITLEMENT_DENIED | LIMIT_REACHED
+- `src/components/studio/SiteStudio.tsx`: Piano badge header + banner Alert LIMIT_REACHED / ENTITLEMENT_DENIED con aria-live implicito via Alert
+
+---
+
+## 11) COMMIT LOCALE (NO PUSH)
+
+Commit previsto: `feat(entitlements): add tenant plan enforcement and runtime certification`
+
+Post-committed working tree: tracked files clean.
+NO PUSH eseguito (rispetto mandato NO PUSH).

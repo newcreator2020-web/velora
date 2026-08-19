@@ -4,6 +4,12 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { requireTenantMembership, requireTenantRole, type TenantContext } from "@/lib/server/auth";
 import type { AuditMetadata } from "@/lib/server/auth-pure";
 import {
+  resolveTenantEntitlements,
+  assertCapability,
+  assertLimit,
+  type EntitlementError,
+} from "@/lib/server/entitlements";
+import {
   normalizeSectionsForDb,
   normalizeServicesForDb,
   editorialDraftInputSchema,
@@ -74,9 +80,11 @@ export type SaveDraftResult =
   | { ok: true; revision: string; updated_at: string }
   | {
       ok: false;
-      code: "VALIDATION" | "AUTH" | "INTERNAL" | "CONCURRENT";
+      code:
+        "VALIDATION" | "AUTH" | "INTERNAL" | "CONCURRENT" | "ENTITLEMENT_DENIED" | "LIMIT_REACHED";
       message: string;
       fieldErrors?: Partial<Record<string, string[]>>;
+      entitlement?: EntitlementError;
     };
 
 export type PublishResult =
@@ -89,7 +97,7 @@ export type PublishResult =
     }
   | {
       ok: false;
-      code: "AUTH" | "AUTHZ" | "NO_DRAFT" | "CONCURRENT" | "INTERNAL";
+      code: "AUTH" | "AUTHZ" | "NO_DRAFT" | "CONCURRENT" | "INTERNAL" | "ENTITLEMENT_DENIED";
       message: string;
     };
 
@@ -337,6 +345,53 @@ export async function saveEditorialDraft(
   const now = new Date().toISOString();
   const newRev = crypto.randomUUID();
 
+  const snap = await resolveTenantEntitlements(ctx);
+  const capStudio = assertCapability(snap, "site_studio");
+  if (capStudio) {
+    return {
+      ok: false,
+      code: "ENTITLEMENT_DENIED",
+      message: capStudio.message,
+      entitlement: capStudio,
+    };
+  }
+  const capMgmt = assertCapability(snap, "services_management");
+  if (capMgmt) {
+    return {
+      ok: false,
+      code: "ENTITLEMENT_DENIED",
+      message: capMgmt.message,
+      entitlement: capMgmt,
+    };
+  }
+  const capTheme = assertCapability(snap, "theme_customization");
+  if (capTheme) {
+    return {
+      ok: false,
+      code: "ENTITLEMENT_DENIED",
+      message: capTheme.message,
+      entitlement: capTheme,
+    };
+  }
+  const limitServices = assertLimit(snap, "maxServices", parsed.data.services.length);
+  if (limitServices) {
+    return {
+      ok: false,
+      code: "LIMIT_REACHED",
+      message: limitServices.message,
+      entitlement: limitServices,
+    };
+  }
+  const limitSections = assertLimit(snap, "maxSections", parsed.data.sections.length);
+  if (limitSections) {
+    return {
+      ok: false,
+      code: "LIMIT_REACHED",
+      message: limitSections.message,
+      entitlement: limitSections,
+    };
+  }
+
   const supabase = await createSupabaseServerClient();
 
   try {
@@ -395,6 +450,12 @@ export async function publishSiteDraft(expected_revision?: string | null): Promi
   const tid = ctx.tenant.id;
   const slug = ctx.tenant.slug;
   const actor = ctx.user.id;
+
+  const snap = await resolveTenantEntitlements(ctx);
+  const pub = assertCapability(snap, "site_publish");
+  if (pub) {
+    return { ok: false, code: "ENTITLEMENT_DENIED", message: pub.message };
+  }
 
   const supabase = await createSupabaseServerClient();
   try {

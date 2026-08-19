@@ -93,7 +93,7 @@ export async function getCurrentTenantContext(): Promise<TenantContext> {
   if (mRow) {
     const t = await supabase
       .from("tenants")
-      .select("id,name,slug,status,created_at,updated_at")
+      .select("id,name,slug,status,plan_id,created_at,updated_at")
       .eq("id", mRow.tenant_id)
       .limit(1)
       .maybeSingle();
