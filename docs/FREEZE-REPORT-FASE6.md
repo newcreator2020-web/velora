@@ -4,7 +4,7 @@
 
 Data freeze (report prodotto): 2026-08-19
 Commit baseline FASE 5 frozen: `7d1e8a7`
-Commit FASE 6D (runtime certification dopo Docker recovery): `be6eb3e` (locale, NON pushato, branch feature/auth-onboarding)
+Commit FASE 6D (runtime certification dopo Docker recovery): `6c11a76` (locale, NON pushato, branch feature/auth-onboarding). Hash congelato: contiene codice + test transient + report v1. Il commit docs successivo a questo aggiorna solo i riferimenti all'hash freeze.
 
 Classificatione gate obbligatori:
 
@@ -372,7 +372,7 @@ Classificatione gate obbligatori:
 | Working tree: solo file attesi ✅                                                                           |  VERIFIED  | `git status --porcelain=v1`: M .prettierignore, M src/types/supabase.ts, M docs/FREEZE-REPORT-FASE6.md, M .gitignore, ?? tests/db/site-editorial-fase6.test.ts. Solo attesi. |
 | Nessun secret staged / unstaged (.env, service_role, sk_test, sb-) ✅                                       |  VERIFIED  | Secret scan §30: 0 leak. .env e .env.* sono in .gitignore. service_role key SOLO lato server next/server e variabili env.       |
 | `supabase/migrations/` append-only da baseline `7d1e8a7` ✅                                                 |  VERIFIED  | `git diff 7d1e8a7 -- supabase/migrations` → SOLO file 024 FASE6 (nuovo). 001-023 IMMUTATE. Regola freeze rispettata.                |
-| Commit message: `feat(studio): FASE 6D runtime certification 237+52 PASS dopo Docker recovery` ✅           |  VERIFIED  | Hash locale `be6eb3e` (branch feature/auth-onboarding) — NO PUSH remoto eseguito. Messaggio conforme AAA. Chain: be6eb3e→49b820c→b59a70a→7d1e8a7 baseline FASE5 frozen. |
+| Commit message: `feat(studio): FASE 6D runtime certification 237+52 PASS dopo Docker recovery` ✅           |  VERIFIED  | Hash freeze congelato `6c11a76` (branch feature/auth-onboarding) — NO PUSH remoto eseguito. Messaggio conforme AAA. Chain: 6c11a76→49b820c→b59a70a→7d1e8a7 baseline FASE5 frozen. Commit docs referenza separato successivo. |
 | ASSOLUTAMENTE NO PUSH REMOTO ✅                                                                              |  VERIFIED  | 0 `git push` eseguiti in questa sessione. Solo commit locale quando il report è finalizzato.     |
 
 ## AH. NOT VERIFIED — VOCI RIMASTE (SOLO DAVVERO NON ESEGUITE)
