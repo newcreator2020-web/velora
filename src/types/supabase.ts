@@ -420,6 +420,121 @@ export type Database = {
         };
         Relationships: [];
       };
+      billing_customers: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          provider: string;
+          provider_customer_id: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          provider?: string;
+          provider_customer_id: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          tenant_id?: string;
+          provider?: string;
+          provider_customer_id?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "billing_customers_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      billing_subscriptions: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          provider: string;
+          provider_customer_id: string;
+          provider_subscription_id: string;
+          provider_price_id: string;
+          status: string;
+          current_period_start: string | null;
+          current_period_end: string | null;
+          cancel_at_period_end: boolean;
+          ended_at: string | null;
+          provider_created_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          provider?: string;
+          provider_customer_id: string;
+          provider_subscription_id: string;
+          provider_price_id: string;
+          status: string;
+          current_period_start?: string | null;
+          current_period_end?: string | null;
+          cancel_at_period_end?: boolean;
+          ended_at?: string | null;
+          provider_created_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          tenant_id?: string;
+          provider?: string;
+          provider_customer_id?: string;
+          provider_subscription_id?: string;
+          provider_price_id?: string;
+          status?: string;
+          current_period_start?: string | null;
+          current_period_end?: string | null;
+          cancel_at_period_end?: boolean;
+          ended_at?: string | null;
+          provider_created_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "billing_subscriptions_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      billing_webhook_events: {
+        Row: {
+          provider_event_id: string;
+          provider: string;
+          event_type: string;
+          processed_at: string;
+        };
+        Insert: {
+          provider_event_id: string;
+          provider?: string;
+          event_type?: string;
+          processed_at?: string;
+        };
+        Update: {
+          provider_event_id?: string;
+          provider?: string;
+          event_type?: string;
+          processed_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -449,6 +564,36 @@ export type Database = {
           sections_applied: number;
           services_applied: number;
           theme_applied: boolean;
+        }[];
+      };
+      admin_set_tenant_plan: {
+        Args: {
+          p_tenant_id: string;
+          p_target_plan: string;
+        };
+        Returns: {
+          ok: boolean;
+          code: string;
+          message: string;
+          old_plan: string;
+          new_plan: string;
+          is_platform_admin: boolean;
+          audit_skipped: boolean;
+        }[];
+      };
+      billing_apply_subscription_plan: {
+        Args: {
+          p_tenant_id: string;
+          p_target_plan: string;
+          p_provider_event_id: string;
+          p_provider_subscription_id: string;
+        };
+        Returns: {
+          ok: boolean;
+          code: string;
+          old_plan: string;
+          new_plan: string;
+          idempotent_replay: boolean;
         }[];
       };
     };

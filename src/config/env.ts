@@ -3,6 +3,9 @@ import { z } from "zod";
 const serverEnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
+  STRIPE_SECRET_KEY: z.string().min(1).optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
+  STRIPE_PRO_PRICE_ID: z.string().min(1).optional(),
 });
 
 const publicEnvSchema = z.object({
@@ -10,6 +13,7 @@ const publicEnvSchema = z.object({
   NEXT_PUBLIC_APP_ENV: z.enum(["development", "test", "production"]).default("development"),
   NEXT_PUBLIC_SUPABASE_URL: z.string().url(),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
+  NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: z.string().min(1).optional(),
 });
 
 type ServerEnv = z.infer<typeof serverEnvSchema>;
@@ -19,6 +23,9 @@ function parseServerEnv(): ServerEnv {
   const raw = {
     NODE_ENV: process.env["NODE_ENV"],
     SUPABASE_SERVICE_ROLE_KEY: process.env["SUPABASE_SERVICE_ROLE_KEY"],
+    STRIPE_SECRET_KEY: process.env["STRIPE_SECRET_KEY"],
+    STRIPE_WEBHOOK_SECRET: process.env["STRIPE_WEBHOOK_SECRET"],
+    STRIPE_PRO_PRICE_ID: process.env["STRIPE_PRO_PRICE_ID"],
   };
   const result = serverEnvSchema.safeParse(raw);
   if (!result.success) {
@@ -37,6 +44,7 @@ function parsePublicEnv(): PublicEnv {
     NEXT_PUBLIC_APP_ENV: process.env["NEXT_PUBLIC_APP_ENV"],
     NEXT_PUBLIC_SUPABASE_URL: process.env["NEXT_PUBLIC_SUPABASE_URL"],
     NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env["NEXT_PUBLIC_SUPABASE_ANON_KEY"],
+    NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: process.env["NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY"],
   };
   const result = publicEnvSchema.safeParse(raw);
   if (!result.success) {

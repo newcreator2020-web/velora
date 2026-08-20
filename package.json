@@ -19,7 +19,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:db": "vitest run tests/db",
+    "test:db": "vitest run tests/db --maxWorkers=1 --file-parallelism=false",
     "test:e2e": "cross-env PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers playwright test",
     "test:e2e:prod": "cross-env PLAYWRIGHT_USE_PRODUCTION=1 PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers playwright test",
     "playwright:install": "cross-env PLAYWRIGHT_BROWSERS_PATH=.playwright-browsers playwright install chromium",
@@ -31,7 +31,7 @@
     "db:push": "supabase db push",
     "db:reset": "supabase db reset",
     "db:seed": "supabase db seed",
-    "db:test": "vitest run tests/db",
+    "db:test": "vitest run tests/db --maxWorkers=1 --file-parallelism=false",
     "check:db": "pnpm db:test",
     "verify": "pnpm check && pnpm db:test && pnpm build",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:run src/"
@@ -41,7 +41,8 @@
     "@supabase/supabase-js": "^2.112.3",
     "next": "^16.3.1",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "stripe": "^22.5.0"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
