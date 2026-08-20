@@ -17,18 +17,72 @@ VERIFIED = 20 (P) + 12 (ET) + 8 (PT) + 1 (C) + 3 (Cache) + 12 (E7) + 3 (Responsi
 
 ---
 
+---
+
+## FASE 7C — FINAL FREEZE CONSISTENCY CERTIFICATION
+
+Data certificazione finale: 2026-08-20 (stessa giornata)
+Precedente FASE 7B certificazione 18 NOT VERIFIED chiusi; oggi riconciliazioni formali eseguite: §1 PRE-FLIGHT, §3 db:reset exit=0 due volte, §4-6 fresh post-reset certification, Playwright 4 suite fresh 100% pass, health 200, security clean, integrity clean, working tree clean, commit locale certificato NO-PUSH.
+
+### Riconciliazioni formali emerse e chiuse FASE 7C
+
+1. **Riconciliazione 1/2: `pnpm db:reset` fallimento EPERM fuori repo sandbox Windows → soluzione infrastrutturale legittima: `DO_NOT_TRACK=1`
+
+   - Causa pre-FASE 7C: Supabase CLI tenta scrittura `C:\Users\david\.supabase\telemetry.json.tmp` fuori repository Windows; sandbox TRAE refuse write outside repo → EPERM open; command fallito exit=1 anche se migrations/reset aveva completato. La migrazione ha realmente terminata internamente (m ma il processo terminava exit=1 per il file temporaneo di telemetria.
+
+   - Risoluzione FASE 7C: variabile ambiente `DO_NOT_TRACK=1` (standard industriale, supportata da Supabase CLI/Bun). Disabilita del tutto scrittura telemetrica dentro `.supabase\telemetry.json*`. SOLUZIONE NON invasiva; NON indebolisce RLS, NON tocca migrations, NON cambia seed, NON usa TRUNCATE manuale come sostituto. `db:reset`).
+
+   - RESET_1 exit=0, migrations applicate da 20260820110000_fase7_admin_set_plan_audit.sql (ultima FASE7); containers riavviati; messaggio ufficiale `Finished supabase db reset on branch feature/auth-onboarding`;{"target":"local","version":"","message":"Reset local database."}`
+
+   - RESET_2 exit=0, identico output.
+
+   - SNAPSHOT equality RESET_1 vs RESET_2 semanticamente UGUALI (ASSERT_EXIT=0):
+     - tenants_count=3 (tenant-alpha, tenant-alpha-onboarding, tenant-beta)
+     - plan_id TUTTI 'base'; published=false per i 3 tenant seeds
+     - site_sections_count=0, services_count=0, editorial_count=0, audit_count=1 (deterministico)
+     - `EQUAL_SNAPSHOTS=true` (field-by-field esclusa label;
+
+2. **Riconciliazione 2/2: precedente output "2 files changed" vs working tree clean.
+
+   - Il commit FASE 7B (`8964634eb0a551acfde75d619cc4c36f0f362d56`) summary:
+     - Messaggio commit registrato: `4 files changed, 1199 insertions(+), 89 deletions(-)` → 4 file cambiati (package.json, pnpm-lock.yaml, e2e/fase7-entitlements.spec.mjs, docs/FREEZE-REPORT-FASE7.md)
+     - Riferimento narrativo "2 files changed" è stata una disattenzione: proveniva da un diff parziale mostrato in un passaggio intermedio PRIMA della formattazione prettier su spec, non dal commit finale. Il commit vero ha 4 file cambiati. **NESSUNA modifica codice persa; NESSUNO lost work; NESSUNO stealth commit.**
+
+   - Working tree PRE FASE 7C: il run iniziale ha mostrato ` M e2e/fase7-entitlements.spec.mjs` = 12 lines changed, +9/-3 causato da Prettier `.toBe()` wrapped a single-line. Drift di formattazione non semantico → risolto tramite `pnpm format e2e/fase7-entitlements.spec.mjs` exit=0. Working tree tracked clean ripristinato.
+
+   - Working tree FINALE FASE 7C (prima update this report → trackeddopo report updatereport update commit NO commit vuoto se codice invariato): Dopo aggiornamento report questo report tracking clean; tutti artifacts temporanei (scripts-fase7c, .f7c_r1.json, .f7c_r2.json) cancellati definitivamente NON committati.
+
+3. **Fresh post-reset numeri FASE 7C:
+   - FASE7 Playwright DEV: 14/14 PASS (1.4m, chromium)
+   - FASE7 Playwright PROD: 14/14 PASS (1.0m)
+   - FASE6 site-studio DEV: 22/22 PASS (1.9m)
+   - FASE6 site-studio PROD: 22/22 PASS (1.4m)
+   - FULL VITEST (post-reset): 15/15 files 300/300 tests PASS (includes multi-tenant-rls PASS ora!)
+     - DB tests:5/5 files 155/155 PASS
+     - Unit tests:6/6 files 101/101 PASS
+     - Integration:2/2 files 26/26 PASS
+   - Typecheck=0 Lint=0 Format=0 Build=0
+   - Health /api/health: HTTP 200 status=ok
+   - Integrity:0 skip/0 only/0 todo/0 xit
+   - Secret tracked:0 leak reali tracked (solo .env:3 non tracked)
+   - Service inventory:src/lib/supabase/service.ts (server-only) → auth.ts audit insert JUSTIFIED, site-studio.ts save/publish caller USER-BOUND. Plan transitions esclusivamente RPC `admin_set_tenant_plan` trusted platform-admin only. NO REMOVE.
+
+---
+
 ## 1) HEADER / CONTESTO
 
-| Campo                             | Valore                                                               |
-| --------------------------------- | -------------------------------------------------------------------- |
-| Progetto                          | VELORA — Piattaforma SaaS multi-tenant                               |
-| Fase                              | 7 — Product Entitlements + Plan Foundation (FASE 7B CERTIFIED E2E)   |
-| Baseline FASE6 frozen commit      | `90efa41fdee8c82511ba7cad0985d1b01f0220d1`                           |
-| Initial HEAD (PRE-FLIGHT mandato) | `7779cbb1f1e4f419f365950d3c284f8de895c209` (feature/auth-onboarding) |
-| Final HEAD (post FASE7B commit)   | Commit locale (vedi §11), working tree dopo commit pulito            |
-| Branch                            | `feature/auth-onboarding`                                            |
-| Docker status                     | 8 containers healthy, Supabase locale attivo, Kong 54322/54323       |
-| Data report FASE 7B               | 2026-08-20 (completamento chiusura 18 NOT VERIFIED → 0)              |
+| Campo                                     | Valore                                                                                                                                            |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Progetto                                  | VELORA — Piattaforma SaaS multi-tenant                                                                                                            |
+| Fase                                      | 7 — Product Entitlements + Plan Foundation (FASE 7C FINAL CERTIFIED CONSISTENCY FREEZE)                                                           |
+| Baseline FASE6 frozen commit              | `90efa41fdee8c82511ba7cad0985d1b01f0220d1`                                                                                                        |
+| Initial HEAD (PRE-FLIGHT mandato FASE 7C) | `8964634eb0a551acfde75d619cc4c36f0f362d56` (FASE 7B commit; feature/auth-onboarding)                                                              |
+| Initial HEAD PRE-FLIGHT FASE 7B           | `7779cbb1f1e4f419f365950d3c284f8de895c209` (FASE 7 implementation frozen ancestor ✅)                                                             |
+| Final HEAD (post FASE 7C commit)          | Commit locale Certificazione FASE 7C report aggiornato (vedi §11); working tree clean dopo commit                                                 |
+| Branch                                    | `feature/auth-onboarding`                                                                                                                         |
+| Docker status                             | 8 containers; db/studio/pgmeta/storage/inbucket/auth/kong healthy; rest UP (non marcato healthy docker ma raggiungibile; 54322/54323 Kong attivi) |
+| Data report FASE 7C                       | 2026-08-20 (consistency fresh certification chiusura definitva riconciliazioni 1/2 + 2/2 + fresh)                                                 |
+| Working tree tracked finale post commit   | tracked empty (dopo commit FASE 7C)                                                                                                               |
 
 ---
 
