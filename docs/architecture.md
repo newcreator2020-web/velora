@@ -271,6 +271,103 @@ ISR dynamic: `/s/[slug]` revalidate=300s (1).
 
 ---
 
+## 13. FASE 8 — Secure Subscription Billing Lifecycle & Trust Boundary (closure NOT FROZEN)
+
+Aggiunto in FASE 8: motore abbonamenti multi-tenant sicuro con trust boundary hardening, webhook Stripe idempotente, anti OOO, plan RPCs EXECUTE-only postgres/service_role, checkout/portal authority server-side, audit PII-free immutable. Chiusura FASE 8 = **NOT FROZEN** per 2 NOT VERIFIED permanenti (provider-network Stripe TEST API missing creds runtime `.env`). Report autorevole → `docs/FREEZE-REPORT-FASE8.md`.
+
+### 13.1 Stack aggiuntivo FASE 8
+
+| Componente               | Scelta                                                                                                                                               |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Billing Provider         | Stripe SDK ufficiale `stripe` Node (webhook signature.verifyHeader = NO mock)                                                                        |
+| Tables                   | `billing_customers`, `billing_subscriptions`, `billing_webhook_events` (public schema)                                                               |
+| Trusted RPCs             | `admin_set_tenant_plan` 4-param (FASE8d) + `billing_apply_subscription_plan` 5-param (FASE8e) — SECURITY DEFINER, EXECUTE-only postgres/service_role |
+| Anti OOO / Idempotency   | FASE8f stale event gating + `billing_webhook_events UNIQUE(provider,event_id)`                                                                       |
+| Plan change guard        | Trigger BEFORE UPDATE `protect_tenant_plan_id` (FASE8c) — fail-closed PLAN_CHANGE_DENIED                                                             |
+| FORCE RLS + service role | FASE8i `tenants_service_role_all` POLICY (necessaria per FORCE RLS + service_role provisioning)                                                      |
+| Checkout / Portal        | Server Actions `src/app/billing/actions.ts` — USER-BOUND auth.getCurrentUser; price_id server-only env                                               |
+| Audit immutable          | FASE8h `audit_logs_immutable_trigger` + actions: checkout_created, subscription_activated/updated/cancel_scheduled/ended, tenant.plan_changed        |
+| E2E Coverage             | Playwright FASE8 16/16 DEV + PROD (E8-1..E8-12 + responsive 3vp + axe billing)                                                                       |
+
+### 13.2 Source of Truth FASE 8
+
+```
+tenants.plan_id                                 ← SOURCE OF TRUTH (allowed mutations: admin_set_tenant_plan OR billing_apply_subscription_plan trusted ONLY)
+  ├─ billing_customers UNIQUE(tenant_id,provider) + UNIQUE(provider, provider_customer_id)
+  ├─ billing_subscriptions UNIQUE(provider, provider_subscription_id)
+  │   ├─ status: active/trialing/canceled/past_due/unpaid
+  │   ├─ current_period_start/end
+  │   └─ cancel_at_period_end boolean
+  ├─ billing_webhook_events append-only + idempotency key (provider,event_id) UNIQUE
+  ├─ PLAN_CATALOG src/config/plans.ts:
+  │   BASE: maxServices=3, maxSections=5
+  │   PRO : unlimited
+  │   INTERNAL_TEST: unlimited (NON acquistabile da checkout path)
+  ├─ webhook route src/app/api/billing/stripe/webhook/route.ts
+  │   rawBody buffer → stripe SDK signature.verify → set LOCAL app.billing_trusted=true → RPC billing_apply_subscription_plan
+  │   invalid signature = HTTP 401 + 0 write
+  │   duplicate events = OK_NOOP
+  │   stale/older events = OUT_OF_ORDER_STALE_EVENT (no state overwrite)
+  └─ checkout / portal actions:
+      tenant_id payload = IGNORED
+      price_id payload  = IGNORED → SOLO env STRIPE_PRO_PRICE_ID
+      plan / amount / currency / internal_test = IGNORED server-side override
+      Owner = allow; Staff = deny; Manager = deny (policy)
+      Portal customer = BOUND al tenant auth corrente
+```
+
+### 13.3 Migration files FASE 8 (9, append-only, FASE1-7 immutate)
+
+- `20260820120000_fase8a_billing_customers_subscriptions.sql`
+- `20260820121000_fase8b_billing_webhook_events_idempotency.sql`
+- `20260820122000_fase8c_trigger_plan_trust_boundary.sql`
+- `20260820123000_fase8d_rpc_admin_set_plan.sql`
+- `20260820124000_fase8e_rpc_billing_lifecycle.sql`
+- `20260820125000_fase8f_oos_stale_event_gating.sql`
+- `20260820126000_fase8g_billing_checkout_actions_rls.sql`
+- `20260820127000_fase8h_audit_immutable_plan_change.sql`
+- `20260820140000_fase8i_service_role_force_rls_tenants.sql` (force RLS tenants → policy service_role esplicita; DO block idempotent)
+
+### 13.4 Fresh certification counts FASE 8
+
+| Livello                                    | Suite                               | PASS              |
+| ------------------------------------------ | ----------------------------------- | ----------------- |
+| DB Trust Boundary                          | BT1-10 (fase8b)                     | 10/10             |
+| DB Billing Matrix                          | B1-21 (fase8c)                      | 21/21             |
+| DB Totale 7 files                          | 186/186 tests                       | 186/186           |
+| Integration Webhook + Checkout             | 29/29                               | 29/29             |
+| Playwright FASE8 DEV (chromium workers=1)  | E8-1..E8-16                         | 16/16             |
+| Playwright FASE8 PROD build reale 35s      | E8-1..E8-16                         | 16/16             |
+| FASE6 Regression Playwright DEV/PROD       | site-studio 22t                     | 21/22 + 22/22     |
+| FASE7 Regression Playwright DEV/PROD       | entitlements 14t                    | 14/14 + 14/14     |
+| Unit tests                                 | 101/101                             | 101/101           |
+| Quality gates                              | typecheck/lint/format/build         | 0/0/0/0           |
+| Health                                     | `/api/health`                       | HTTP200 status=ok |
+| Security                                   | secret scan tracked-only            | 0 LEAKS           |
+| Integrity                                  | skip/only/xit/todo/bypass           | 0/0/0/0/0         |
+| Service inventory 14 files                 | JUSTIFIED                           | 14/14             |
+| §18 Second clean run doppio reset equality | reset1===reset2 + BT/B reproducible | True + 31/31      |
+
+### 13.5 Gates NOT VERIFIED permanenti FASE 8 (vincolo NOT FROZEN)
+
+1. **NV-1 §7-B: Stripe Checkout Session provider-network TEST API**. Credenziali runtime `.env` MISSING:
+   - `STRIPE_SECRET_KEY` (sk_test_...)
+   - `STRIPE_PRO_PRICE_ID` (price_...)
+   - `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` (pk_test_...)
+2. **NV-2 §7-C: Stripe Billing Portal provider-network TEST API**. Stesse credenziali MISSING.
+
+Condizioni per FASE8 = FROZEN run futura: popolare `.env` con valori TEST reali, rieseguire §7 Checkout+Portal rete API, conferma 0/2 NOT VERIFIED, quindi commit locale.
+
+### 13.6 Performance FASE 8
+
+- Next build production duration ~35s.
+- Routes billing SSR dynamic: `/billing` (2 round-trip DB). `/api/billing/stripe/webhook` λ dynamic (~4 writes + 2 reads per lifecycle activate; no N+1).
+- Client bundle `/billing`: ~140KB JS first-load; stripe = server-side only, NO client bundle.
+- No N+1 queries; entitlement resolver = 0 DB calls (in-memory snapshot from plan row).
+- Query count page `/app/site-studio` unchanged from FASE6/7.
+
+---
+
 ## 13. FASE 6 — Site Management Studio + Draft/Preview/Publish (Freeze 2026-08-19)
 
 Aggiunto in FASE 6: dashboard di configurazione sito **tenant-scoped**,

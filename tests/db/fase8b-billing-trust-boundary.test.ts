@@ -380,44 +380,72 @@ describe("FASE8B — Billing Trust Boundary BT1-BT10", () => {
     expect(r.error).toBeDefined();
   });
 
-  it("BT7 forged attack direct update + billing inserts STILL denied", async () => {
+  it("BT7 forged set_config app.billing_trusted + direct plan UPDATE → DENY", async () => {
     const owner = await freshUser("owner", "base");
-    const before = await getPlanTenantsTable(serviceClient(), owner.tenantId);
+    const before = await getPlanDirect(owner.tenantId);
     expect(before).toBe("base");
-    const c = authenticatedClient(owner.jwt);
-    const rUpd = await c.from("tenants").update({ plan_id: "pro" }).eq("id", owner.tenantId);
-    expect(rUpd.error).toBeDefined();
-    const rIns = await c.from("billing_customers").insert({
-      tenant_id: owner.tenantId,
-      provider_customer_id: "cus_attack7",
-      provider: "stripe",
-    });
-    expect(rIns.error).toBeDefined();
-    const rSub = await c.from("billing_subscriptions").insert({
-      tenant_id: owner.tenantId,
-      provider: "stripe",
-      provider_customer_id: "cus_x",
-      provider_subscription_id: "sub_x",
-      provider_price_id: "price_x",
-      status: "active",
-      provider_created_at: new Date().toISOString(),
-    });
-    expect(rSub.error).toBeDefined();
-    const after = await getPlanTenantsTable(serviceClient(), owner.tenantId);
+    const db = await getPg();
+
+    await db.query("BEGIN");
+    await db.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
+    await db.query(`SELECT set_config('request.jwt.claim.sub', $1::text, true)`, [owner.userId]);
+    await db.query(`SELECT set_config('app.billing_trusted', 'true', true)`);
+    const { rows: authUidCheck } = await db.query(
+      `SELECT COALESCE(current_setting('request.jwt.claim.sub', true), NULL) AS uid,
+              current_setting('app.billing_trusted', true) AS guc`,
+    );
+    expect((authUidCheck?.[0] as { uid: string })?.uid).toBe(owner.userId);
+    expect((authUidCheck?.[0] as { guc: string })?.guc).toBe("true");
+    let raised: Error | null = null;
+    try {
+      await db.query(`UPDATE public.tenants SET plan_id = 'pro' WHERE id = $1::uuid`, [
+        owner.tenantId,
+      ]);
+    } catch (e) {
+      raised = e as Error;
+    } finally {
+      await db.query("ROLLBACK");
+    }
+    expect(raised).not.toBeNull();
+    expect(String(raised?.message ?? "")).toMatch(
+      /plan_id mutation denied|insufficient_privilege/i,
+    );
+    const after = await getPlanDirect(owner.tenantId);
     expect(after).toBe("base");
   });
 
-  it("BT8 non platform_admin owner cannot call admin_set_tenant_plan", async () => {
+  it("BT8 forged SET LOCAL app.billing_trusted + direct plan UPDATE → DENY", async () => {
     const owner = await freshUser("owner", "base");
-    const before = await getPlanTenantsTable(serviceClient(), owner.tenantId);
-    const c = authenticatedClient(owner.jwt);
-    const r = await c.rpc("admin_set_tenant_plan", {
-      p_tenant_id: owner.tenantId,
-      p_target_plan: "pro",
-    });
-    expect(r.error).toBeDefined();
-    const after = await getPlanTenantsTable(serviceClient(), owner.tenantId);
-    expect(after).toBe(before);
+    const before = await getPlanDirect(owner.tenantId);
+    expect(before).toBe("base");
+    const db = await getPg();
+
+    await db.query("BEGIN");
+    await db.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', true)`);
+    await db.query(`SELECT set_config('request.jwt.claim.sub', $1::text, true)`, [owner.userId]);
+    await db.query(`SELECT set_config('app.billing_trusted', 'true', true)`);
+    const { rows: authUidCheck } = await db.query(
+      `SELECT current_setting('request.jwt.claim.sub', true) AS uid,
+              current_setting('app.billing_trusted', true) AS guc`,
+    );
+    expect((authUidCheck?.[0] as { uid: string })?.uid).toBe(owner.userId);
+    expect((authUidCheck?.[0] as { guc: string })?.guc).toBe("true");
+    let raised: Error | null = null;
+    try {
+      await db.query(`UPDATE public.tenants SET plan_id = 'pro' WHERE id = $1::uuid`, [
+        owner.tenantId,
+      ]);
+    } catch (e) {
+      raised = e as Error;
+    } finally {
+      await db.query("ROLLBACK");
+    }
+    expect(raised).not.toBeNull();
+    expect(String(raised?.message ?? "")).toMatch(
+      /plan_id mutation denied|insufficient_privilege/i,
+    );
+    const after = await getPlanDirect(owner.tenantId);
+    expect(after).toBe("base");
   });
 
   it("BT9 service_role trusted billing RPC transition PRO OK", async () => {

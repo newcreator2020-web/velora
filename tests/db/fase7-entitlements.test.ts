@@ -425,14 +425,19 @@ async function adminSetPlan(
   tenantId: string,
   newPlan: string,
 ): Promise<{ ok: boolean; code: string; old_plan: string | null; new_plan: string | null }> {
-  // Simulate call to admin_set_tenant_plan RPC by platform admin context.
-  // The RPC itself is SECURITY DEFINER and validates is_platform_admin with app.current_user_id == platform_admins.active.
+  // FASE8h hardening: grant EXECUTE only postgres + service_role.
+  // Ensure elevated role for this RPC call within the current transaction.
+  await c.query(`SET LOCAL ROLE postgres`);
+  // FASE8d/FASE8h signature: admin_set_tenant_plan(p_target_tenant UUID, p_new_plan TEXT, p_admin_id UUID DEFAULT NULL, p_reason TEXT DEFAULT NULL)
   const r = await c.query<{
     ok: boolean;
     code: string;
     old_plan: string | null;
     new_plan: string | null;
-  }>(`SELECT * FROM public.admin_set_tenant_plan($1::uuid, $2::text)`, [tenantId, newPlan]);
+  }>(
+    `SELECT * FROM public.admin_set_tenant_plan($1::uuid, $2::text, NULL::uuid, 'f7-db-harness'::text)`,
+    [tenantId, newPlan],
+  );
   return (
     r.rows[0] ?? {
       ok: false,
@@ -492,10 +497,13 @@ describe("FASE7 · Entitlements DB Suite (P1-P20)", () => {
     if (!pg) throw new Error("no pg");
     await pg.query(`BEGIN`);
     await pg.query(`SET LOCAL ROLE anon`);
-    // admin_set_plan RPC → permission denied
+    // admin_set_plan RPC → permission denied (FASE8h EXECUTE grant postgres/service_role only)
     let rpcDenied = false;
     try {
-      await pg.query(`SELECT * FROM public.admin_set_tenant_plan($1::uuid,'pro')`, [TENANT_A]);
+      await pg.query(
+        `SELECT * FROM public.admin_set_tenant_plan($1::uuid, 'pro'::text, NULL::uuid, 'p4-harness'::text)`,
+        [TENANT_A],
+      );
     } catch (_) {
       rpcDenied = true;
     }
@@ -967,10 +975,13 @@ describe("FASE7 · Anti-Tampering (ET1-ET12)", () => {
   it("ET11 anon non legge dati privati entitlement + non esegue azioni riservate", async () => {
     await pg!.query(`BEGIN`);
     await pg!.query(`SET LOCAL ROLE anon`);
-    // Anon cannot EXECUTE admin_set_tenant_plan (granted only to authenticated/service_role).
+    // Anon cannot EXECUTE admin_set_tenant_plan (FASE8h grant EXECUTE only postgres/service_role).
     let rpcDeny = false;
     try {
-      await pg!.query(`SELECT * FROM public.admin_set_tenant_plan($1::uuid,'pro')`, [TENANT_A]);
+      await pg!.query(
+        `SELECT * FROM public.admin_set_tenant_plan($1::uuid, 'pro'::text, NULL::uuid, 'et11-harness'::text)`,
+        [TENANT_A],
+      );
     } catch (_) {
       rpcDeny = true;
     }

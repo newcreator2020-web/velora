@@ -408,6 +408,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       p_target_plan: targetPlan,
       p_provider_event_id: providerEventId,
       p_provider_subscription_id: row.provider_subscription_id,
+      p_provider_event_created_at: providerCreated,
     });
     if (r.error) {
       return NextResponse.json(

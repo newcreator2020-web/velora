@@ -364,14 +364,16 @@ async function saveDraft(page, tenantId = TENANT_A) {
   return r;
 }
 
-// RPC trusted transition platform_admin (run as superuser/connected pg directly via SET ROLE auth id then RPC)
+// RPC trusted transition platform_admin.
+// FASE8h hardening: admin_set_tenant_plan has EXECUTE grant ONLY to postgres/service_role (NOT authenticated).
+// La RPC internamente usa: v_actor := COALESCE(p_admin_id, auth.uid()) — quindi passiamo p_admin_id esplicitamente
+// come 3° parametro invece di impersonare authenticated (no permission denied).
 async function rpcAdminSetPlan(pg, platformAdminUid, tenantId, plan) {
   await pg.query(`BEGIN`);
-  await pg.query(`SET LOCAL ROLE authenticated`);
-  await pg.query(`SELECT set_config('request.jwt.claim.sub', $1::text, true)`, [platformAdminUid]);
+  await pg.query(`SET LOCAL ROLE postgres`); // FASE8h EXECUTE only postgres/service_role
   const r = await pg.query(
-    `SELECT ok, code, old_plan, new_plan FROM public.admin_set_tenant_plan($1::uuid, $2::text)`,
-    [tenantId, plan],
+    `SELECT ok, code, old_plan, new_plan FROM public.admin_set_tenant_plan($1::uuid, $2::text, $3::uuid, $4::text)`,
+    [tenantId, plan, platformAdminUid, "e2e-fase7-regression-test"],
   );
   await pg.query(`COMMIT`);
   return r.rows[0];

@@ -29,7 +29,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: useProduction ? `pnpm.cmd start -p ${PORT}` : `pnpm.cmd dev -p ${PORT}`,
+    command: useProduction
+      ? `node .\\node_modules\\next\\dist\\bin\\next start -p ${PORT}`
+      : `node .\\node_modules\\next\\dist\\bin\\next dev -p ${PORT}`,
     url: `${baseURL}/`,
     reuseExistingServer: !isCI,
     timeout: 180_000,

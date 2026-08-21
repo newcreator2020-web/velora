@@ -37,6 +37,7 @@ export async function initialBillingResult(): Promise<BillingActionResult> {
 }
 
 export async function createCheckoutAction(): Promise<BillingActionResult> {
+  let url: string | undefined;
   try {
     const ctx = await getCurrentTenantContext();
     if (!ctx.membership || ctx.membership.role !== "owner") {
@@ -48,34 +49,39 @@ export async function createCheckoutAction(): Promise<BillingActionResult> {
       return { status: "error", message: "Piano non acquistabile" };
     }
 
-    const { url } = await createCheckoutSession({
+    const session = await createCheckoutSession({
       tenantId: ctx.tenant.id,
       tenantDisplayName: ctx.business_profile?.display_name ?? ctx.tenant.name ?? "Tenant",
       ownerEmail: ctx.user.auth_email,
       successPath: "/app/billing?checkout=success",
       cancelPath: "/app/billing?checkout=cancel",
     });
-    redirect(url);
+    url = session.url;
   } catch (e) {
     const message = e instanceof Error ? e.message : "Impossibile creare la sessione di pagamento";
     return { status: "error", message, error: message };
   }
+  if (url) redirect(url);
+  return { status: "error", message: "URL checkout non disponibile" };
 }
 
 export async function createPortalAction(): Promise<BillingActionResult> {
+  let url: string | undefined;
   try {
     const ctx = await getCurrentTenantContext();
     if (!ctx.membership || ctx.membership.role !== "owner") {
       return { status: "error", message: "Solo il proprietario può gestire l'abbonamento" };
     }
     if (!ctx.tenant) return { status: "error", message: "Tenant non trovato" };
-    const { url } = await createBillingPortalSession({
+    const session = await createBillingPortalSession({
       tenantId: ctx.tenant.id,
       returnPath: "/app/billing",
     });
-    redirect(url);
+    url = session.url;
   } catch (e) {
     const message = e instanceof Error ? e.message : "Impossibile aprire il portale abbonamento";
     return { status: "error", message, error: message };
   }
+  if (url) redirect(url);
+  return { status: "error", message: "URL portale non disponibile" };
 }
