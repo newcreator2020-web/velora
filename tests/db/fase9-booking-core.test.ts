@@ -142,9 +142,11 @@ describe("FASE9 BOOKING CORE — DB / RLS / TAMP / CONCURRENCY / FAILURE", () =>
       `DELETE FROM public.tenants WHERE id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
     );
     await pgc.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
+    await pgc.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
     await pgc.query(
       `DELETE FROM auth.users u WHERE u.email LIKE '%@test.local' AND u.email LIKE 'f9-%';`,
     );
+    await pgc.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
 
     // create users
     const roleOrder: (keyof typeof EMAILS)[] = [
@@ -155,14 +157,99 @@ describe("FASE9 BOOKING CORE — DB / RLS / TAMP / CONCURRENCY / FAILURE", () =>
       "no_member",
     ];
     for (const k of roleOrder) {
-      const r = await c.auth.admin.createUser({
-        email: EMAILS[k],
-        password: PASSWORD,
-        email_confirm: true,
-        user_metadata: { name: k },
-      });
-      if (r.error) throw new Error(`createUser ${k}: ${r.error.message}`);
+      const email = EMAILS[k];
+      // Cleanup identities + users FIRST via SQL (replica mode to bypass audit immutable FK SET NULL)
+      await pgc.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
+      await pgc.query(
+        `DELETE FROM auth.refresh_tokens rt USING auth.users u WHERE rt.user_id::uuid = u.id AND lower(u.email::text) = lower($1::text)`,
+        [email],
+      );
+      await pgc.query(
+        `DELETE FROM auth.identities i USING auth.users u WHERE i.user_id = u.id AND lower(u.email::text) = lower($1::text)`,
+        [email],
+      );
+      await pgc.query(
+        `DELETE FROM auth.mfa_factors mf USING auth.users u WHERE mf.user_id = u.id AND lower(u.email::text) = lower($1::text)`,
+        [email],
+      );
+      await pgc.query(
+        `DELETE FROM public.tenant_memberships tm USING auth.users u WHERE tm.user_id = u.id AND lower(u.email::text) = lower($1::text)`,
+        [email],
+      );
+      await pgc.query(
+        `DELETE FROM public.profiles p USING auth.users u WHERE p.id = u.id AND lower(u.email::text) = lower($1::text)`,
+        [email],
+      );
+      await pgc.query(`DELETE FROM auth.users WHERE lower(email::text) = lower($1::text)`, [email]);
+      await pgc.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
+
+      // Now create via official Supabase admin HTTP API so GoTrue state/cache is consistent
+      let r: Awaited<ReturnType<(typeof c.auth.admin)["createUser"]>> | null = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          r = await c.auth.admin.createUser({
+            email,
+            password: PASSWORD,
+            email_confirm: true,
+            user_metadata: { name: k },
+          });
+          if (!r.error) break;
+        } catch {
+          // swallow transient
+        }
+        if (attempt < 2) await new Promise((res) => setTimeout(res, 1200));
+      }
+      if (!r || r.error) throw new Error(`createUser ${k}: ${r?.error?.message ?? "no response"}`);
       userIds[k] = r.data.user!.id;
+
+      // Ensure profiles row exists for has_tenant_role to work
+      await pgc.query(
+        `INSERT INTO public.profiles (id, display_name)
+         VALUES ($1::uuid, $2::text)
+         ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name`,
+        [r.data.user!.id, k.replace(/_/g, " ")],
+      );
+    }
+    // Idempotent cleanup for any prior residue (cross-suite contamination)
+    {
+      await pgc.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
+      await pgc.query(
+        `DELETE FROM public.bookings WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
+      );
+      await pgc.query(
+        `DELETE FROM public.customers WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
+      );
+      await pgc.query(
+        `DELETE FROM public.business_availability WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
+      );
+      await pgc.query(
+        `DELETE FROM public.services WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
+      );
+      await pgc.query(
+        `DELETE FROM public.tenant_memberships WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
+      );
+      await pgc.query(
+        `DELETE FROM public.business_profiles WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
+      );
+      await pgc.query(
+        `DELETE FROM public.site_sections WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
+      );
+      await pgc.query(
+        `DELETE FROM public.site_editorial_state WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
+      );
+      await pgc.query(
+        `DELETE FROM public.billing_customers WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
+      );
+      await pgc.query(
+        `DELETE FROM public.billing_webhook_events WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
+      );
+      await pgc.query(
+        `DELETE FROM public.billing_subscriptions WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
+      );
+      await pgc.query(
+        `DELETE FROM public.tenants WHERE id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
+      );
+      await pgc.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
     }
     // tenants + profiles
     const NOW = new Date().toISOString();
@@ -200,11 +287,13 @@ describe("FASE9 BOOKING CORE — DB / RLS / TAMP / CONCURRENCY / FAILURE", () =>
   }, 60_000);
 
   afterAll(async () => {
-    const c = serviceRoleClient();
     const pgc = await pg();
     await pgc.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
     await pgc.query(
       `DELETE FROM public.bookings WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
+    );
+    await pgc.query(
+      `DELETE FROM public.customers WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
     );
     await pgc.query(
       `DELETE FROM public.business_availability WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
@@ -213,27 +302,52 @@ describe("FASE9 BOOKING CORE — DB / RLS / TAMP / CONCURRENCY / FAILURE", () =>
       `DELETE FROM public.services WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
     );
     await pgc.query(
+      `DELETE FROM public.tenant_memberships WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
+    );
+    await pgc.query(
       `DELETE FROM public.business_profiles WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
+    );
+    await pgc.query(
+      `DELETE FROM public.site_sections WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
     );
     await pgc.query(
       `DELETE FROM public.site_editorial_state WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
     );
     await pgc.query(
-      `DELETE FROM public.billing_subscriptions WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
+      `DELETE FROM public.billing_customers WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
     );
     await pgc.query(`DELETE FROM public.billing_webhook_events WHERE true IS NOT NULL;`);
     await pgc.query(
-      `DELETE FROM public.tenant_memberships WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
+      `DELETE FROM public.billing_subscriptions WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
     );
     await pgc.query(
       `DELETE FROM public.tenants WHERE id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
     );
-    await pgc.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
-    for (const k of Object.keys(userIds) as (keyof typeof EMAILS)[]) {
-      if (userIds[k]) {
-        await c.auth.admin.deleteUser(userIds[k]!);
-      }
+    for (const k of Object.keys(EMAILS) as (keyof typeof EMAILS)[]) {
+      const email = EMAILS[k];
+      await pgc.query(
+        `DELETE FROM auth.refresh_tokens rt USING auth.users u WHERE rt.user_id::uuid = u.id AND lower(u.email::text) = lower($1::text)`,
+        [email],
+      );
+      await pgc.query(
+        `DELETE FROM auth.identities i USING auth.users u WHERE i.user_id = u.id AND lower(u.email::text) = lower($1::text)`,
+        [email],
+      );
+      await pgc.query(
+        `DELETE FROM auth.mfa_factors mf USING auth.users u WHERE mf.user_id = u.id AND lower(u.email::text) = lower($1::text)`,
+        [email],
+      );
+      await pgc.query(
+        `DELETE FROM public.tenant_memberships tm USING auth.users u WHERE tm.user_id = u.id AND lower(u.email::text) = lower($1::text)`,
+        [email],
+      );
+      await pgc.query(
+        `DELETE FROM public.profiles p USING auth.users u WHERE p.id = u.id AND lower(u.email::text) = lower($1::text)`,
+        [email],
+      );
+      await pgc.query(`DELETE FROM auth.users WHERE lower(email::text) = lower($1::text)`, [email]);
     }
+    await pgc.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
     await pgClose();
   }, 60_000);
 

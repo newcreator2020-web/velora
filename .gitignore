@@ -56,6 +56,9 @@ coverage/
 /playwright/.cache/
 /.playwright-browsers/
 
+# Local WIP E2E specs (use tests/e2e tracked; ignore loose e2e/ scratch dir).
+/e2e/
+
 # IDE / AI agent tool-local files (NOT project governance).
 # Project technical rules are the single source of truth in TRAE Project Rules
 # and the docs/ folder. Do not commit regenerated scratch files.

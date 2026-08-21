@@ -602,6 +602,81 @@ beforeAll(async () => {
   const tB = FIXTURE.tenants.B;
   const epoch = new Date(0);
 
+  // Idempotent cross-suite cleanup: remove all known test tenants and
+  // ANY published tenants left behind by FASE9/fase10/fase8 when they
+  // exit early before afterAll. Order: FK dependencies first, using replica
+  // role to bypass immutable audit triggers (test-only harness cleanup).
+  await pg.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
+  // Known FASE9/FASE10 tenant UUIDs + OUR own fixture tenant IDs
+  const wipeTenantIds = [
+    "00000000-0000-4999-9001-0000000000a1", // FASE9 tenant_a
+    "00000000-0000-4999-9001-0000000000b1", // FASE9 tenant_b
+    "00000000-0000-4100-9001-0000000000a1", // FASE10 tenant_a
+    "00000000-0000-4100-9001-0000000000b1", // FASE10 tenant_b
+    tA,
+    tB,
+  ];
+  const placeholders = wipeTenantIds.map((_v, i) => `$${i + 1}::uuid`).join(",");
+  await pg.query(`DELETE FROM public.bookings WHERE tenant_id IN (${placeholders})`, wipeTenantIds);
+  await pg.query(
+    `DELETE FROM public.customers WHERE tenant_id IN (${placeholders})`,
+    wipeTenantIds,
+  );
+  await pg.query(
+    `DELETE FROM public.business_availability WHERE tenant_id IN (${placeholders})`,
+    wipeTenantIds,
+  );
+  await pg.query(`DELETE FROM public.services WHERE tenant_id IN (${placeholders})`, wipeTenantIds);
+  await pg.query(
+    `DELETE FROM public.business_profiles WHERE tenant_id IN (${placeholders})`,
+    wipeTenantIds,
+  );
+  await pg.query(
+    `DELETE FROM public.site_editorial_state WHERE tenant_id IN (${placeholders})`,
+    wipeTenantIds,
+  );
+  await pg.query(
+    `DELETE FROM public.billing_subscriptions WHERE tenant_id IN (${placeholders})`,
+    wipeTenantIds,
+  );
+  await pg.query(`DELETE FROM public.billing_webhook_events WHERE true IS NOT NULL`);
+  await pg.query(
+    `DELETE FROM public.tenant_memberships WHERE tenant_id IN (${placeholders})`,
+    wipeTenantIds,
+  );
+  await pg.query(`DELETE FROM public.tenants WHERE id IN (${placeholders})`, wipeTenantIds);
+  // Finally wipe ANY remaining published=true tenants created by suites that
+  // exited without cleanup (catches cross-contamination if new UUIDs are used).
+  await pg.query(`DELETE FROM public.tenants WHERE published = true`);
+  await pg.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
+
+  // (Re-)create the canonical fixture tenants + business_profiles used by
+  // this suite. We do this AFTER the cross-suite wipe so we don't rely on
+  // leftovers from FASE9/FASE10.
+  await pg.query(
+    `INSERT INTO public.tenants (id,slug,name,status,published,published_at,created_at,updated_at)
+       VALUES
+         ($1::uuid,'tenant-alpha','Tenant Alpha','active',false,$2::timestamptz,$2::timestamptz,$2::timestamptz),
+         ($3::uuid,'tenant-beta' ,'Tenant Beta' ,'active',false,$2::timestamptz,$2::timestamptz,$2::timestamptz)
+     ON CONFLICT (id) DO UPDATE SET
+       slug         = EXCLUDED.slug,
+       name         = EXCLUDED.name,
+       status       = EXCLUDED.status,
+       published    = EXCLUDED.published,
+       updated_at   = EXCLUDED.updated_at`,
+    [tA, epoch, tB],
+  );
+  await pg.query(
+    `INSERT INTO public.business_profiles (tenant_id,display_name,category,city,province,timezone,locale,created_at,updated_at)
+       VALUES
+         ($1::uuid,'Alpha Barbershop','hairdresser','Roma','RM','Europe/Rome','it-IT',$2::timestamptz,$2::timestamptz),
+         ($3::uuid,'Beta Beauty'     ,'beauty'    ,'Milano','MI','Europe/Rome','it-IT',$2::timestamptz,$2::timestamptz)
+     ON CONFLICT (tenant_id) DO UPDATE SET
+       display_name = EXCLUDED.display_name,
+       updated_at   = EXCLUDED.updated_at`,
+    [tA, epoch, tB],
+  );
+
   const membershipDefs: Array<{
     id: string;
     tenant_id: string;
