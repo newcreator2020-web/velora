@@ -254,6 +254,104 @@ export type Database = {
           },
         ];
       };
+      business_availability: {
+        Row: {
+          tenant_id: string;
+          weekday: number;
+          enabled: boolean;
+          start_time: string;
+          end_time: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          tenant_id: string;
+          weekday: number;
+          enabled?: boolean;
+          start_time?: string;
+          end_time?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          tenant_id?: string;
+          weekday?: number;
+          enabled?: boolean;
+          start_time?: string;
+          end_time?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "business_availability_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      bookings: {
+        Row: {
+          id: string;
+          tenant_id: string;
+          service_id: string;
+          starts_at: string;
+          ends_at: string;
+          status: string;
+          customer_name: string;
+          customer_email: string | null;
+          customer_phone: string | null;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          tenant_id: string;
+          service_id: string;
+          starts_at: string;
+          ends_at: string;
+          status?: string;
+          customer_name: string;
+          customer_email?: string | null;
+          customer_phone?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          tenant_id?: string;
+          service_id?: string;
+          starts_at?: string;
+          ends_at?: string;
+          status?: string;
+          customer_name?: string;
+          customer_email?: string | null;
+          customer_phone?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "bookings_service_id_fkey";
+            columns: ["service_id"];
+            isOneToOne: false;
+            referencedRelation: "services";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "bookings_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       site_editorial_state: {
         Row: {
           tenant_id: string;
@@ -594,6 +692,23 @@ export type Database = {
           old_plan: string;
           new_plan: string;
           idempotent_replay: boolean;
+        }[];
+      };
+      public_booking_create_slug: {
+        Args: {
+          p_slug: string;
+          p_service_id: string;
+          p_starts_at: string;
+          p_customer_name: string;
+          p_customer_email?: string;
+          p_customer_phone?: string;
+          p_notes?: string;
+        };
+        Returns: {
+          booking_id: string;
+          booking_status: string;
+          starts_at: string;
+          ends_at: string;
         }[];
       };
     };

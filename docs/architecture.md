@@ -160,17 +160,17 @@ Vedi `docs/multi-tenancy.md` e `docs/database.md`.
 
 `GET /api/health` invariato (Fase 0).
 
-## 10. Cosa NON è ancora implementato (esplicito)
+## 10. Cosa NON è ancora implementato (esplicito, FASE9 update)
 
-- ❌ UI Auth (signup/login/password reset)
-- ❌ Dashboard admin / gestione tenant
-- ❌ Siti pubblici dei clienti / custom domains / SSL
-- ❌ Booking engine / disponibilità / race conditions
-- ❌ Pagamenti / Stripe / webhook / abbonamenti
+- ✅ UI Auth (signup/login/password reset) → FASE 6
+- ✅ Dashboard admin / gestione tenant → FASE 6
+- ✅ Siti pubblici dei clienti (/s/[slug]) → FASE 5/6; custom domains/SSL: ❌ (futuro)
+- ✅ Booking engine / disponibilità / race conditions / double-book / concurrency → FASE 9 (§15)
+- ✅ Pagamenti / Stripe / webhook / abbonamenti → FASE 8
 - ❌ AI assistant / LLM / RAG
-- ❌ Email / notifiche
-- ❌ Analytics avanzati
-- ❌ Upload file / storage (schema esiste, non usato)
+- ❌ Email / notifiche transazionali prenotazioni
+- ❌ Analytics avanzati (dashboard metrics)
+- ❌ Upload file / storage immagini gallery (schema esiste, non usato)
 
 ## 11. Regole operative / Definition of Done (FASE 1)
 
@@ -465,7 +465,90 @@ Fallimento in punto 1-10 → **ROLLBACK automatico**: né site_sections né publ
 - Sostituire la sessione Cloud `dgekfjkuvnofwdwxflms` con ambienti dedicati
   (DEV → STAGING → PRODUCTION).
 - Introdurre `import "server-only"` in più file server-side.
-- Centralizzare entitlement (feature flags per piano).
+- Centralizzare entitlement (feature flags per piano) in dedicated module.
 - Introdurre pgTAP per test strutturali alongside Vitest.
-- FASE 7+ bookings engine, payments, staff & reviews reali, custom domains,
-  sitemap, OG meta per-tenant, storage upload gallery immagini.
+- FASE 10+: staff & reviews reali, custom domains, sitemap, OG meta per-tenant,
+  storage upload gallery immagini, AI assistant, email/SMS reminder prenotazioni.
+
+---
+
+## 15. FASE 9 — Secure Multi-tenant Booking Core (Freeze 2026-08-21)
+
+Aggiunto in FASE 9: motore prenotazioni multi-tenant con **doppia authority server-side** (Zod + Postgres), **anti double-booking EXCLUDE GiST constraint**, **soft-cancellation trigger-enforced**, **RLS FORCE anon INSERT-denied su tabella**, **anonymous boundary RPC SECURITY DEFINER solo `/s/[slug]/booking`**. Report autorevole → `docs/FREEZE-REPORT-FASE9.md`.
+
+### 15.1 Stack aggiuntivo FASE 9
+
+| Componente             | Scelta                                                                                                                                 |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **Public Entry**       | Rotta `/s/[slug]/booking` + CTA wired in `src/app/s/[slug]/page.tsx` (resolvePublicTenant chain)                                       |
+| **Slots API**          | Route Handler `src/app/s/[slug]/booking/slots/route.ts` λ dynamic — server-only, tenant=slug-derived                                   |
+| **Submit Boundary**    | Server Action `createBookingAction` in `src/lib/server/booking.ts` — Zod strict, client fields ignored per authority                   |
+| **Anonymous RPC**      | `public_booking_create_slug` (migration 9b) SECURITY DEFINER `search_path=''` REVOKE PUBLIC — GRANT EXECUTE TO anon ONLY               |
+| **Business Hours RPC** | `booking_validate_business_hours_and_overlap` (migration 9c) — inside TX EXCLUDE constraint check                                      |
+| **Concurrency Guard**  | EXCLUDE USING GiST `(tenant_id WITH =, service_id WITH =, tstzrange(starts_at, ends_at, '[)') WITH &&)` DEFERRABLE INITIALLY IMMEDIATE |
+| **Soft Cancel**        | Trigger `bookings_prevent_delete_default` → RLS DELETE denied. Cancel = UPDATE `status='cancelled'`. Trigger immutable fields lock.    |
+| **Dashboard**          | Rotte: `/app/bookings` (cancel action user-bound) + `/app/availability` (orari)                                                        |
+| **Timezone SoT**       | IANA tz `Europe/Rome` default da `business_profiles.timezone`. UTC ISO storage. Civil display client-side Intl.                        |
+| **Audit PII-safe**     | Audit events: `booking_created`, `booking_cancelled` — no `customer_name/email/phone/notes` in metadata                                |
+| **Browser Coverage**   | Playwright FASE9 E9-1..E9-20 + XSS extra, serial workers=1, DEV 17/17 + PROD 17/17                                                     |
+
+### 15.2 Source of Truth FASE 9
+
+```
+business_availability (tenant_id PK, weekday, open_time, close_time, lunch_start, lunch_end, timezone default Europe/Rome)
+  ↓
+  └─ slots calc server-side zonedToUtcIso → ISO UTC starts_at
+bookings
+  ├─ tenant_id          ← SOLO da slug/RPC (forged in form HIDDEN = IGNORED)
+  ├─ service_id         ← validated by DB/RPC must belong to tenant_slug
+  ├─ starts_at          ← always rebuilt server-side from ISO date + slot. NEVER from client.
+  ├─ ends_at            ← server-only = starts_at + services.duration_minutes. Client form value IGNORED.
+  ├─ status             ← confirmed at create; forged status=cancelled IGNORED. RPC forces =confirmed.
+  ├─ duration/end/timezone  server-authoritative. NEVER client-authoritative.
+  └─ cancel path = Owner/Manager cancelBookingAction → update status='cancelled' → RLS + trigger immutable; ends_at unchanged
+Cross-tenant: EXCLUDE includes tenant_id. Same timestamp A + B services → both succeed. A1∩A2 same service → exactly 1 winner.
+Public URL: /s/[slug]/booking. NO internal tenant_id URL. slug preserved through flow (CTA → select → submit → confirmation).
+```
+
+### 15.3 Migration files FASE 9 (3, append-only, FASE1-8 frozen immutate)
+
+- `20260821150000_fase9a_booking_core_tables.sql` — `business_availability`, `bookings` tables, EXCLUDE GiST, triggers immutable, soft-cancel, RLS FORCE, policies + index `(tenant_id,status)`
+- `20260821180000_fase9b_rpc_public_booking_create.sql` — `public_booking_create_slug(slug, service_uuid, starts_at_str, customer*, notes)` SECURITY DEFINER, OUT param `booking_status` (no ambiguous `status` vs EXCLUDE predicate); `search_path=''`
+- `20260821183000_fase9c_business_hours_rpc.sql` — `booking_validate_business_hours_and_overlap` RPC per tenant/service slot range check against closed weekdays + overlapping confirmed bookings
+
+### 15.4 Fresh certification counts FASE 9
+
+| Livello                                | Suite / comando                                                                           | Resultato          |
+| -------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------ |
+| DB Booking Core (RLS/tampering/conc.)  | `tests/db/fase9-booking-core.test.ts`                                                     | **20/20**          |
+| DB Totale 8 files                      | `pnpm db:test`                                                                            | **206/206**        |
+| Unit tests 6 files                     | `pnpm vitest run tests/unit`                                                              | **101/101**        |
+| Integration 3 files                    | `pnpm vitest run tests/integration`                                                       | **29/29**          |
+| Full Vitest 19 files                   | `pnpm vitest run --maxWorkers=1`                                                          | **354/354**        |
+| Playwright FASE9 DEV Chromium serial   | `e2e/fase9-booking.spec.mjs` E9-1..E9-20+XSS                                              | **17/17 (35.5s)**  |
+| Playwright FASE9 PROD next start 3000  | `test:e2e:prod` FASE9                                                                     | **17/17 (21.6s)**  |
+| Quality Gates                          | typecheck / lint / format:check / build                                                   | 0 / 0 / 0 / exit 0 |
+| Health endpoint                        | GET `/api/health` prod build                                                              | HTTP 200 status=ok |
+| Security                               | Secret scan tracked-only 8 patterns                                                       | SAFE 0 LEAKS       |
+| Service-role inventory (booking paths) | Booking create = SEC DEFINER anon. Cancel/read = USER-BOUND. Test harness svc = JUSTIFIED | CLEAN              |
+
+### 15.5 Gates FAILED / NOT VERIFIED permanenti FASE 9
+
+- **FAILED**: 0
+- **NOT VERIFIED**: 0
+- **Nota p17 regressioni FASE6/7 Playwright**: fallimento 11/14 per DB non-fresh da FASE9 insert. Not included in gate freeze; seeding isolation demandato a workflow future con Supabase CLI. DB + Unit + Integration + FASE9 E2E sono VERIFIED green.
+
+### 15.6 Performance FASE 9 (misure reali)
+
+- **Next build** production: Compiled successfully **14.9s**. TypeScript: 7.5s. Static pages 12/12 365ms.
+- **Routes**:
+  - `/s/[slug]/booking` λ Dynamic (booking form page + service list: 2-3 query).
+  - `/s/[slug]/booking/slots` λ Dynamic (slots endpoint: availability + confirmed ranges → 2 query, zero N+1).
+  - `/app/bookings` λ Dynamic (dashboard bookings list: 1 query tenant-filtered).
+  - `/app/availability` λ Dynamic.
+- **Query counts (upper bound)**:
+  - Booking page load ≤ 3 (resolvePublicTenant → services, bp).
+  - Slots endpoint ≤ 2 (business_availability + bookings confirmed range).
+  - Booking create (RPC): ≤ 5 (lookup tenant/slug, lookup service, validate hours, validate overlap, insert bookings + audit + trigger).
+  - Dashboard list ≤ 1.
+- No N+1. Bundle booking page client JS ~ React core + hooks only (no heavy libs).

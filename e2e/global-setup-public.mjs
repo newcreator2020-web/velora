@@ -258,6 +258,30 @@ async function cleanupAndInsert(pg, spec, opts) {
       );
     }
   }
+  // FASE9: business_availability default required per slots API
+  // weekday mapping: 0=Sun 1=Mon 2=Tue 3=Wed 4=Thu 5=Fri 6=Sat
+  // LUN..VEN: 09:00-18:00 enabled; SAB: 09:00-13:00 enabled; DOM disabled
+  const defaultAvailability = [
+    [0, false, "09:00", "18:00"],
+    [1, true, "09:00", "18:00"],
+    [2, true, "09:00", "18:00"],
+    [3, true, "09:00", "18:00"],
+    [4, true, "09:00", "18:00"],
+    [5, true, "09:00", "18:00"],
+    [6, true, "09:00", "13:00"],
+  ];
+  for (const [wd, en, s, e] of defaultAvailability) {
+    await pg.query(
+      `INSERT INTO public.business_availability(tenant_id, weekday, enabled, start_time, end_time, created_at, updated_at)
+       VALUES ($1::uuid,$2::int,$3::boolean,$4::time,$5::time,$6::timestamptz,$7::timestamptz)
+       ON CONFLICT (tenant_id, weekday) DO UPDATE SET
+         enabled = EXCLUDED.enabled,
+         start_time = EXCLUDED.start_time,
+         end_time = EXCLUDED.end_time,
+         updated_at = EXCLUDED.updated_at`,
+      [tenantId, wd, en, s, e, now, now],
+    );
+  }
   return tenantId;
 }
 
