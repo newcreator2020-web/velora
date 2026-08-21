@@ -67,6 +67,7 @@ export async function createPublicBooking(input: PublicBookingInput) {
     booking_status: string;
     starts_at: string;
     ends_at: string;
+    customer_id?: string | null;
   }> | null;
   if (!rows || rows.length === 0) throw new Error("BOOKING_EMPTY");
   return rows[0];
