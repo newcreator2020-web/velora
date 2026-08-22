@@ -56,16 +56,16 @@ export async function createPublicBooking(input: PublicBookingInput): Promise<Pu
   const resource_slug =
     validated.resource_slug && validated.resource_slug.length > 0 ? validated.resource_slug : "any";
   const rpcArgs = {
-    p_slug: validated.slug,
+    p_tenant_slug: validated.slug,
     p_service_id: validated.service_id,
     p_starts_at: validated.starts_at.toISOString(),
-    p_customer_name: validated.customer_name,
     p_resource_slug: resource_slug,
-    ...(email ? { p_customer_email: email } : {}),
-    ...(phone ? { p_customer_phone: phone } : {}),
-    ...(notes ? { p_notes: notes } : {}),
+    p_customer_name: validated.customer_name,
+    p_customer_email: email,
+    p_customer_phone: phone,
+    p_notes: notes,
   };
-  const { data, error } = await supabase.rpc("public_booking_create_v2", rpcArgs as never);
+  const { data, error } = await supabase.rpc("public_booking_create_v3", rpcArgs as never);
   if (error) {
     throw new Error(error.message || "BOOKING_ERROR");
   }

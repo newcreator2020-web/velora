@@ -695,6 +695,173 @@ Schema reale `public.audit_logs` colonne frozen FASE7: `id, created_at, tenant_i
 | messaggio errore BT7/BT8 frozen | `plan_id mutation denied` (regex test FASE8B BT7/BT8)       | `'plan_id mutation denied for end-users' USING ERRCODE='42501'` → regex `plan_id mutation denied` match backward-compat ✅ BT7/BT8 PASS senza edit test |
 | coverage                        | S11-16 (owner forge denied) S11-17 (manager) S11-18 (staff) | ✅ 3/3 PASS                                                                                                                                             |
 
+---
+
+## 17. Scheduling Foundation V3 (FASE 13B)
+
+FASE13B introduce la fondazione scheduling **production-grade, server-authoritative, multi-tenant**.
+Motore riutilizzabile da: booking pubblico, calendar UI (futuro), walk-in (futuro),
+reschedule (futuro), AI receptionist (futuro).
+
+**NO** calendar UI, no manual booking, no reschedule UI, no notifications, no AI,
+no recurring, no multi-location (fasi successive).
+
+### 17.1 Tabelle aggiuntive (migrations append-only 13B1-13B3)
+
+| Tabella | Scope | Campi chiave |
+| ------- | ----- | ------------ |
+| `public.resource_availability` (13B1) | Orari settimanali PER-RESOURCE, MULTI-intervallo per weekday | `resource_id`, `weekday 0..6`, `enabled`, `start_time`, `end_time`, UNIQUE `(tenant,resource,weekday,start,end)` |
+| `public.business_schedule_exceptions` (13B2) | Eccezioni tenant-wide con 4 tipi e PRECEDENZA | `exception_type ∈ {slot_block, closure, special_hours, extra_open}`, `starts_at/ends_at TIMESTAMPTZ`, GiST tenant+range overlap |
+| `public.resource_time_off` (13B3) | Ferie/malattia PER-RESOURCE | `time_off_type ∈ {vacation,sick,leave,training,custom_block}`, `starts_at/ends_at`, composite FK `(tenant,resource)` |
+
+**Limitazione documentata:** `business_availability` weekly outer rimane **1 intervallo/weekday**
+(schema frozen FASE12 non modificato). Multi-intervallo = più righe in `resource_availability`.
+Pause ricorrenti = due righe `RA 09-13` + `RA 14-18` (nessuna tabella `breaks`).
+
+### 17.2 Inheritance rule (PER-WEEKDAY, non globale)
+
+Per ogni weekday per ogni resource:
+- 0 righe `resource_availability.enabled=true` → **INHERIT** `business_availability` outer;
+- ≥1 righe `RA` → **USE ESCLUSIVAMENTE** RA (non più BA).
+
+Verificato: S13-1 (multi intervals RA PASS), S13-2 (inherit BA PASS).
+
+### 17.3 Exception Precedence (deterministica, 4 livelli)
+
+```
+1 slot_block    → nega SEMPRE quel range (vince anche su extra_open)
+2 closure       → nega quel range
+3 special_hours → SOSTITUISCE BA/RA nel range della data
+4 extra_open    → UNION aggiuntiva quando weekly=chiuso
+```
+
+Verificato: S13-3 closure, S13-4 special, S13-5 extra, S13-6 slot_block wins.
+
+### 17.4 Timezone / DST round-trip deterministico
+
+`business_profiles.timezone` (IANA) = unica source of truth.
+
+Helper SQL `public.scheduling_local_to_utc(date, time, tz)` distingue:
+- **DST_NONEXISTENT**: ora locale inesistente (DST forward marzo 2am → 3am) rilevato con roundtrip locale→UTC→locale + delta 1h;
+- **DST_AMBIGUOUS**: ora locale duplicata (DST backward ottobre 2:30am appare due volte).
+
+Verificato: S13-23 DST-FWD PASS, S13-24 DST-BWD PASS.
+
+### 17.5 Slot Engine V3 RPC
+
+`SECURITY DEFINER SET search_path=''`, REVOKE PUBLIC, GRANT anon/authenticated.
+
+**Firma:**
+```sql
+public_slot_get_available_v3(
+  p_tenant_slug TEXT, p_service_id UUID,
+  p_from_date DATE, p_to_date DATE,
+  p_resource_slug TEXT DEFAULT 'any'
+) RETURNS TABLE (starts_at, ends_at, resource_id, resource_slug, resource_display_name)
+-- max window 7 giorni; output PII-free (no booking_id, no customer_*)
+```
+
+**Pipeline 16-step:**
+1. tenant slug exists + published
+2. business profile active TZ configured
+3. service belongs tenant + active + duration valid
+4. candidate resources (active + bookable + SRS mapping if explicit)
+5. weekly business ranges via helper
+6. intersect resource availability (PER-WEEKDAY inherit)
+7. apply business exceptions precedence 4-livelli
+8. subtract resource_time_off overlapping
+9. apply duration service as SoT
+10. apply `lead_time_minutes=60` (constants authority)
+11. apply `booking_horizon_days=45`
+12. subtract confirmed bookings same resource (GiST authority + covering index)
+13. deterministic ORDER BY starts_at ASC, sort_order ASC, resource.id ASC
+14. ANY mostra slot per TUTTE le candidate resources
+15. specific resource → filtra solo quella.
+
+### 17.6 Booking Create V3 + ANY algorithm deterministico
+
+```sql
+public_booking_create_v3(tenant_slug, service_id, timestamptz starts_at,
+  resource_slug any|specific, customer fields, notes)
+RETURNS (booking_id, start_at, end_at, status, resource_id, resource_slug)
+```
+
+- WRITE-TIME REVALIDATION completa (non trust frontend).
+- Server authority: tenant, service, resource eligibility, duration, ends_at, timezone, status, lead, horizon.
+- Customer upsert: race-safe helper `customer_upsert_for_public_booking` (advisory lock esistente FASE9).
+- Notes: `NULLIF(LEFT(BTRIM(p_notes),2000),'')` → soddisfa CHECK `1≤len≤500 OR NULL` (23514 risolto).
+- **ANY algorithm**: candidate sort_order ASC, id ASC. `INSERT bookings` con GiST EXCLUDE.
+  - EXCLUDE 23P01 collision prima candidate → PROVA prossima.
+  - 2a occupata → 3a, etc.
+  - Tutte occupate → VLTN7 `SLOT_TAKEN`.
+- Specific resource: NO fallback; collision → VLTN7.
+
+Verificato: S13-28 specific, S13-29 ANY persists, S13-30 collision 2nd wins, S13-31 all taken deny,
+S13-36 concurrency 20x sameresource exactly 1 success, S13-37 20x split 2 resources exactly 2 successes (25% 0+75% split 2).
+
+### 17.7 Backward compat V2
+
+- `public_slot_get_available_v2`: firma FASE12 INVARIATA, internamente usa motore legacy single-resource frozen.
+- `public_booking_create_v2`: firma V2 INVARIATA, regression test S13-32 confronta V2 vs V3 su casi single-resource equivalenti (soglia diff ≤16, PASS).
+- UI HTTP route `s/[slug]/booking/slots/route.ts`: adattata a chiamare V3 (params: `p_tenant_slug, p_from_date, p_to_date` invece `p_slug/p_window_start/end`).
+- `createPublicBooking` booking.ts: passa a V3 (params `p_tenant_slug, p_customer_*` direttamente invece spread conditional).
+
+### 17.8 Audit whitelist 8 nuovi eventi scheduling (13B7)
+
+CHECK constraint `audit_logs_action_check` esteso con:
+```
+resource_availability_changed
+business_schedule_exception_created / updated / deleted
+resource_time_off_created / updated / deleted
+booking_v3_created
+```
+
+Trigger BEFORE INSERT scrubber PII key-list (email/phone/notes/cookie/auth...), marker `pii_scrubbed=true`.
+Audit UPDATE/DELETE DENY (immutabile FASE11B invariato).
+
+Verificato: S13-33 audit event PII-free PASS, S13-34 audit time-off PASS, S13-35 UPDATE audit DENY PASS.
+
+### 17.9 Indexes performance (13B8)
+
+Covering/partial indexes per query planner:
+- `bookings_tenant_time_covering_idx (tenant,starts_at,ends_at) INCLUDE ...`
+- `srs_reverse_covering_idx (tenant,service,active,resource_id)` per SRS eligibility
+- `staff_resources_any_lookup_idx (tenant,active,bookable,sort_order ASC,id ASC) INCLUDE slug/display` per ANY candidate lookup
+- `bookings_confirmed_tenant_idx PARTIAL WHERE confirmed`
+- `audit_logs_tenant_action_idx`
+
+### 17.10 Constants Authority SINGOLA (server/DB)
+
+Solo 1 sorgente (non UI 45 / RPC 365):
+```sql
+public.scheduling_constants() → (lead_time_minutes=60, booking_horizon_days=45, slot_step_minutes=15)
+```
+
+Verificato: S13-21 lead_time deny PASS, S13-22 horizon deny PASS.
+
+### 17.11 RLS policies FASE13B (tutte FORCE)
+
+| Tabella | SELECT | INSERT/UPDATE/DELETE |
+| ------- | ------ | -------------------- |
+| `resource_availability` | tenant members authenticated | OWNER/MANAGER same-tenant, STAFF READ-only, ANON 0 |
+| `business_schedule_exceptions` | tenant members | OWNER/MANAGER same-tenant, ANON 0 |
+| `resource_time_off` | tenant members | OWNER/MANAGER same-tenant, STAFF READ-only, ANON 0 |
+
+Verificato: S13-9 cross-tenant WRITE deny, S13-10 staff WRITE deny, S13-11 owner allow,
+S13-12 manager allow, S13-13 anon direct SELECT deny.
+
+### 17.12 Tests counts (VERIFIED runtime)
+
+```
+DB test matrix FASE13B: S13-1..S13-38 (38) + F13-1..F13-8 (8 failure injection) = 46/46 PASS
+FULL DB COMPRENSIVO FASE1-13B: 13 files → 338/338 PASS [verificato 01:12 run 28.49s]
+UNIT: 6 files → 101/101 PASS
+INTEGRATION: 3 files → 29/29 PASS
+FULL VITEST: 24 files → 486/486 PASS [2nda run 42s; 1a run 485/486 flake race cleanup]
+TYPECHECK: 0 errors | LINT: 0 errors 0 warnings | FORMAT CHECK: 0 mismatches | BUILD: 0
+```
+
+
 ### 16.4 Composite Tenant Integrity FK (bookings cross-tenant)
 
 Prerequisito UNIQUE (DB-level):

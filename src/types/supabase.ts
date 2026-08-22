@@ -419,6 +419,53 @@ export type Database = {
           },
         ];
       };
+      business_schedule_exceptions: {
+        Row: {
+          created_at: string;
+          end_time: string | null;
+          ends_at: string;
+          exception_type: string;
+          id: string;
+          start_time: string | null;
+          starts_at: string;
+          tenant_id: string;
+          title: string;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          end_time?: string | null;
+          ends_at: string;
+          exception_type: string;
+          id?: string;
+          start_time?: string | null;
+          starts_at: string;
+          tenant_id: string;
+          title: string;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          end_time?: string | null;
+          ends_at?: string;
+          exception_type?: string;
+          id?: string;
+          start_time?: string | null;
+          starts_at?: string;
+          tenant_id?: string;
+          title?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "business_schedule_exceptions_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       customers: {
         Row: {
           created_at: string;
@@ -531,6 +578,94 @@ export type Database = {
           updated_at?: string;
         };
         Relationships: [];
+      };
+      resource_availability: {
+        Row: {
+          created_at: string;
+          enabled: boolean;
+          end_time: string;
+          id: string;
+          resource_id: string;
+          start_time: string;
+          tenant_id: string;
+          updated_at: string;
+          weekday: number;
+        };
+        Insert: {
+          created_at?: string;
+          enabled?: boolean;
+          end_time: string;
+          id?: string;
+          resource_id: string;
+          start_time: string;
+          tenant_id: string;
+          updated_at?: string;
+          weekday: number;
+        };
+        Update: {
+          created_at?: string;
+          enabled?: boolean;
+          end_time?: string;
+          id?: string;
+          resource_id?: string;
+          start_time?: string;
+          tenant_id?: string;
+          updated_at?: string;
+          weekday?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "resource_availability_resource_fk";
+            columns: ["tenant_id", "resource_id"];
+            isOneToOne: false;
+            referencedRelation: "staff_resources";
+            referencedColumns: ["tenant_id", "id"];
+          },
+        ];
+      };
+      resource_time_off: {
+        Row: {
+          created_at: string;
+          ends_at: string;
+          id: string;
+          resource_id: string;
+          starts_at: string;
+          tenant_id: string;
+          time_off_type: string;
+          title: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          ends_at: string;
+          id?: string;
+          resource_id: string;
+          starts_at: string;
+          tenant_id: string;
+          time_off_type: string;
+          title?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          ends_at?: string;
+          id?: string;
+          resource_id?: string;
+          starts_at?: string;
+          tenant_id?: string;
+          time_off_type?: string;
+          title?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "resource_time_off_resource_fk";
+            columns: ["tenant_id", "resource_id"];
+            isOneToOne: false;
+            referencedRelation: "staff_resources";
+            referencedColumns: ["tenant_id", "id"];
+          },
+        ];
       };
       services: {
         Row: {
@@ -980,6 +1115,26 @@ export type Database = {
           starts_at: string;
         }[];
       };
+      public_booking_create_v3: {
+        Args: {
+          p_customer_email: string;
+          p_customer_name: string;
+          p_customer_phone: string;
+          p_notes: string;
+          p_resource_slug: string;
+          p_service_id: string;
+          p_starts_at: string;
+          p_tenant_slug: string;
+        };
+        Returns: {
+          booking_id: string;
+          end_at: string;
+          resource_id: string;
+          resource_slug: string;
+          start_at: string;
+          status: string;
+        }[];
+      };
       public_booking_get_confirmed_ranges: {
         Args: {
           p_from: string;
@@ -1000,6 +1155,15 @@ export type Database = {
           sort_order: number;
         }[];
       };
+      public_resources_list_v3: {
+        Args: { p_service_id: string; p_tenant_slug: string };
+        Returns: {
+          color_hex: string;
+          display_name: string;
+          resource_id: string;
+          slug: string;
+        }[];
+      };
       public_slot_get_available_v2: {
         Args: {
           p_resource_slug?: string;
@@ -1015,6 +1179,22 @@ export type Database = {
           starts_at: string;
         }[];
       };
+      public_slot_get_available_v3: {
+        Args: {
+          p_from_date: string;
+          p_resource_slug?: string;
+          p_service_id: string;
+          p_tenant_slug: string;
+          p_to_date: string;
+        };
+        Returns: {
+          ends_at: string;
+          resource_display_name: string;
+          resource_id: string;
+          resource_slug: string;
+          starts_at: string;
+        }[];
+      };
       publish_site_draft: {
         Args: { p_expected_revision?: string; p_tenant_id: string };
         Returns: {
@@ -1025,6 +1205,59 @@ export type Database = {
           sections_applied: number;
           services_applied: number;
           theme_applied: boolean;
+        }[];
+      };
+      scheduling_business_weekly_ranges: {
+        Args: {
+          p_from_date: string;
+          p_tenant_id: string;
+          p_to_date: string;
+          p_tz: string;
+        };
+        Returns: {
+          day_date: string;
+          end_tstz: string;
+          start_tstz: string;
+          weekday: number;
+        }[];
+      };
+      scheduling_constants: {
+        Args: never;
+        Returns: {
+          booking_horizon_days: number;
+          lead_time_minutes: number;
+          slot_step_minutes: number;
+        }[];
+      };
+      scheduling_local_to_utc: {
+        Args: { p_local_date: string; p_local_time: string; p_tz_name: string };
+        Returns: {
+          dst_status: string;
+          local_normal: string;
+          utc_tstz: string;
+        }[];
+      };
+      scheduling_resource_has_overlap_confirmed: {
+        Args: {
+          p_end: string;
+          p_resource_id: string;
+          p_start: string;
+          p_tenant_id: string;
+        };
+        Returns: boolean;
+      };
+      scheduling_resource_weekly_ranges: {
+        Args: {
+          p_from_date: string;
+          p_resource_id: string;
+          p_tenant_id: string;
+          p_to_date: string;
+          p_tz: string;
+        };
+        Returns: {
+          day_date: string;
+          end_tstz: string;
+          start_tstz: string;
         }[];
       };
       uuid_generate_v1: { Args: never; Returns: string };

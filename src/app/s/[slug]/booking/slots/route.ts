@@ -61,11 +61,11 @@ export async function GET(req: Request, props: { params: Promise<{ slug: string 
   const weekday = new Date(y, m - 1, d).getDay();
   const windowStart = `${parts[0]}-${parts[1]}-${parts[2]}`;
   const windowEnd = windowStart;
-  const { data, error } = await supabase.rpc("public_slot_get_available_v2", {
-    p_slug: parsed.data,
+  const { data, error } = await supabase.rpc("public_slot_get_available_v3", {
+    p_tenant_slug: parsed.data,
     p_service_id: service_id,
-    p_window_start: windowStart,
-    p_window_end: windowEnd,
+    p_from_date: windowStart,
+    p_to_date: windowEnd,
     p_resource_slug: resource_slug,
   });
   if (error) {
