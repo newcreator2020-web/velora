@@ -196,6 +196,7 @@ export type Database = {
           ends_at: string;
           id: string;
           notes: string | null;
+          resource_id: string | null;
           service_id: string;
           starts_at: string;
           status: string;
@@ -211,6 +212,7 @@ export type Database = {
           ends_at: string;
           id?: string;
           notes?: string | null;
+          resource_id?: string | null;
           service_id: string;
           starts_at: string;
           status?: string;
@@ -226,6 +228,7 @@ export type Database = {
           ends_at?: string;
           id?: string;
           notes?: string | null;
+          resource_id?: string | null;
           service_id?: string;
           starts_at?: string;
           status?: string;
@@ -239,6 +242,13 @@ export type Database = {
             isOneToOne: false;
             referencedRelation: "customers";
             referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "bookings_resource_composite_fk";
+            columns: ["tenant_id", "resource_id"];
+            isOneToOne: false;
+            referencedRelation: "staff_resources";
+            referencedColumns: ["tenant_id", "id"];
           },
           {
             foreignKeyName: "bookings_service_id_fkey";
@@ -651,6 +661,108 @@ export type Database = {
           },
         ];
       };
+      staff_resource_services: {
+        Row: {
+          active: boolean;
+          created_at: string;
+          duration_override_minutes: number | null;
+          resource_id: string;
+          service_id: string;
+          tenant_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          active?: boolean;
+          created_at?: string;
+          duration_override_minutes?: number | null;
+          resource_id: string;
+          service_id: string;
+          tenant_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          active?: boolean;
+          created_at?: string;
+          duration_override_minutes?: number | null;
+          resource_id?: string;
+          service_id?: string;
+          tenant_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "srs_resource_fk";
+            columns: ["tenant_id", "resource_id"];
+            isOneToOne: false;
+            referencedRelation: "staff_resources";
+            referencedColumns: ["tenant_id", "id"];
+          },
+          {
+            foreignKeyName: "srs_service_fk";
+            columns: ["tenant_id", "service_id"];
+            isOneToOne: false;
+            referencedRelation: "services";
+            referencedColumns: ["tenant_id", "id"];
+          },
+        ];
+      };
+      staff_resources: {
+        Row: {
+          active: boolean;
+          bookable: boolean;
+          color_hex: string | null;
+          created_at: string;
+          display_name: string;
+          id: string;
+          linked_membership_id: string | null;
+          slug: string;
+          sort_order: number;
+          tenant_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          active?: boolean;
+          bookable?: boolean;
+          color_hex?: string | null;
+          created_at?: string;
+          display_name: string;
+          id?: string;
+          linked_membership_id?: string | null;
+          slug: string;
+          sort_order?: number;
+          tenant_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          active?: boolean;
+          bookable?: boolean;
+          color_hex?: string | null;
+          created_at?: string;
+          display_name?: string;
+          id?: string;
+          linked_membership_id?: string | null;
+          slug?: string;
+          sort_order?: number;
+          tenant_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "staff_resources_linked_membership_tenant_fk";
+            columns: ["tenant_id", "linked_membership_id"];
+            isOneToOne: false;
+            referencedRelation: "tenant_memberships";
+            referencedColumns: ["tenant_id", "id"];
+          },
+          {
+            foreignKeyName: "staff_resources_tenant_id_fkey";
+            columns: ["tenant_id"];
+            isOneToOne: false;
+            referencedRelation: "tenants";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       tenant_memberships: {
         Row: {
           created_at: string;
@@ -848,6 +960,26 @@ export type Database = {
           starts_at: string;
         }[];
       };
+      public_booking_create_v2: {
+        Args: {
+          p_customer_email?: string;
+          p_customer_name: string;
+          p_customer_phone?: string;
+          p_notes?: string;
+          p_resource_slug?: string;
+          p_service_id: string;
+          p_slug: string;
+          p_starts_at: string;
+        };
+        Returns: {
+          booking_id: string;
+          booking_status: string;
+          ends_at: string;
+          resource_display_name: string;
+          resource_slug: string;
+          starts_at: string;
+        }[];
+      };
       public_booking_get_confirmed_ranges: {
         Args: {
           p_from: string;
@@ -857,6 +989,29 @@ export type Database = {
         };
         Returns: {
           ends_at: string;
+          starts_at: string;
+        }[];
+      };
+      public_booking_resources_list: {
+        Args: { p_service_id: string; p_slug: string };
+        Returns: {
+          resource_display_name: string;
+          resource_slug: string;
+          sort_order: number;
+        }[];
+      };
+      public_slot_get_available_v2: {
+        Args: {
+          p_resource_slug?: string;
+          p_service_id: string;
+          p_slug: string;
+          p_window_end: string;
+          p_window_start: string;
+        };
+        Returns: {
+          ends_at: string;
+          resource_display_name: string;
+          resource_slug: string;
           starts_at: string;
         }[];
       };
@@ -871,10 +1026,6 @@ export type Database = {
           services_applied: number;
           theme_applied: boolean;
         }[];
-      };
-      test_provision_user: {
-        Args: { p_email: string; p_meta?: Json; p_password: string };
-        Returns: string;
       };
       uuid_generate_v1: { Args: never; Returns: string };
       uuid_generate_v1mc: { Args: never; Returns: string };

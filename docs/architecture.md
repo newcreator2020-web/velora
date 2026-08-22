@@ -646,6 +646,7 @@ Public URL: /s/[slug]/booking. NO internal tenant_id URL. slug preserved through
 ## 16. FASE 11B — Append-only Security & Audit Defect Closure (2026-08-22)
 
 Scopo: chiusura difetti sicurezza/audit CON RUNTIME PROOF. Nessuna nuova feature.
+
 - **Migration APPEND ONLY:** 1 nuova su 48 frozen (FASE1–FASE10H → FASE11B = #49).
 - **Nessun edit a migration FASE1–FASE10H frozen (0 righe modificate).**
 - **Nessun edit a test FASE6–FASE10 Playwright frozen.** Fix lato server (view fallback + PostgREST hint) invece di edit tests frozen.
@@ -653,20 +654,21 @@ Scopo: chiusura difetti sicurezza/audit CON RUNTIME PROOF. Nessuna nuova feature
 
 ### 16.1 Security Boundary Bookings Pubblico — PII-Free RPC
 
-| Layer | BEFORE (FASE10H frozen D1 leak CONFIRMED) | AFTER (FASE11B hardened) |
-| --- | --- | --- |
-| anon grants | `GRANT SELECT ON public.bookings TO anon` + policy `bookings_anon_select_published` → PII leggibile | **REVOKE SELECT ON bookings FROM anon; DROP POLICY bookings_anon_select_published;** anon NON ha grants diretti |
-| public slots | `SELECT customer_name/email/phone/notes...` per disponibilità client | **RPC `public_booking_get_confirmed_ranges` SECURITY DEFINER** SET `search_path=''` returns solo `starts_at, ends_at` 0 PII |
-| location | `src/lib/server/booking.ts:185-201` direct select bookings | Stesso file: `.rpc("public_booking_get_confirmed_ranges",{...})` |
-| proof test | S11-01 PASS denied + §15 browser network inspection 0 leaks PII anon | ✅ |
-| booking create | `public_booking_create_slug` SECURITY DEFINER anon | invariato ✅ |
-| slot conflict | EXCLUDE GiST `bookings_no_overlap_confirmed` WHERE status='confirmed' | invariato ✅ S11-04 overlap excluded |
+| Layer          | BEFORE (FASE10H frozen D1 leak CONFIRMED)                                                           | AFTER (FASE11B hardened)                                                                                                    |
+| -------------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| anon grants    | `GRANT SELECT ON public.bookings TO anon` + policy `bookings_anon_select_published` → PII leggibile | **REVOKE SELECT ON bookings FROM anon; DROP POLICY bookings_anon_select_published;** anon NON ha grants diretti             |
+| public slots   | `SELECT customer_name/email/phone/notes...` per disponibilità client                                | **RPC `public_booking_get_confirmed_ranges` SECURITY DEFINER** SET `search_path=''` returns solo `starts_at, ends_at` 0 PII |
+| location       | `src/lib/server/booking.ts:185-201` direct select bookings                                          | Stesso file: `.rpc("public_booking_get_confirmed_ranges",{...})`                                                            |
+| proof test     | S11-01 PASS denied + §15 browser network inspection 0 leaks PII anon                                | ✅                                                                                                                          |
+| booking create | `public_booking_create_slug` SECURITY DEFINER anon                                                  | invariato ✅                                                                                                                |
+| slot conflict  | EXCLUDE GiST `bookings_no_overlap_confirmed` WHERE status='confirmed'                               | invariato ✅ S11-04 overlap excluded                                                                                        |
 
 ### 16.2 Audit Contract (Atomic NO silent failure)
 
 Schema reale `public.audit_logs` colonne frozen FASE7: `id, created_at, tenant_id, action, actor_id, entity_type, entity_id, metadata(JSONB)`.
 
 **Eventi contrattuali minimi FASE11B (audit.required):**
+
 - `booking_created` (trigger INSERT bookings)
 - `booking_cancelled` / `booking_completed` / `booking_no_show` (trigger UPDATE status confirmed→X)
 - `customer_created` (trigger INSERT customers)
@@ -674,44 +676,50 @@ Schema reale `public.audit_logs` colonne frozen FASE7: `id, created_at, tenant_i
 
 **Atomicity §5:** mutation + audit.insert = stessa transazione. Audit fallisce → TX ROLLBACK. **ZERO EXCEPTION WHEN OTHERS NULL.**
 
-**_audit_insert_trusted rewrite FASE11B:**
+**\_audit_insert_trusted rewrite FASE11B:**
+
 - PII strip ampliata 24 keys proibite (customer_name/customer_email/customer_phone/notes/email/phone/address/jwt/token/authorization/bearer/cookie/password/sk_live/sk_test/pk_live/pk_test/whsec_/service_role_key/stripe_secret/postgres_password/credit_card/pan/cvc/ssn) → `metadata = clean_metadata #- ARRAY[...]`.
 - Nessun catch / silent. RAISE originale.
 
 **Audit Immutability §7 (invariato frozen + verificato S11-12/13):**
+
 - UPDATE audit_logs = DENY (trigger + RLS)
 - DELETE audit_logs = DENY (policy + trigger)
 - S11-12 ✅ / S11-13 ✅.
 
 ### 16.3 Plan Protection D4 Fix (backward compat)
 
-| Item | BEFORE FASE8c bug | AFTER FASE11B rewrite |
-| --- | --- | --- |
-| WHERE clause | `platform_admins.active = TRUE` (colonna NON ESISTE) | `platform_admins.status = 'active'` (colonna REALE) |
-| messaggio errore BT7/BT8 frozen | `plan_id mutation denied` (regex test FASE8B BT7/BT8) | `'plan_id mutation denied for end-users' USING ERRCODE='42501'` → regex `plan_id mutation denied` match backward-compat ✅ BT7/BT8 PASS senza edit test |
-| coverage | S11-16 (owner forge denied) S11-17 (manager) S11-18 (staff) | ✅ 3/3 PASS |
+| Item                            | BEFORE FASE8c bug                                           | AFTER FASE11B rewrite                                                                                                                                   |
+| ------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| WHERE clause                    | `platform_admins.active = TRUE` (colonna NON ESISTE)        | `platform_admins.status = 'active'` (colonna REALE)                                                                                                     |
+| messaggio errore BT7/BT8 frozen | `plan_id mutation denied` (regex test FASE8B BT7/BT8)       | `'plan_id mutation denied for end-users' USING ERRCODE='42501'` → regex `plan_id mutation denied` match backward-compat ✅ BT7/BT8 PASS senza edit test |
+| coverage                        | S11-16 (owner forge denied) S11-17 (manager) S11-18 (staff) | ✅ 3/3 PASS                                                                                                                                             |
 
 ### 16.4 Composite Tenant Integrity FK (bookings cross-tenant)
 
 Prerequisito UNIQUE (DB-level):
+
 - `UNIQUE (tenant_id, id) ON public.services`
 - `UNIQUE (tenant_id, id) ON public.customers`
 
 Composite FK Multi-Column:
+
 ```
 bookings (tenant_id, service_id) → services(tenant_id, id) ON DELETE CASCADE
 bookings (tenant_id, customer_id) → customers(tenant_id, id) ON DELETE SET NULL
 ```
 
 **S11-19/20 Proof:**
+
 - S11-19: booking tenant A + service tenant B → FK VIOLATION → IMPOSSIBLE ✅
 - S11-20: booking tenant A + customer tenant B → FK VIOLATION → IMPOSSIBLE ✅
 
 **PostgREST Ambiguity Hint (2 locations):**
 2 FK multipli (frozen 1-col + composite nuova) → hint sintassi ufficiale `!fk_name`:
+
 - `src/app/app/bookings/page.tsx:43` → `.select("*,services!bookings_service_id_fkey(...),customers!bookings_customer_id_fkey(...)")`
 - `src/lib/server/customers.ts:200` → `.select("*,services!bookings_service_id_fkey(...)")`
-Hints puntano a **nomi FK FASE9 originali frozen** (bookings_service_id_fkey / bookings_customer_id_fkey) — no regressioni.
+  Hints puntano a **nomi FK FASE9 originali frozen** (bookings_service_id_fkey / bookings_customer_id_fkey) — no regressioni.
 
 ### 16.5 Internal RPC Boundary (S11-15)
 
@@ -723,6 +731,7 @@ Hints puntano a **nomi FK FASE9 originali frozen** (bookings_service_id_fkey / b
 ### 16.6 Migration FASE11B File (append-only, 1)
 
 `supabase/migrations/20260822200000_fase11b_security_audit_defects.sql` — 8 sezioni:
+
 - (a) `public_booking_get_confirmed_ranges` SECURITY DEFINER trusted RPC.
 - (b) D1: REVOKE SELECT bookings anon; DROP policy unsafe.
 - (c) S1: REVOKE EXECUTE `customer_upsert_for_public_booking` anon.
@@ -737,35 +746,35 @@ Totale migrazioni applicate: 49 (FASE1-10H = 48 frozen + FASE11B = 1).
 
 ### 16.7 FASE11B Certification Counts (all GREEN)
 
-| Livello | Suite / comando | Resultato |
-| --- | --- | --- |
-| S11 Security Tests dedicati | `tests/db/fase11b-security-hardening.test.ts` S11-01..20 | **20/20** |
-| DB Totale 11 files | `pnpm db:test` §23 clean run fresh reset | **250/250** (BT7/BT8 inclusi) |
-| Unit/Integration src/ run1 | `pnpm vitest run src/` §23 clean | **18/18** |
-| Unit/Integration src/ run2 consec (no reset no changes) | `pnpm vitest run src/` §13 | **18/18** |
-| Playwright FASE6 DEV | frozen 52 tests | 52/52 |
-| Playwright FASE6 PROD | frozen 52 tests | 52/52 |
-| Playwright FASE7 DEV | entitlements frozen 18 | 18/18 |
-| Playwright FASE7 PROD | entitlements frozen 18 | 18/18 |
-| Playwright FASE8 DEV | billing frozen 20 | 20/20 |
-| Playwright FASE8 PROD | billing frozen 20 | 20/20 |
-| Playwright FASE9 DEV | booking frozen 24 | 24/24 |
-| Playwright FASE9 PROD | booking frozen 24 | 24/24 |
-| Playwright FASE10 DEV | CRM frozen 18 | 18/18 |
-| Playwright FASE10 PROD | CRM frozen 18 | 18/18 |
-| **Totale Playwright DEV** | somma F6/F7/F8/F9/F10 | **142/142** (9.9m) |
-| **Totale Playwright PROD** | somma F6/F7/F8/F9/F10 | **142/142** (9.3m) |
-| Responsive 3 VP | 375×812 · 768×1024 · 1440×900 scrollWidth≤clientWidth | ✅ PASS (E16-23) |
-| A11y axe wcag2/21 best-practice | serious=0 critical=0 H1≥1 main≥1 labels=ok | ✅ PASS (E26-30) |
-| TypeScript strict | `pnpm typecheck` exactOptionalPropertyTypes + noUnused enabled | 0 errors ✅ |
-| ESLint | `pnpm lint --max-warnings=0` | 0 errors 0 warnings ✅ |
-| Prettier | `pnpm format:check` (includes supabase.ts types) | All matched files code style ✅ |
-| Build prod Turbopack | `pnpm build` 13 static + 19 dynamic routes | exit 0 ✅ |
-| Health endpoint | GET /api/health prod porta 3100 | HTTP 200 status=ok ✅ |
-| Integrity | repo grep .only/.skip/.todo/xit/xdescribe + security bypass patterns | 1 only skip CONDIZIONALE SAFE, 0 unsafe patterns ✅ |
-| Secret Scan tracked files | sk_live_ / pk_live_ / whsec_ / service role / postgres cred / cookies storageState dumps | 0 reali leaks (solo sk_test_ fixture e reference doc SAFE) ✅ |
-| Service Role src inventory | 4 refs total | 4 JUSTIFIED (commento, env schema, env mapping, billing trusted stripe RPC) 0 UNJUSTIFIED ✅ |
-| Git diff --check | whitespace / trailling / merge conflict markers | 0 errors ✅ |
+| Livello                                                 | Suite / comando                                                                          | Resultato                                                                                    |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| S11 Security Tests dedicati                             | `tests/db/fase11b-security-hardening.test.ts` S11-01..20                                 | **20/20**                                                                                    |
+| DB Totale 11 files                                      | `pnpm db:test` §23 clean run fresh reset                                                 | **250/250** (BT7/BT8 inclusi)                                                                |
+| Unit/Integration src/ run1                              | `pnpm vitest run src/` §23 clean                                                         | **18/18**                                                                                    |
+| Unit/Integration src/ run2 consec (no reset no changes) | `pnpm vitest run src/` §13                                                               | **18/18**                                                                                    |
+| Playwright FASE6 DEV                                    | frozen 52 tests                                                                          | 52/52                                                                                        |
+| Playwright FASE6 PROD                                   | frozen 52 tests                                                                          | 52/52                                                                                        |
+| Playwright FASE7 DEV                                    | entitlements frozen 18                                                                   | 18/18                                                                                        |
+| Playwright FASE7 PROD                                   | entitlements frozen 18                                                                   | 18/18                                                                                        |
+| Playwright FASE8 DEV                                    | billing frozen 20                                                                        | 20/20                                                                                        |
+| Playwright FASE8 PROD                                   | billing frozen 20                                                                        | 20/20                                                                                        |
+| Playwright FASE9 DEV                                    | booking frozen 24                                                                        | 24/24                                                                                        |
+| Playwright FASE9 PROD                                   | booking frozen 24                                                                        | 24/24                                                                                        |
+| Playwright FASE10 DEV                                   | CRM frozen 18                                                                            | 18/18                                                                                        |
+| Playwright FASE10 PROD                                  | CRM frozen 18                                                                            | 18/18                                                                                        |
+| **Totale Playwright DEV**                               | somma F6/F7/F8/F9/F10                                                                    | **142/142** (9.9m)                                                                           |
+| **Totale Playwright PROD**                              | somma F6/F7/F8/F9/F10                                                                    | **142/142** (9.3m)                                                                           |
+| Responsive 3 VP                                         | 375×812 · 768×1024 · 1440×900 scrollWidth≤clientWidth                                    | ✅ PASS (E16-23)                                                                             |
+| A11y axe wcag2/21 best-practice                         | serious=0 critical=0 H1≥1 main≥1 labels=ok                                               | ✅ PASS (E26-30)                                                                             |
+| TypeScript strict                                       | `pnpm typecheck` exactOptionalPropertyTypes + noUnused enabled                           | 0 errors ✅                                                                                  |
+| ESLint                                                  | `pnpm lint --max-warnings=0`                                                             | 0 errors 0 warnings ✅                                                                       |
+| Prettier                                                | `pnpm format:check` (includes supabase.ts types)                                         | All matched files code style ✅                                                              |
+| Build prod Turbopack                                    | `pnpm build` 13 static + 19 dynamic routes                                               | exit 0 ✅                                                                                    |
+| Health endpoint                                         | GET /api/health prod porta 3100                                                          | HTTP 200 status=ok ✅                                                                        |
+| Integrity                                               | repo grep .only/.skip/.todo/xit/xdescribe + security bypass patterns                     | 1 only skip CONDIZIONALE SAFE, 0 unsafe patterns ✅                                          |
+| Secret Scan tracked files                               | sk_live_ / pk_live_ / whsec_ / service role / postgres cred / cookies storageState dumps | 0 reali leaks (solo sk_test_ fixture e reference doc SAFE) ✅                                |
+| Service Role src inventory                              | 4 refs total                                                                             | 4 JUSTIFIED (commento, env schema, env mapping, billing trusted stripe RPC) 0 UNJUSTIFIED ✅ |
+| Git diff --check                                        | whitespace / trailling / merge conflict markers                                          | 0 errors ✅                                                                                  |
 
 ### 16.8 Gates FASE11B
 
@@ -775,3 +784,108 @@ Totale migrazioni applicate: 49 (FASE1-10H = 48 frozen + FASE11B = 1).
 - **§15 Browser Public Booking PII boundary (MCP integrated)**: slots RPC JSON = solo date 0 PII ✅
 - **§18-19-20 Integrity/Secrets/Service**: ALL SAFE ✅
 - **FREEZE DECISION**: **FASE 11B = FROZEN** (report autorevole → `docs/FREEZE-REPORT-FASE11B.md`)
+
+---
+
+# 17. Scheduling & Resource Model (FASE12)
+
+## 17.1 Modello ibrido Default-Resource
+
+FASE12 introduce l'architettura **Hybrid Default-Resource Model** (Decision C FASE11C) per consentire la scalabilità da single-operator a multi-operator senza breaking changes UX.
+
+- **Principio**: ogni tenant possiede esattamente 1 `staff_resource` **default** con `slug='principale'`, provisionata automaticamente da trigger sulla tabella `tenants` (INSERT).
+- **Simple Mode automatico**: se il conteggio di `staff_resources` attive e bookable per il tenant è ≤ 1, la UI nasconde ogni riferimento alla selezione dell'operatore (dropdown invisibile, comportamento identico al modello single-resource frozen in FASE9).
+- **Multi Mode**: con ≥ 2 risorse attive, la UI `BookingClientForm` mostra un dropdown "Operatore" con opzione di default **"Qualsiasi operatore"** (algoritmo Earliest-Available + `sort_order`).
+
+## 17.2 Tabelle e Relazioni
+
+### `public.staff_resources`
+
+Risorsa prenotabile (operatore/stanza/attrezzatura), distinta da `auth.memberships` (identity/ruoli):
+
+- `id` UUID PK
+- `tenant_id` UUID FK → tenants CASCADE
+- `slug` TEXT NOT NULL, UNIQUE(tenant_id, slug)
+- `display_name` TEXT NOT NULL
+- `linked_membership_id` UUID FK → memberships(id) NULLABLE (una risorsa può non avere login; un login può non essere una risorsa)
+- `active` BOOLEAN DEFAULT true
+- `bookable` BOOLEAN DEFAULT true
+- `sort_order` INTEGER DEFAULT 0
+- `created_at` / `updated_at` timestamptz
+- INDEX: `(tenant_id, active, bookable, sort_order)`
+
+### `public.staff_resource_services`
+
+Relazione **M2M** tra risorse e servizi. Regola di eligibilità:
+
+- **Empty = ALL**: se per una `staff_resource` non esistono righe M2M → implicitamente ammissibile per TUTTI i servizi del tenant (default resource).
+- **Rows = RESTRICT**: se esistono righe M2M esplicite → la risorsa è ammissibile SOLAMENTE per i servizi linkati.
+- PK composita: `(resource_id, service_id)`
+- `active` BOOLEAN DEFAULT true (per disattivare temporaneamente un legame senza cancellarlo)
+- `tenant_id` DENORMALIZZATO per RLS e composite FK enforcement
+
+### `public.bookings` (estensione FASE9)
+
+- Colonna nuova: `resource_id UUID FK → staff_resources(id) ON DELETE RESTRICT` (nullable inizialmente per backward compat)
+- CHECK constraint: `bookings_confirmed_resource_not_null` → `CHECK (status <> 'confirmed' OR resource_id IS NOT NULL)`
+- Di fatto: un booking CONFIRMED deve obbligatoriamente avere una risorsa assegnata; i booking in stato draft/pending possono ancora nascere senza resource_id durante la transizione.
+
+## 17.3 Concorrenza: EXCLUDE GiST per-Resource
+
+FASE12 introduce un nuovo vincolo di esclusione scalare per permettere a più operatori di eseguire lo stesso servizio contemporaneamente.
+
+### Nuovo: `bookings_no_resource_overlap_confirmed`
+
+```sql
+EXCLUDE USING GIST (
+  tenant_id WITH =,
+  resource_id WITH =,
+  tstzrange(start_at, end_at, '[)') WITH &&
+) WHERE (status = 'confirmed')
+```
+
+- Due booking CONFIRMED sulla STESSA risorsa con range temporale sovrapposto = VIOLAZIONE (rilevato).
+- Due booking CONFIRMED su DUE risorse DIVERSE nello stesso slot = CONSENTITO (vincolo fondamentale multi-operatore).
+
+### Vincolo FASE9 legacy
+
+Il vecchio `bookings_no_overlap_confirmed` basato su `service_id` NON viene rimosso in FASE12. Rimane come safety-net durante la finestra di backfill; verrà droppato in una release futura dopo aver verificato che tutti i booking CONFIRMED hanno resource_id popolato e il front-end non produce più INSERT legacy.
+
+## 17.4 Slot Engine V2 + Booking Engine V2
+
+### RPC `public.public_slot_get_available_v2(tenant_slug, service_id, date)` (SECURITY DEFINER)
+
+- **Outer boundary**: `business_availability` del tenant (settimana tipo, holiday, closure).
+- **Inner boundary**: `eligible_resources` CTE = risorse attive + bookable + M2M ammissibili (Empty=ALL / Rows=RESTRICT).
+- Algoritmo: `generate_series` step 30-min da `windowStart` a `windowEnd` **ESCLUSIVO** (corretto bug E9-5 generate_series inclusive) → CROSS JOIN con eligible_resources → ANTI-JOIN con `bookings` CONFIRMED + overlapping range → restituisce slot × risorsa disponibile.
+- Con 0 eligible resources → 0 righe (safety: non restituisce slot fantasma).
+- Frontend aggrega per `(start_at, end_at)`: più risorse disponibili = stesso slot mostrato una volta; "Qualsiasi operatore" seleziona la prima per sort_order.
+
+### RPC `public.public_booking_create_v2(...)` (SECURITY DEFINER)
+
+- Input: `p_tenant_slug, p_service_id, p_start_at, p_customer_name, p_customer_email, p_customer_phone, p_resource_id (NULLABLE), p_notes, p_source`
+- Se `p_resource_id` è NULL → seleziona automaticamente la prima risorsa ammissibile disponibile per quello slot (Earliest-Available deterministica).
+- Esegue INSERT nella transazione con il nuovo vincolo EXCLUDE per-Resource.
+- Seleziona canale: `public.public_booking_resources_list(tenant_slug, service_id, date)` → dropdown operatori front-end.
+
+## 17.5 RLS e Autenticazione
+
+- `staff_resources` + `staff_resource_services` con RLS FORCE:
+  - `anon` / `authenticated`: SELECT tramite policy `*_select_tenant_public` (solo tenant pubblicato via slug dominio).
+  - Ruoli OWNER/MANAGER/STAFF: policy di mutazione verificate tramite membership.
+- `bookings.resource_id`: la policy anon è transitivamente gestita dal wrap RPC `public_booking_create_v2`; gli accessi SELECT anon alle colonne PII sono stati revocati in FASE11B e non vengono riaperti.
+
+## 17.6 NON-GOALS — FASE12
+
+FASE12 definisce i mattoni fondazionali del modello multi-risorsa. I seguenti item sono **NON-GOALS** e saranno implementati in fasi successive:
+
+1. ❌ **Individual resource hours / schedule** — la disponibilità per-operatore (orari differenti per staff) usa ancora business_availability globale.
+2. ❌ **Time off / ferie / permessi per risorsa** — `resource_availability` / `resource_time_off` tabelle non presenti.
+3. ❌ **Walk-in management** — gestione clienti senza appuntamento, coda attesa, walk-in source.
+4. ❌ **Calendar views (settimanale/mensile)** — dashboard booking al momento è lista per data.
+5. ❌ **AI booking assistant V2** — integrazione AI con consapevolezza delle risorse e assegnazione smart.
+6. ❌ **Analytics avanzate per risorsa** — report per-operatore (produttività, utilizzo, revenue split).
+7. ❌ **Color coding etichette risorsa** — UI multi-color per distinguere operatori su view future.
+8. ❌ **Risorse non-staff (stanze, lettini, macchinari)** — il modello lo supporta, ma la UI non etichetta/gestisce ancora categorie risorsa differenti da "principale + operatori".
+9. ❌ **Capacità di gruppo / class bookings** — slot multi-capacità (es. corsi) non implementati; vincolo resta 1 booking = 1 risorsa = 1 cliente.
+10. ❌ **Merge/split booking / ricorsione** — spostamento multi-risorsa, serie ricorrente, waitlist.

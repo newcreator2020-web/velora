@@ -107,6 +107,12 @@ describe("FASE10H runtime: §6 concurrency20 + §7 auditPII", () => {
         );
       }
       await pg.query("SET LOCAL session_replication_role = DEFAULT; COMMIT;");
+      await pg.query(
+        `INSERT INTO public.staff_resources(tenant_id, display_name, slug, active, bookable, sort_order)
+         VALUES ($1::uuid, $2, 'principale', TRUE, TRUE, 0)
+         ON CONFLICT (tenant_id, slug) DO NOTHING`,
+        [id, displayName.substring(0, 80)],
+      );
       return id;
     };
     const ensureService = async (
@@ -387,6 +393,14 @@ describe("FASE10H runtime: §6 concurrency20 + §7 auditPII", () => {
             [cid, tenantA, PII_EMAIL, PII_PHONE],
           );
         }
+        const resRow = await pg.query<{ id: string }>(
+          `SELECT id FROM public.staff_resources WHERE tenant_id=$1::uuid AND slug='principale' LIMIT 1`,
+          [tenantA],
+        );
+        const defaultResourceId = resRow.rows[0]?.id;
+        if (!defaultResourceId) {
+          throw new Error(`Default staff resource not found for tenant ${tenantA}`);
+        }
         for (let i = 0; i < 3; i++) {
           const bid = randomUUID();
           const slotBase = new Date();
@@ -394,9 +408,9 @@ describe("FASE10H runtime: §6 concurrency20 + §7 auditPII", () => {
           slotBase.setUTCHours(10, 0, 0, 0);
           const slot = slotBase.toISOString();
           await pg.query(
-            `INSERT INTO public.bookings(id, tenant_id, service_id, starts_at, ends_at, customer_id, customer_email, customer_name, status, created_at, updated_at)
-             VALUES ($1::uuid, $2::uuid, $3::uuid, $4::timestamptz, $4::timestamptz + ($5::int || ' minutes')::interval, $6::uuid, $7, 'Audit PII Fallback', 'confirmed', NOW(), NOW())`,
-            [bid, tenantA, serviceA, slot, 30, cid, PII_EMAIL],
+            `INSERT INTO public.bookings(id, tenant_id, service_id, resource_id, starts_at, ends_at, customer_id, customer_email, customer_name, status, created_at, updated_at)
+             VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::timestamptz, $5::timestamptz + ($6::int || ' minutes')::interval, $7::uuid, $8, 'Audit PII Fallback', 'confirmed', NOW(), NOW())`,
+            [bid, tenantA, serviceA, defaultResourceId, slot, 30, cid, PII_EMAIL],
           );
           created.push(bid);
         }

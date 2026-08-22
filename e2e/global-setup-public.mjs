@@ -293,6 +293,12 @@ async function cleanupAndInsert(pg, spec, opts) {
     }
     throw err;
   }
+  await pg.query(
+    `INSERT INTO public.staff_resources(tenant_id, display_name, slug, active, bookable, sort_order)
+     VALUES ($1::uuid, $2, 'principale', TRUE, TRUE, 0)
+     ON CONFLICT (tenant_id, slug) DO NOTHING`,
+    [tenantId, (spec.displayName || "Principale").substring(0, 80)],
+  );
   return tenantId;
 }
 

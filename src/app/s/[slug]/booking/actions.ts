@@ -12,6 +12,7 @@ export async function createBookingAction(_prevState: unknown, form: FormData) {
     customer_email: form.get("customer_email")?.toString(),
     customer_phone: form.get("customer_phone")?.toString(),
     notes: form.get("notes")?.toString(),
+    resource_slug: form.get("resource_slug")?.toString() ?? "any",
   };
   const parsed = CreatePublicBookingSchema.safeParse(payload);
   if (!parsed.success) {

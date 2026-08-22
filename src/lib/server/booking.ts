@@ -22,11 +22,26 @@ export const CreatePublicBookingSchema = z.object({
     .optional()
     .or(z.literal("")),
   notes: z.string().max(500).optional().or(z.literal("")),
+  resource_slug: z
+    .string()
+    .regex(/^(any|[a-z0-9][a-z0-9-]{0,58}[a-z0-9])$/)
+    .max(60)
+    .optional()
+    .or(z.literal("")),
 });
 
 export type PublicBookingInput = z.infer<typeof CreatePublicBookingSchema>;
 
-export async function createPublicBooking(input: PublicBookingInput) {
+export type PublicBookingResult = {
+  booking_id: string;
+  booking_status: string;
+  starts_at: string;
+  ends_at: string;
+  resource_slug?: string | null;
+  resource_display_name?: string | null;
+};
+
+export async function createPublicBooking(input: PublicBookingInput): Promise<PublicBookingResult> {
   const validated = CreatePublicBookingSchema.parse(input);
   const supabase = await createSupabaseServerClient();
   const email =
@@ -38,39 +53,47 @@ export async function createPublicBooking(input: PublicBookingInput) {
       ? validated.customer_phone
       : null;
   const notes = validated.notes && validated.notes.length > 0 ? validated.notes : null;
-  const rpcArgs: Record<string, unknown> = {
+  const resource_slug =
+    validated.resource_slug && validated.resource_slug.length > 0 ? validated.resource_slug : "any";
+  const rpcArgs = {
     p_slug: validated.slug,
     p_service_id: validated.service_id,
     p_starts_at: validated.starts_at.toISOString(),
     p_customer_name: validated.customer_name,
+    p_resource_slug: resource_slug,
+    ...(email ? { p_customer_email: email } : {}),
+    ...(phone ? { p_customer_phone: phone } : {}),
+    ...(notes ? { p_notes: notes } : {}),
   };
-  if (email) rpcArgs["p_customer_email"] = email;
-  if (phone) rpcArgs["p_customer_phone"] = phone;
-  if (notes) rpcArgs["p_notes"] = notes;
-  const { data, error } = await supabase.rpc(
-    "public_booking_create_slug",
-    rpcArgs as {
-      p_slug: string;
-      p_service_id: string;
-      p_starts_at: string;
-      p_customer_name: string;
-      p_customer_email?: string;
-      p_customer_phone?: string;
-      p_notes?: string;
-    },
-  );
+  const { data, error } = await supabase.rpc("public_booking_create_v2", rpcArgs as never);
   if (error) {
     throw new Error(error.message || "BOOKING_ERROR");
   }
-  const rows = data as unknown as Array<{
-    booking_id: string;
-    booking_status: string;
-    starts_at: string;
-    ends_at: string;
-    customer_id?: string | null;
-  }> | null;
-  if (!rows || rows.length === 0) throw new Error("BOOKING_EMPTY");
-  return rows[0];
+  const rows = (data as unknown as PublicBookingResult[] | null) ?? [];
+  if (rows.length === 0) throw new Error("BOOKING_EMPTY");
+  const result = rows[0];
+  if (!result) throw new Error("BOOKING_EMPTY");
+  return result;
+}
+
+export type PublicResourceOption = {
+  resource_slug: string;
+  resource_display_name: string;
+  sort_order: number;
+};
+
+export async function listPublicResourcesForService(opts: {
+  slug: string;
+  service_id: string;
+}): Promise<PublicResourceOption[]> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.rpc("public_booking_resources_list", {
+    p_slug: opts.slug,
+    p_service_id: opts.service_id,
+  });
+  if (error) throw new Error(error.message);
+  const rows = (data as unknown as PublicResourceOption[] | null) ?? [];
+  return rows;
 }
 
 export type BusinessAvailabilityRow = {

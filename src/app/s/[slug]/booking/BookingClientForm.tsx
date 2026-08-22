@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useFormState, useFormStatus } from "react-dom";
 import { createBookingAction } from "./actions";
-import type { BusinessAvailabilityRow, Slot } from "@/lib/server/booking";
+import type { BusinessAvailabilityRow, PublicResourceOption, Slot } from "@/lib/server/booking";
 
 type ServiceOption = {
   id: string;
@@ -38,6 +38,8 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
     [services],
   );
   const [serviceId, setServiceId] = useState<string>(activeServices[0]?.id ?? "");
+  const [resourceSlug, setResourceSlug] = useState<string>("any");
+  const [resources, setResources] = useState<PublicResourceOption[]>([]);
   const [date, setDate] = useState<string>(() => {
     const n = new Date();
     return isoDateDmy(n);
@@ -46,6 +48,46 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loading, setLoading] = useState(false);
   const [formState, formAction] = useFormState(createBookingAction, undefined);
+
+  const multiMode = resources.length >= 2;
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!serviceId) {
+      queueMicrotask(() => {
+        setResources([]);
+        setResourceSlug("any");
+      });
+      return;
+    }
+    const url = `/api/res?slug=${encodeURIComponent(slug)}&service_id=${encodeURIComponent(serviceId)}`;
+    const doFetch = (attempt: number) => {
+      if (cancelled) return;
+      fetch(url)
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((data) => {
+          if (!cancelled) {
+            const arr = (data?.resources ?? []) as PublicResourceOption[];
+            setResources(arr);
+            setResourceSlug("any");
+          }
+        })
+        .catch(() => {
+          if (cancelled) return;
+          if (attempt === 0) {
+            setTimeout(() => doFetch(1), 500);
+            return;
+          }
+          setResources([]);
+          setResourceSlug("any");
+        });
+    };
+    doFetch(0);
+    return () => {
+      cancelled = true;
+    };
+  }, [serviceId, slug]);
+
   useEffect(() => {
     let cancelled = false;
     if (!serviceId) {
@@ -58,23 +100,37 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
       return;
     }
     queueMicrotask(() => setLoading(true));
-    fetch(
-      `/s/${encodeURIComponent(slug)}/booking/slots?service_id=${encodeURIComponent(serviceId)}&date=${encodeURIComponent(date)}`,
-    )
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.statusText))))
-      .then((data) => {
-        if (!cancelled) setSlots((data?.slots ?? []) as Slot[]);
-      })
-      .catch(() => {
-        if (!cancelled) setSlots([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    const params = new URLSearchParams({
+      service_id: serviceId,
+      date,
+      resource_slug: resourceSlug || "any",
+    });
+    const url = `/s/${encodeURIComponent(slug)}/booking/slots?${params.toString()}`;
+    const doFetch = (attempt: number) => {
+      if (cancelled) return;
+      fetch(url)
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.statusText))))
+        .then((data) => {
+          if (!cancelled) setSlots((data?.slots ?? []) as Slot[]);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          if (attempt === 0) {
+            setTimeout(() => doFetch(1), 500);
+            return;
+          }
+          setSlots([]);
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    };
+    doFetch(0);
     return () => {
       cancelled = true;
     };
-  }, [serviceId, date, slug, activeServices]);
+  }, [serviceId, date, slug, resourceSlug, activeServices]);
+
   const weekdayOfSelected = useMemo(() => {
     const parts = date.split("-");
     const y = Number(parts[0]);
@@ -101,7 +157,7 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
           Prenota un appuntamento
         </h1>
         <p className="mt-1 text-sm text-neutral-600">
-          Scegli servizio, giorno e orario disponibile. Conferma con i tuoi dati.
+          Scegli servizio, professionista, giorno e orario disponibile. Conferma con i tuoi dati.
         </p>
       </header>
 
@@ -109,6 +165,7 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
         <input type="hidden" name="slug" value={slug} />
         <input type="hidden" name="service_id" value={serviceId} />
         <input type="hidden" name="starts_at" value={slot?.iso ?? ""} />
+        <input type="hidden" name="resource_slug" value={resourceSlug || "any"} />
 
         <div className="sm:col-span-2">
           <label htmlFor="service" className="mb-1 block text-sm font-medium">
@@ -135,6 +192,30 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
             ))}
           </select>
         </div>
+
+        {multiMode ? (
+          <div className="sm:col-span-2">
+            <label htmlFor="operator" className="mb-1 block text-sm font-medium">
+              Operatore
+            </label>
+            <select
+              id="operator"
+              className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm"
+              value={resourceSlug || "any"}
+              onChange={(e) => {
+                setResourceSlug(e.target.value);
+                setSlot(null);
+              }}
+            >
+              <option value="any">Qualsiasi operatore</option>
+              {resources.map((r) => (
+                <option key={r.resource_slug} value={r.resource_slug}>
+                  {r.resource_display_name}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
 
         <div>
           <label htmlFor="date" className="mb-1 block text-sm font-medium">
@@ -276,6 +357,9 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
                 })}
                 {" · "}
                 codice: {formState.booking!.booking_id.substring(0, 8)}
+                {formState.booking!.resource_display_name
+                  ? ` · con ${formState.booking!.resource_display_name}`
+                  : ""}
               </span>
             </div>
           )}
