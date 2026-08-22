@@ -167,120 +167,127 @@ async function cleanupAndInsert(pg, spec, opts) {
   const now = new Date();
   const publishedAt = opts.published ? now : null;
   const tenantId = randomUUID();
-  await pg.query(`DELETE FROM public.business_profiles WHERE tenant_id = $1`, [tenantId]);
-  await pg.query(
-    `DELETE FROM public.site_sections WHERE tenant_id IN (SELECT id FROM public.tenants WHERE slug = $1)`,
-    [spec.slug],
-  );
-  await pg.query(
-    `DELETE FROM public.services WHERE tenant_id IN (SELECT id FROM public.tenants WHERE slug = $1)`,
-    [spec.slug],
-  );
-  await pg.query(
-    `DELETE FROM public.tenants WHERE id IN (SELECT id FROM public.tenants WHERE slug = $1) OR slug = $1`,
-    [spec.slug],
-  );
-  await pg.query(
-    `INSERT INTO public.tenants(id, name, slug, status, published, published_at, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [tenantId, spec.name, spec.slug, opts.status, opts.published, publishedAt, now, now],
-  );
-  await pg.query(
-    `INSERT INTO public.business_profiles(
-        tenant_id, display_name, category, description, phone, email, website_url,
-        address_line1, address_line2, city, province, postal_code, country_code,
-        latitude, longitude, locale, timezone, created_at, updated_at,
-        theme_primary, theme_background, theme_foreground, theme_muted, theme_radius,
-        theme_heading_font_preset, theme_body_font_preset
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
-    [
-      tenantId,
-      spec.displayName,
-      spec.category,
-      spec.description,
-      spec.phone ?? null,
-      spec.email ?? null,
-      spec.website ?? null,
-      spec.address ?? null,
-      null,
-      spec.city,
-      spec.province,
-      spec.postal,
-      spec.country,
-      null,
-      null,
-      "it",
-      "Europe/Rome",
-      now,
-      now,
-      spec.themePrimary ?? "#111827",
-      spec.themeBackground ?? "#fafafa",
-      spec.themeForeground ?? "#0f172a",
-      spec.themeMuted ?? "#6b7280",
-      spec.themeRadius ?? "lg",
-      spec.themeHeading ?? "sans",
-      spec.themeBody ?? "sans",
-    ],
-  );
-  // Sections FASE5 (prepared statement)
-  if (Array.isArray(spec.sections) && spec.sections.length) {
-    for (const s of spec.sections) {
-      await pg.query(
-        `INSERT INTO public.site_sections(id, tenant_id, section_type, position, enabled, variant, settings)
-         VALUES ($1::uuid, $2::uuid, $3, $4::int, $5::boolean, $6, $7::jsonb)`,
-        [
-          randomUUID(),
-          tenantId,
-          s.type,
-          s.position,
-          Boolean(s.enabled),
-          s.variant ?? "default",
-          JSON.stringify(s.settings ?? {}),
-        ],
-      );
-    }
-  }
-  if (Array.isArray(spec.services) && spec.services.length) {
-    for (const s of spec.services) {
-      await pg.query(
-        `INSERT INTO public.services(tenant_id, name, description, price_from, currency, duration_minutes, active, position)
-         VALUES ($1::uuid,$2::text,$3::text,$4::numeric(10,2),$5,$6::int,$7::boolean,$8::int)`,
-        [
-          tenantId,
-          s.name,
-          s.description ?? null,
-          s.priceFrom,
-          s.currency ?? "EUR",
-          s.durationMinutes ?? 30,
-          s.active ?? true,
-          s.position,
-        ],
-      );
-    }
-  }
-  // FASE9: business_availability default required per slots API
-  // weekday mapping: 0=Sun 1=Mon 2=Tue 3=Wed 4=Thu 5=Fri 6=Sat
-  // LUN..VEN: 09:00-18:00 enabled; SAB: 09:00-13:00 enabled; DOM disabled
-  const defaultAvailability = [
-    [0, false, "09:00", "18:00"],
-    [1, true, "09:00", "18:00"],
-    [2, true, "09:00", "18:00"],
-    [3, true, "09:00", "18:00"],
-    [4, true, "09:00", "18:00"],
-    [5, true, "09:00", "18:00"],
-    [6, true, "09:00", "13:00"],
-  ];
-  for (const [wd, en, s, e] of defaultAvailability) {
+  await pg.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
+  try {
+    await pg.query(`DELETE FROM public.business_profiles WHERE tenant_id = $1`, [tenantId]);
     await pg.query(
-      `INSERT INTO public.business_availability(tenant_id, weekday, enabled, start_time, end_time, created_at, updated_at)
-       VALUES ($1::uuid,$2::int,$3::boolean,$4::time,$5::time,$6::timestamptz,$7::timestamptz)
-       ON CONFLICT (tenant_id, weekday) DO UPDATE SET
-         enabled = EXCLUDED.enabled,
-         start_time = EXCLUDED.start_time,
-         end_time = EXCLUDED.end_time,
-         updated_at = EXCLUDED.updated_at`,
-      [tenantId, wd, en, s, e, now, now],
+      `DELETE FROM public.site_sections WHERE tenant_id IN (SELECT id FROM public.tenants WHERE slug = $1)`,
+      [spec.slug],
     );
+    await pg.query(
+      `DELETE FROM public.services WHERE tenant_id IN (SELECT id FROM public.tenants WHERE slug = $1)`,
+      [spec.slug],
+    );
+    await pg.query(
+      `DELETE FROM public.business_availability WHERE tenant_id IN (SELECT id FROM public.tenants WHERE slug = $1)`,
+      [spec.slug],
+    );
+    await pg.query(
+      `DELETE FROM public.tenants WHERE id IN (SELECT id FROM public.tenants WHERE slug = $1) OR slug = $1`,
+      [spec.slug],
+    );
+    await pg.query(
+      `INSERT INTO public.tenants(id, name, slug, status, published, published_at, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [tenantId, spec.name, spec.slug, opts.status, opts.published, publishedAt, now, now],
+    );
+    await pg.query(
+      `INSERT INTO public.business_profiles(
+          tenant_id, display_name, category, description, phone, email, website_url,
+          address_line1, address_line2, city, province, postal_code, country_code,
+          latitude, longitude, locale, timezone, created_at, updated_at,
+          theme_primary, theme_background, theme_foreground, theme_muted, theme_radius,
+          theme_heading_font_preset, theme_body_font_preset
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
+      [
+        tenantId,
+        spec.displayName,
+        spec.category,
+        spec.description,
+        spec.phone ?? null,
+        spec.email ?? null,
+        spec.website ?? null,
+        spec.address ?? null,
+        null,
+        spec.city,
+        spec.province,
+        spec.postal,
+        spec.country,
+        null,
+        null,
+        "it",
+        "Europe/Rome",
+        now,
+        now,
+        spec.themePrimary ?? "#111827",
+        spec.themeBackground ?? "#fafafa",
+        spec.themeForeground ?? "#0f172a",
+        spec.themeMuted ?? "#6b7280",
+        spec.themeRadius ?? "lg",
+        spec.themeHeading ?? "sans",
+        spec.themeBody ?? "sans",
+      ],
+    );
+    if (Array.isArray(spec.sections) && spec.sections.length) {
+      for (const s of spec.sections) {
+        await pg.query(
+          `INSERT INTO public.site_sections(id, tenant_id, section_type, position, enabled, variant, settings)
+           VALUES ($1::uuid, $2::uuid, $3, $4::int, $5::boolean, $6, $7::jsonb)`,
+          [
+            randomUUID(),
+            tenantId,
+            s.type,
+            s.position,
+            Boolean(s.enabled),
+            s.variant ?? "default",
+            JSON.stringify(s.settings ?? {}),
+          ],
+        );
+      }
+    }
+    if (Array.isArray(spec.services) && spec.services.length) {
+      for (const s of spec.services) {
+        await pg.query(
+          `INSERT INTO public.services(tenant_id, name, description, price_from, currency, duration_minutes, active, position)
+           VALUES ($1::uuid,$2::text,$3::text,$4::numeric(10,2),$5,$6::int,$7::boolean,$8::int)`,
+          [
+            tenantId,
+            s.name,
+            s.description ?? null,
+            s.priceFrom,
+            s.currency ?? "EUR",
+            s.durationMinutes ?? 30,
+            s.active ?? true,
+            s.position,
+          ],
+        );
+      }
+    }
+    const defaultAvailability = [
+      [0, false, "09:00", "18:00"],
+      [1, true, "09:00", "18:00"],
+      [2, true, "09:00", "18:00"],
+      [3, true, "09:00", "18:00"],
+      [4, true, "09:00", "18:00"],
+      [5, true, "09:00", "18:00"],
+      [6, true, "09:00", "13:00"],
+    ];
+    for (const [wd, en, s, e] of defaultAvailability) {
+      await pg.query(
+        `INSERT INTO public.business_availability(tenant_id, weekday, enabled, start_time, end_time, created_at, updated_at)
+         VALUES ($1::uuid,$2::int,$3::boolean,$4::time,$5::time,$6::timestamptz,$7::timestamptz)
+         ON CONFLICT (tenant_id, weekday) DO UPDATE SET
+           enabled = EXCLUDED.enabled,
+           start_time = EXCLUDED.start_time,
+           end_time = EXCLUDED.end_time,
+           updated_at = EXCLUDED.updated_at`,
+        [tenantId, wd, en, s, e, now, now],
+      );
+    }
+    await pg.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
+  } catch (err) {
+    try { await pg.query(`SET LOCAL session_replication_role = DEFAULT; ROLLBACK;`); } catch (_) { /* swallow */ }
+    throw err;
   }
   return tenantId;
 }

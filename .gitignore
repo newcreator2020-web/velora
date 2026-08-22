@@ -49,15 +49,22 @@ pnpm-debug.log*
 # vitest
 coverage/
 
-# playwright
+# playwright artifacts (ignore browser binaries + output dirs only; keep tracked specs remain tracked)
 /test-results/
 /playwright-report/
 /blob-report/
 /playwright/.cache/
 /.playwright-browsers/
+e2e/.cache/
+e2e/test-results/
+e2e/storageState*.json
+e2e/storage-state*.json
+e2e/*-state*.json
 
-# Local WIP E2E specs (use tests/e2e tracked; ignore loose e2e/ scratch dir).
-/e2e/
+# Explicit ignore for scratch WIP only (tracked specs: fase6/7/8/9 + global-setup stay tracked; do not commit loose untracked WIP drafts
+e2e/scratch/
+e2e/drafts/
+# If a loose untracked scratch spec must be ignored, list it explicitly below instead of blanket /e2e/
 
 # IDE / AI agent tool-local files (NOT project governance).
 # Project technical rules are the single source of truth in TRAE Project Rules

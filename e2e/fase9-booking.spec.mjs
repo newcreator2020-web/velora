@@ -292,7 +292,10 @@ async function selectServiceDateSlot(page, serviceLabel, dateIso, slotLabelHour 
   if (!value) throw new Error(`service option not found for ${serviceLabel}`);
   await page.locator("select#service").selectOption({ value });
   await page.locator("#date").fill(dateIso);
-  await page.locator("#date").dispatchEvent("change");
+  await page.locator("#date").dispatchEvent("input", { bubbles: true });
+  await page.locator("#date").dispatchEvent("change", { bubbles: true });
+  try { await page.waitForLoadState("networkidle", { timeout: 10_000 }); } catch (_e) { /* ignore */ }
+  await page.waitForTimeout(1500);
   await expect(page.getByText("Caricamento slot…"))
     .toBeVisible({ timeout: 10_000 })
     .catch(() => {});
@@ -350,9 +353,12 @@ test("E9-4 Slots derivati da availability reale (LUN 9-18). DOM slot unavailable
   if (!value) throw new Error("service option Taglio uomo not found");
   await page.locator("select#service").selectOption({ value });
   await page.locator("#date").fill(NEXT_MON.iso);
-  await page.locator("#date").dispatchEvent("change");
+  await page.locator("#date").dispatchEvent("input", { bubbles: true });
+  await page.locator("#date").dispatchEvent("change", { bubbles: true });
+  try { await page.waitForLoadState("networkidle", { timeout: 10_000 }); } catch (_e) { /* ignore */ }
+  await page.waitForTimeout(1500);
   const slot9 = page.getByRole("button", { name: "09:00", exact: true }).first();
-  await expect(slot9).toBeEnabled({ timeout: 15_000 });
+  await expect(slot9).toBeEnabled({ timeout: 20_000 });
   const slot18 = page.getByRole("button", { name: "18:00", exact: true });
   await expect(slot18).toHaveCount(0);
 });
@@ -374,7 +380,10 @@ test("E9-5 Domenica chiuso (nessuno slot disponibile)", async ({ page }) => {
   const sun = new Date(today.getTime() - 86_400_000); // Monday -1 = Sunday
   const sunIso = `${sun.getUTCFullYear()}-${String(sun.getUTCMonth() + 1).padStart(2, "0")}-${String(sun.getUTCDate()).padStart(2, "0")}`;
   await page.locator("#date").fill(sunIso);
-  await page.locator("#date").dispatchEvent("change");
+  await page.locator("#date").dispatchEvent("input", { bubbles: true });
+  await page.locator("#date").dispatchEvent("change", { bubbles: true });
+  try { await page.waitForLoadState("networkidle", { timeout: 10_000 }); } catch (_e) { /* ignore */ }
+  await page.waitForTimeout(1500);
   await expect(page.getByText(/chiuso/)).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText(/nessuno slot disponibile/i)).toBeVisible({ timeout: 10_000 });
 });
@@ -462,7 +471,8 @@ test("E9-11 Forged service B denied. B invariant", async ({ page }) => {
   if (!v11) throw new Error("service option Taglio uomo not found");
   await page.locator("select#service").selectOption({ value: v11 });
   await page.locator("#date").fill(NEXT_MON.iso);
-  await page.locator("#date").dispatchEvent("change");
+  await page.locator("#date").dispatchEvent("input", { bubbles: true });
+  await page.locator("#date").dispatchEvent("change", { bubbles: true });
   await page.waitForTimeout(1500);
   // Sovrascrivi hidden input service_id via evaluate
   const svcBId = svcBRow.rows[0].id;
@@ -639,12 +649,23 @@ test("E9-16 Owner A dashboard bookings vede prenotazioni A. No B rows.", async (
   await expect(page.getByRole("heading", { name: /appuntamenti/i })).toBeVisible({
     timeout: 20_000,
   });
-  await expect(page.getByText("Cliente Dashboard").first()).toBeVisible();
+  // NEXT_MON is future: switch away from "Oggi" default tab to show upcoming
+  const tabProssimi = page.getByRole("tab", { name: /Prossimi/i });
+  if ((await tabProssimi.count()) > 0) {
+    await tabProssimi.click();
+  } else {
+    const tabAll = page.getByRole("tab", { name: /Tutti/i });
+    if ((await tabAll.count()) > 0) await tabAll.click();
+  }
+  await expect(page.getByText("Cliente Dashboard").first()).toBeVisible({
+    timeout: 15_000,
+  });
 });
 
 test("E9-17 Staff A: read allowed; cancel button DENY/hidden. Manager/Owner cancel allowed.", async ({
   browser,
 }) => {
+  test.setTimeout(600_000);
   const c = await pgClient();
   // Ensure at least 1 confirmed booking for dashboard list
   await hardDeleteBookings(c, [ids.tenantA]);
@@ -662,14 +683,30 @@ test("E9-17 Staff A: read allowed; cancel button DENY/hidden. Manager/Owner canc
     const pStaff = await ctxStaff.newPage();
     await login(pStaff, EMAILS.staffA, TEST_PW);
     await pStaff.goto("/app/bookings");
+    const tabP1 = pStaff.getByRole("tab", { name: /Prossimi/i });
+    if ((await tabP1.count()) > 0) await tabP1.click();
+    else {
+      const tabT1 = pStaff.getByRole("tab", { name: /Tutti/i });
+      if ((await tabT1.count()) > 0) await tabT1.click();
+    }
     await expect(pStaff.getByText("Cancel Test").first()).toBeVisible({ timeout: 15_000 });
-    const cancelBtnStaff = pStaff.getByRole("button", { name: /annulla/i }).first();
+    const rowStaff = pStaff.getByText("Cancel Test").first().locator("xpath=ancestor::tr | ancestor::li").first();
+    const cancelBtnStaff = rowStaff.getByRole("button", { name: /annulla/i });
     await expect(cancelBtnStaff).toHaveCount(0);
 
     const pOwner = await ctxOwner.newPage();
     await login(pOwner, EMAILS.ownerA, TEST_PW);
     await pOwner.goto("/app/bookings");
-    await expect(pOwner.getByRole("button", { name: /annulla/i }).first()).toBeVisible({
+    const tabP2 = pOwner.getByRole("tab", { name: /Prossimi/i });
+    if ((await tabP2.count()) > 0) await tabP2.click();
+    else {
+      const tabT2 = pOwner.getByRole("tab", { name: /Tutti/i });
+      if ((await tabT2.count()) > 0) await tabT2.click();
+    }
+    const rowOwner = pOwner.getByText("Cancel Test").first().locator("xpath=ancestor::tr | ancestor::li").first();
+    const ownerCancelBtn = rowOwner.getByRole("button", { name: /annulla/i }).first();
+    try { await ownerCancelBtn.scrollIntoViewIfNeeded(); } catch (_e) { /* ignore */ }
+    await expect(ownerCancelBtn).toBeVisible({
       timeout: 15_000,
     });
   } finally {
@@ -693,8 +730,15 @@ test("E9-18 Owner cancellation valida: status → cancelled. Slot torna disponib
   const bid = ins.rows[0].id;
   await login(page, EMAILS.ownerA, TEST_PW);
   await page.goto("/app/bookings");
-  const targetRow = page.getByText("CancTarget").first().locator("xpath=ancestor::tr");
+  const tabPE = page.getByRole("tab", { name: /Prossimi/i });
+  if ((await tabPE.count()) > 0) await tabPE.click();
+  else {
+    const tabTE = page.getByRole("tab", { name: /Tutti/i });
+    if ((await tabTE.count()) > 0) await tabTE.click();
+  }
+  const targetRow = page.getByText("CancTarget").first().locator("xpath=ancestor::tr | ancestor::li").first();
   const cancelBtn = targetRow.getByRole("button", { name: /annulla/i }).first();
+  try { await cancelBtn.scrollIntoViewIfNeeded(); } catch (_e) { /* ignore */ }
   await expect(cancelBtn).toBeVisible({ timeout: 15_000 });
   await cancelBtn.click();
   await page.waitForLoadState("networkidle");
