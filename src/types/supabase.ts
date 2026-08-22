@@ -6,6 +6,7 @@ export type Database = {
       audit_logs: {
         Row: {
           action: string;
+          actor_kind: string;
           actor_user_id: string | null;
           created_at: string;
           entity_id: string | null;
@@ -16,6 +17,7 @@ export type Database = {
         };
         Insert: {
           action: string;
+          actor_kind?: string;
           actor_user_id?: string | null;
           created_at?: string;
           entity_id?: string | null;
@@ -26,6 +28,7 @@ export type Database = {
         };
         Update: {
           action?: string;
+          actor_kind?: string;
           actor_user_id?: string | null;
           created_at?: string;
           entity_id?: string | null;
@@ -245,11 +248,25 @@ export type Database = {
             referencedColumns: ["id"];
           },
           {
+            foreignKeyName: "bookings_tenant_customer_fk";
+            columns: ["tenant_id", "customer_id"];
+            isOneToOne: false;
+            referencedRelation: "customers";
+            referencedColumns: ["tenant_id", "id"];
+          },
+          {
             foreignKeyName: "bookings_tenant_id_fkey";
             columns: ["tenant_id"];
             isOneToOne: false;
             referencedRelation: "tenants";
             referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "bookings_tenant_service_fk";
+            columns: ["tenant_id", "service_id"];
+            isOneToOne: false;
+            referencedRelation: "services";
+            referencedColumns: ["tenant_id", "id"];
           },
         ];
       };
@@ -726,6 +743,16 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      _audit_insert_trusted: {
+        Args: {
+          p_action: string;
+          p_entity_id: string;
+          p_entity_type: string;
+          p_metadata?: Json;
+          p_tenant_id: string;
+        };
+        Returns: undefined;
+      };
       admin_set_tenant_plan: {
         Args: {
           p_admin_id?: string;
@@ -755,6 +782,15 @@ export type Database = {
           ok: boolean;
           old_plan: string;
         }[];
+      };
+      booking_validate_business_hours_and_overlap: {
+        Args: {
+          p_ends_at: string;
+          p_service_id: string;
+          p_starts_at: string;
+          p_tenant_id: string;
+        };
+        Returns: boolean;
       };
       create_tenant_with_owner: {
         Args: {
@@ -794,42 +830,36 @@ export type Database = {
         Args: { "": string };
         Returns: Record<string, unknown>[];
       };
-      public_booking_create_slug:
-        | {
-            Args: {
-              p_customer_email?: string;
-              p_customer_name: string;
-              p_customer_phone?: string;
-              p_notes?: string;
-              p_service_id: string;
-              p_slug: string;
-              p_starts_at: string;
-            };
-            Returns: {
-              booking_id: string;
-              booking_status: string;
-              customer_id: string;
-              ends_at: string;
-              starts_at: string;
-            }[];
-          }
-        | {
-            Args: {
-              p_customer_email?: string;
-              p_customer_name: string;
-              p_customer_phone?: string;
-              p_notes?: string;
-              p_service_id: string;
-              p_slug: string;
-              p_starts_at: string;
-            };
-            Returns: {
-              booking_id: string;
-              booking_status: string;
-              ends_at: string;
-              starts_at: string;
-            }[];
-          };
+      public_booking_create_slug: {
+        Args: {
+          p_customer_email?: string;
+          p_customer_name: string;
+          p_customer_phone?: string;
+          p_notes?: string;
+          p_service_id: string;
+          p_slug: string;
+          p_starts_at: string;
+        };
+        Returns: {
+          booking_id: string;
+          booking_status: string;
+          customer_id: string;
+          ends_at: string;
+          starts_at: string;
+        }[];
+      };
+      public_booking_get_confirmed_ranges: {
+        Args: {
+          p_from: string;
+          p_service_id: string;
+          p_tenant_id: string;
+          p_to: string;
+        };
+        Returns: {
+          ends_at: string;
+          starts_at: string;
+        }[];
+      };
       publish_site_draft: {
         Args: { p_expected_revision?: string; p_tenant_id: string };
         Returns: {

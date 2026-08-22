@@ -640,3 +640,138 @@ Public URL: /s/[slug]/booking. NO internal tenant_id URL. slug preserved through
   - Booking create (RPC): ≤ 5 (lookup tenant/slug, lookup service, validate hours, validate overlap, insert bookings + audit + trigger).
   - Dashboard list ≤ 1.
 - No N+1. Bundle booking page client JS ~ React core + hooks only (no heavy libs).
+
+---
+
+## 16. FASE 11B — Append-only Security & Audit Defect Closure (2026-08-22)
+
+Scopo: chiusura difetti sicurezza/audit CON RUNTIME PROOF. Nessuna nuova feature.
+- **Migration APPEND ONLY:** 1 nuova su 48 frozen (FASE1–FASE10H → FASE11B = #49).
+- **Nessun edit a migration FASE1–FASE10H frozen (0 righe modificate).**
+- **Nessun edit a test FASE6–FASE10 Playwright frozen.** Fix lato server (view fallback + PostgREST hint) invece di edit tests frozen.
+- Commit singolo FASE11B. NESSUNO PUSH MAI.
+
+### 16.1 Security Boundary Bookings Pubblico — PII-Free RPC
+
+| Layer | BEFORE (FASE10H frozen D1 leak CONFIRMED) | AFTER (FASE11B hardened) |
+| --- | --- | --- |
+| anon grants | `GRANT SELECT ON public.bookings TO anon` + policy `bookings_anon_select_published` → PII leggibile | **REVOKE SELECT ON bookings FROM anon; DROP POLICY bookings_anon_select_published;** anon NON ha grants diretti |
+| public slots | `SELECT customer_name/email/phone/notes...` per disponibilità client | **RPC `public_booking_get_confirmed_ranges` SECURITY DEFINER** SET `search_path=''` returns solo `starts_at, ends_at` 0 PII |
+| location | `src/lib/server/booking.ts:185-201` direct select bookings | Stesso file: `.rpc("public_booking_get_confirmed_ranges",{...})` |
+| proof test | S11-01 PASS denied + §15 browser network inspection 0 leaks PII anon | ✅ |
+| booking create | `public_booking_create_slug` SECURITY DEFINER anon | invariato ✅ |
+| slot conflict | EXCLUDE GiST `bookings_no_overlap_confirmed` WHERE status='confirmed' | invariato ✅ S11-04 overlap excluded |
+
+### 16.2 Audit Contract (Atomic NO silent failure)
+
+Schema reale `public.audit_logs` colonne frozen FASE7: `id, created_at, tenant_id, action, actor_id, entity_type, entity_id, metadata(JSONB)`.
+
+**Eventi contrattuali minimi FASE11B (audit.required):**
+- `booking_created` (trigger INSERT bookings)
+- `booking_cancelled` / `booking_completed` / `booking_no_show` (trigger UPDATE status confirmed→X)
+- `customer_created` (trigger INSERT customers)
+- `customer_updated` (trigger UPDATE customers)
+
+**Atomicity §5:** mutation + audit.insert = stessa transazione. Audit fallisce → TX ROLLBACK. **ZERO EXCEPTION WHEN OTHERS NULL.**
+
+**_audit_insert_trusted rewrite FASE11B:**
+- PII strip ampliata 24 keys proibite (customer_name/customer_email/customer_phone/notes/email/phone/address/jwt/token/authorization/bearer/cookie/password/sk_live/sk_test/pk_live/pk_test/whsec_/service_role_key/stripe_secret/postgres_password/credit_card/pan/cvc/ssn) → `metadata = clean_metadata #- ARRAY[...]`.
+- Nessun catch / silent. RAISE originale.
+
+**Audit Immutability §7 (invariato frozen + verificato S11-12/13):**
+- UPDATE audit_logs = DENY (trigger + RLS)
+- DELETE audit_logs = DENY (policy + trigger)
+- S11-12 ✅ / S11-13 ✅.
+
+### 16.3 Plan Protection D4 Fix (backward compat)
+
+| Item | BEFORE FASE8c bug | AFTER FASE11B rewrite |
+| --- | --- | --- |
+| WHERE clause | `platform_admins.active = TRUE` (colonna NON ESISTE) | `platform_admins.status = 'active'` (colonna REALE) |
+| messaggio errore BT7/BT8 frozen | `plan_id mutation denied` (regex test FASE8B BT7/BT8) | `'plan_id mutation denied for end-users' USING ERRCODE='42501'` → regex `plan_id mutation denied` match backward-compat ✅ BT7/BT8 PASS senza edit test |
+| coverage | S11-16 (owner forge denied) S11-17 (manager) S11-18 (staff) | ✅ 3/3 PASS |
+
+### 16.4 Composite Tenant Integrity FK (bookings cross-tenant)
+
+Prerequisito UNIQUE (DB-level):
+- `UNIQUE (tenant_id, id) ON public.services`
+- `UNIQUE (tenant_id, id) ON public.customers`
+
+Composite FK Multi-Column:
+```
+bookings (tenant_id, service_id) → services(tenant_id, id) ON DELETE CASCADE
+bookings (tenant_id, customer_id) → customers(tenant_id, id) ON DELETE SET NULL
+```
+
+**S11-19/20 Proof:**
+- S11-19: booking tenant A + service tenant B → FK VIOLATION → IMPOSSIBLE ✅
+- S11-20: booking tenant A + customer tenant B → FK VIOLATION → IMPOSSIBLE ✅
+
+**PostgREST Ambiguity Hint (2 locations):**
+2 FK multipli (frozen 1-col + composite nuova) → hint sintassi ufficiale `!fk_name`:
+- `src/app/app/bookings/page.tsx:43` → `.select("*,services!bookings_service_id_fkey(...),customers!bookings_customer_id_fkey(...)")`
+- `src/lib/server/customers.ts:200` → `.select("*,services!bookings_service_id_fkey(...)")`
+Hints puntano a **nomi FK FASE9 originali frozen** (bookings_service_id_fkey / bookings_customer_id_fkey) — no regressioni.
+
+### 16.5 Internal RPC Boundary (S11-15)
+
+- `customer_upsert_for_public_booking` — signature frozen FASE10 UUID,TEXT,TEXT,TEXT 4-args required.
+  - FASE10: `GRANT EXECUTE ... TO anon;` → spam surface / enumeration possibile.
+  - FASE11B: **REVOKE EXECUTE ON FUNCTION customer_upsert_for_public_booking(UUID,TEXT,TEXT,TEXT) FROM anon;**
+  - S11-15 ✅ direct anon call = function 42501 insufficient_privilege.
+
+### 16.6 Migration FASE11B File (append-only, 1)
+
+`supabase/migrations/20260822200000_fase11b_security_audit_defects.sql` — 8 sezioni:
+- (a) `public_booking_get_confirmed_ranges` SECURITY DEFINER trusted RPC.
+- (b) D1: REVOKE SELECT bookings anon; DROP policy unsafe.
+- (c) S1: REVOKE EXECUTE `customer_upsert_for_public_booking` anon.
+- (d) D4: CREATE OR REPLACE `protect_tenant_plan_id` → `status='active'`; ERRCODE 42501 backward compat.
+- (e) CREATE OR REPLACE `_audit_insert_trusted`: NO EXCEPTION; PII strip 24 keys ampliata.
+- (f) DROP/RECREATE audit triggers status + INSERT events; ZERO EXCEPTION swallow.
+- (g) UNIQUE prerequisiti composites: services(tenant_id,id) UNIQUE; customers(tenant_id,id) UNIQUE.
+- (h) FK composites bookings→services (CASCADE) + bookings→customers (SET NULL).
+
+Totale migrazioni applicate: 49 (FASE1-10H = 48 frozen + FASE11B = 1).
+§12 double reset x2 equality → semantic SHA256 = IDENTICAL ✅.
+
+### 16.7 FASE11B Certification Counts (all GREEN)
+
+| Livello | Suite / comando | Resultato |
+| --- | --- | --- |
+| S11 Security Tests dedicati | `tests/db/fase11b-security-hardening.test.ts` S11-01..20 | **20/20** |
+| DB Totale 11 files | `pnpm db:test` §23 clean run fresh reset | **250/250** (BT7/BT8 inclusi) |
+| Unit/Integration src/ run1 | `pnpm vitest run src/` §23 clean | **18/18** |
+| Unit/Integration src/ run2 consec (no reset no changes) | `pnpm vitest run src/` §13 | **18/18** |
+| Playwright FASE6 DEV | frozen 52 tests | 52/52 |
+| Playwright FASE6 PROD | frozen 52 tests | 52/52 |
+| Playwright FASE7 DEV | entitlements frozen 18 | 18/18 |
+| Playwright FASE7 PROD | entitlements frozen 18 | 18/18 |
+| Playwright FASE8 DEV | billing frozen 20 | 20/20 |
+| Playwright FASE8 PROD | billing frozen 20 | 20/20 |
+| Playwright FASE9 DEV | booking frozen 24 | 24/24 |
+| Playwright FASE9 PROD | booking frozen 24 | 24/24 |
+| Playwright FASE10 DEV | CRM frozen 18 | 18/18 |
+| Playwright FASE10 PROD | CRM frozen 18 | 18/18 |
+| **Totale Playwright DEV** | somma F6/F7/F8/F9/F10 | **142/142** (9.9m) |
+| **Totale Playwright PROD** | somma F6/F7/F8/F9/F10 | **142/142** (9.3m) |
+| Responsive 3 VP | 375×812 · 768×1024 · 1440×900 scrollWidth≤clientWidth | ✅ PASS (E16-23) |
+| A11y axe wcag2/21 best-practice | serious=0 critical=0 H1≥1 main≥1 labels=ok | ✅ PASS (E26-30) |
+| TypeScript strict | `pnpm typecheck` exactOptionalPropertyTypes + noUnused enabled | 0 errors ✅ |
+| ESLint | `pnpm lint --max-warnings=0` | 0 errors 0 warnings ✅ |
+| Prettier | `pnpm format:check` (includes supabase.ts types) | All matched files code style ✅ |
+| Build prod Turbopack | `pnpm build` 13 static + 19 dynamic routes | exit 0 ✅ |
+| Health endpoint | GET /api/health prod porta 3100 | HTTP 200 status=ok ✅ |
+| Integrity | repo grep .only/.skip/.todo/xit/xdescribe + security bypass patterns | 1 only skip CONDIZIONALE SAFE, 0 unsafe patterns ✅ |
+| Secret Scan tracked files | sk_live_ / pk_live_ / whsec_ / service role / postgres cred / cookies storageState dumps | 0 reali leaks (solo sk_test_ fixture e reference doc SAFE) ✅ |
+| Service Role src inventory | 4 refs total | 4 JUSTIFIED (commento, env schema, env mapping, billing trusted stripe RPC) 0 UNJUSTIFIED ✅ |
+| Git diff --check | whitespace / trailling / merge conflict markers | 0 errors ✅ |
+
+### 16.8 Gates FASE11B
+
+- **FAILED**: 0
+- **NOT VERIFIED**: 0
+- **§23 SECOND CLEAN RUN (fresh reset → DB250 → vitest 18/18 ×2 → quality0 → build → health200)**: ALL GREEN ✅
+- **§15 Browser Public Booking PII boundary (MCP integrated)**: slots RPC JSON = solo date 0 PII ✅
+- **§18-19-20 Integrity/Secrets/Service**: ALL SAFE ✅
+- **FREEZE DECISION**: **FASE 11B = FROZEN** (report autorevole → `docs/FREEZE-REPORT-FASE11B.md`)

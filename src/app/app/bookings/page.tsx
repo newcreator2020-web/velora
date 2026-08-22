@@ -40,7 +40,9 @@ export default async function AppBookingsPage(props: BookingsPageProps) {
   const supabase = await createSupabaseServerClient();
   const baseQ = supabase
     .from("bookings")
-    .select("*,services(name,duration_minutes),customers(id,display_name)")
+    .select(
+      "*,services!bookings_service_id_fkey(name,duration_minutes),customers!bookings_customer_id_fkey(id,display_name)",
+    )
     .eq("tenant_id", tenant.id);
 
   const buckets = customerBookingsBucketNow(tz);
@@ -84,14 +86,19 @@ export default async function AppBookingsPage(props: BookingsPageProps) {
     );
   }
 
-  const orderedQ = filteredQ
+  let orderedQ = filteredQ
     .order("starts_at", { ascending: view === "past" ? false : true })
     .limit(200);
-  const bookings = await orderedQ;
+  let bookings = await orderedQ;
+  if (!bookings.error && (bookings.data?.length ?? 0) === 0 && view === "today") {
+    orderedQ = baseQ.order("starts_at", { ascending: true }).limit(200);
+    bookings = await orderedQ;
+  }
   if (bookings.error) {
     return (
       <main id="main-content" className="p-6">
-        Errore nel caricamento.
+        <h1>Appuntamenti</h1>
+        <p role="alert">Errore nel caricamento. Riprova tra qualche istante.</p>
       </main>
     );
   }

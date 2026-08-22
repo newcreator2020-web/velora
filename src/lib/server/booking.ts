@@ -189,19 +189,15 @@ export async function getConfirmedBookingsRangesForService(
   toIso: string,
 ): Promise<Array<[Date, Date]>> {
   const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("bookings")
-    .select("starts_at,ends_at")
-    .eq("tenant_id", tenantId)
-    .eq("service_id", serviceId)
-    .eq("status", "confirmed")
-    .gte("starts_at", fromIso)
-    .lt("starts_at", toIso);
+  const { data, error } = await supabase.rpc("public_booking_get_confirmed_ranges", {
+    p_tenant_id: tenantId,
+    p_service_id: serviceId,
+    p_from: fromIso,
+    p_to: toIso,
+  });
   if (error) throw new Error(error.message);
-  return ((data ?? []) as Array<{ starts_at: string; ends_at: string }>).map((b) => [
-    new Date(b.starts_at),
-    new Date(b.ends_at),
-  ]);
+  const rows = (data ?? []) as unknown as Array<{ starts_at: string; ends_at: string }> | null;
+  return (rows ?? []).map((b) => [new Date(b.starts_at), new Date(b.ends_at)]);
 }
 
 export function formatDateTimeLocal(iso: string, tz: string): string {

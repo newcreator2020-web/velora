@@ -197,7 +197,7 @@ export async function getCustomerDetail(customerIdRaw: unknown): Promise<
 
   const { data: bookings, error: bErr } = await supabase
     .from("bookings")
-    .select("*,services(name,duration_minutes)")
+    .select("*,services!bookings_service_id_fkey(name,duration_minutes)")
     .eq("tenant_id", tenantId)
     .eq("customer_id", cust.id)
     .order("starts_at", { ascending: false })
