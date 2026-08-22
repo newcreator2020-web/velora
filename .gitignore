@@ -76,3 +76,7 @@ CLAUDE_todo*.md
 # Supabase CLI sandbox home workaround (FASE 4 Windows EPERM)
 .supabase-home/
 supabase/.home/
+
+# Local temporary runtime diagnostics / transient log artifacts only.
+# Project evidence lives in docs/*-REPORT-*.md and commits. Do NOT commit tmp.
+/tmp/

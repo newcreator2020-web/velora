@@ -466,18 +466,18 @@ Aggiunto in FASE 10H: modulo CRM **tenant-scoped** autenticato, **Concurrency20 
 
 ### 16.1 Stack aggiuntivo FASE 10H
 
-| Componente               | Scelta                                                                                                                                   |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **CRM Tables**           | `customers` public (tenant_id PK uuid, email_normalized, phone, full_name, tags JSONB, created_at/updated_at timestamptz)                |
-| **Concurrency20 Guard**  | 20 richieste contemporanee stesso tenant/email → 1 solo `customers` row (dedup) + 20 `bookings` distinte. Zero race-conditions duplicate. |
-| **Audit PII-free**       | `audit_logs` append-only trigger immutabilità UPDATE/DELETE DENY; whitelist action enum; metadata SOLO status/id/count, 0 leaks PII.     |
-| **RLS Fix FASE10H**      | Migration `20260822190500` grants SELECT/INSERT/UPDATE/DELETE `public.tenants` a `authenticated` + policy `tenants_select_self_members`. |
-| **Dashboard CRM**        | Rotte `/app/customers` (CRUD + search/filter) + `/app/bookings` (status badges: confirmed/cancelled/completed/no_show → view=all toggle). |
-| **Bookings Statuses**    | confirmed · cancelled · completed · no_show; migration FASE 10G policy RLS anon published SELECT + trigger status lock immutable fields. |
-| **Playwright Recovery**  | workers=1 serial; global-setup login stable; PLAYWRIGHT_USE_PRODUCTION=1 porta 3100; RC12-21 PS+flags config OK.                         |
-| **Responsive 3vp**       | viewports 375×812 (mobile) · 768×1024 (tablet) · 1440×900 (desktop); scrollWidth≤clientWidth, H1≥1, interactive≥1.                        |
-| **A11y axe-core**        | tags wcag2a/2aa/21a/21aa + best-practice; serious=0 · critical=0; disable color-contrast-enhanced only.                                  |
-| **Playwright Coverage**  | FASE10 19/19 DEV · 19/19 PROD (E10-1..15 CRM core + 3vp responsive + axe a11y). F6/F7/F8/F9 regressioni complete.                        |
+| Componente              | Scelta                                                                                                                                    |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| **CRM Tables**          | `customers` public (tenant_id PK uuid, email_normalized, phone, full_name, tags JSONB, created_at/updated_at timestamptz)                 |
+| **Concurrency20 Guard** | 20 richieste contemporanee stesso tenant/email → 1 solo `customers` row (dedup) + 20 `bookings` distinte. Zero race-conditions duplicate. |
+| **Audit PII-free**      | `audit_logs` append-only trigger immutabilità UPDATE/DELETE DENY; whitelist action enum; metadata SOLO status/id/count, 0 leaks PII.      |
+| **RLS Fix FASE10H**     | Migration `20260822190500` grants SELECT/INSERT/UPDATE/DELETE `public.tenants` a `authenticated` + policy `tenants_select_self_members`.  |
+| **Dashboard CRM**       | Rotte `/app/customers` (CRUD + search/filter) + `/app/bookings` (status badges: confirmed/cancelled/completed/no_show → view=all toggle). |
+| **Bookings Statuses**   | confirmed · cancelled · completed · no_show; migration FASE 10G policy RLS anon published SELECT + trigger status lock immutable fields.  |
+| **Playwright Recovery** | workers=1 serial; global-setup login stable; PLAYWRIGHT_USE_PRODUCTION=1 porta 3100; RC12-21 PS+flags config OK.                          |
+| **Responsive 3vp**      | viewports 375×812 (mobile) · 768×1024 (tablet) · 1440×900 (desktop); scrollWidth≤clientWidth, H1≥1, interactive≥1.                        |
+| **A11y axe-core**       | tags wcag2a/2aa/21a/21aa + best-practice; serious=0 · critical=0; disable color-contrast-enhanced only.                                   |
+| **Playwright Coverage** | FASE10 19/19 DEV · 19/19 PROD (E10-1..15 CRM core + 3vp responsive + axe a11y). F6/F7/F8/F9 regressioni complete.                         |
 
 ### 16.2 Source of Truth FASE 10H
 
@@ -519,32 +519,32 @@ Concurrency20 C18 C19 C20 FASE10H test
 
 ### 16.4 Fresh certification counts FASE 10H
 
-| Livello                                          | Suite / comando                                                                 | Resultato              |
-| ------------------------------------------------ | ------------------------------------------------------------------------------- | ---------------------- |
-| DB Concurrency20 + audit PII                     | `tests/db/fase10h-concurrency-auditpii.test.ts` C1-C20                         | **4/4**               |
-| DB CRM Core C1-C20                               | `tests/db/fase10-crm.test.ts`                                                  | **20/20**              |
-| DB Totale 9 files                                | `pnpm db:test`                                                                  | **230/230**            |
-| Unit tests                                       | `pnpm vitest run tests/unit`                                                    | **101/101**            |
-| Integration                                      | `pnpm vitest run tests/integration`                                             | **29/29**              |
-| Full Vitest 19 files × 2 consecutive order-indep | `pnpm vitest run --maxWorkers=1` × 2x                                          | **378/378 × 2 EXIT0**  |
-| Playwright FASE10 DEV Chromium serial            | `e2e/fase10-crm.spec.mjs` E10-1..15 + 3vp + axe                                | **19/19**              |
-| Playwright FASE10 PROD next start 3100           | `test:e2e:prod` FASE10                                                          | **19/19**              |
-| Playwright FASE9 DEV · PROD regressioni          | `e2e/fase9-booking.spec.mjs`                                                    | **17/17 · 17/17**      |
-| Playwright FASE8 DEV rerun · PROD regressioni    | `e2e/fase8-billing.spec.mjs`                                                    | **18/18 · 18/18**      |
-| Playwright FASE7 DEV · PROD regressioni          | `e2e/fase7-entitlements.spec.mjs` RC32 beforeAudit tenant-filtered             | **14/14 · 14/14**      |
-| Playwright FASE6 DEV · PROD 4 specs RC33 recover | auth/app/app-settings/site-public `ea79af3` checkout                          | **52/52 · 52/52**      |
-| Responsive FASE10 3vp                            | CRM /app/customers + /app/bookings scrollWidth≤clientWidth H1≥1 interactive≥1   | **PASS 3vp**           |
-| A11y axe FASE10 wcag2/21 best-practice           | serious=0 · critical=0 · H1≥1 · main≥1                                          | **PASS AXE**           |
-| Double db:reset semantic SHA256 equality         | UUID placeholder + timestamp normalized; migrations 47 versions identical      | **PASS SNAP EQ**       |
-| Quality Gates                                    | typecheck / lint(0/0) / format:check / build Turbopack 13s                     | 0/0/0/EXIT0            |
-| Health endpoint                                  | GET `/api/health` dev 3199 + slug_page /s/{a} HTTP 200 len=34330                | HTTP 200 OK            |
-| Security Integrity                               | Secret scan 8 patterns · 0 skip/only/xit · service-role inventory CRM clean    | SAFE 0 LEAKS           |
+| Livello                                          | Suite / comando                                                               | Resultato             |
+| ------------------------------------------------ | ----------------------------------------------------------------------------- | --------------------- |
+| DB Concurrency20 + audit PII                     | `tests/db/fase10h-concurrency-auditpii.test.ts` C1-C20                        | **4/4**               |
+| DB CRM Core C1-C20                               | `tests/db/fase10-crm.test.ts`                                                 | **20/20**             |
+| DB Totale 9 files                                | `pnpm db:test`                                                                | **230/230**           |
+| Unit tests                                       | `pnpm vitest run tests/unit`                                                  | **101/101**           |
+| Integration                                      | `pnpm vitest run tests/integration`                                           | **29/29**             |
+| Full Vitest 19 files × 2 consecutive order-indep | `pnpm vitest run --maxWorkers=1` × 2x                                         | **378/378 × 2 EXIT0** |
+| Playwright FASE10 DEV Chromium serial            | `e2e/fase10-crm.spec.mjs` E10-1..15 + 3vp + axe                               | **19/19**             |
+| Playwright FASE10 PROD next start 3100           | `test:e2e:prod` FASE10                                                        | **19/19**             |
+| Playwright FASE9 DEV · PROD regressioni          | `e2e/fase9-booking.spec.mjs`                                                  | **17/17 · 17/17**     |
+| Playwright FASE8 DEV rerun · PROD regressioni    | `e2e/fase8-billing.spec.mjs`                                                  | **18/18 · 18/18**     |
+| Playwright FASE7 DEV · PROD regressioni          | `e2e/fase7-entitlements.spec.mjs` RC32 beforeAudit tenant-filtered            | **14/14 · 14/14**     |
+| Playwright FASE6 DEV · PROD 4 specs RC33 recover | auth/app/app-settings/site-public `ea79af3` checkout                          | **52/52 · 52/52**     |
+| Responsive FASE10 3vp                            | CRM /app/customers + /app/bookings scrollWidth≤clientWidth H1≥1 interactive≥1 | **PASS 3vp**          |
+| A11y axe FASE10 wcag2/21 best-practice           | serious=0 · critical=0 · H1≥1 · main≥1                                        | **PASS AXE**          |
+| Double db:reset semantic SHA256 equality         | UUID placeholder + timestamp normalized; migrations 47 versions identical     | **PASS SNAP EQ**      |
+| Quality Gates                                    | typecheck / lint(0/0) / format:check / build Turbopack 13s                    | 0/0/0/EXIT0           |
+| Health endpoint                                  | GET `/api/health` dev 3199 + slug_page /s/{a} HTTP 200 len=34330              | HTTP 200 OK           |
+| Security Integrity                               | Secret scan 8 patterns · 0 skip/only/xit · service-role inventory CRM clean   | SAFE 0 LEAKS          |
 
-### 16.5 Gates FASE 10H
+### 16.5 Gates FASE 10H (FASE10I reconciled)
 
 - **FAILED**: 0
-- **NOT VERIFIED**: 0 (Performance reali: NOT VERIFIED onesto; esplicito non gate-fail come da mandato AAA §14 classification)
-- **FREEZE DECISION**: FASE 10 = FROZEN ✅. Commit locale creato. **NESSUN PUSH REMOTO ESEGUITO.**
+- **NOT VERIFIED**: 0 (Performance reali: **NON-BLOCKING INFORMATIONAL**, non freezegate contrattuale. 5 metriche = POST-CHANGE VERIFIED; 4 opzionali non misurate = NON-BLOCKING INFORMATIONAL. 0 gate falliti.)
+- **FREEZE DECISION**: FASE 10 = FROZEN ✅. Commit locale creato FASE10H + reconciliation FASE10I. **NESSUN PUSH REMOTO ESEGUITO.**
 
 ---
 

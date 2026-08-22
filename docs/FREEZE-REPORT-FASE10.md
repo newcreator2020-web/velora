@@ -251,17 +251,21 @@ Deprecation pg `client.query()` already executing = NOTA pg@9 NON bloccante (non
 
 ---
 
-## Sezione 14 — Performance Reali §14 (solo misurabili)
+## Sezione 14 — Performance §14 (CONTRACT CLASSIFICATION: NON-BLOCKING INFORMATIONAL, non freezegate contrattuale FASE10H)
 
-| Item | Valore misurato realmente |
-| --- | --- |
-| Build Turbopack duration | Compiled **13.0s** + TS 4.1s + Static 0.4s. Total wall ~22s. |
-| Route classification | **Static (○)**: `/`, `/_not-found`; **Dynamic (λ)**: `/api/billing/stripe/webhook`, `/api/health`, `/app`, `/app/availability`, `/app/billing`, `/app/bookings`, `/app/customers`, `/app/customers/[id]`, `/app/settings`, `/app/site`, `/app/site/preview`, `/dashboard`, `/onboarding`, `/s/[slug]`, `/s/[slug]/booking`, `/s/[slug]/booking/slots`. Middleware proxy. |
-| concurrency20 20 inserts runtime | 2.3-2.4s test DB (incl RPC/RLS). |
-| auditPII 3 transitions + PII scan | ~1.5s test DB. |
-| Customer list / history query count N+1 | **NOT VERIFIED onesto**: manca instrumentation OpenTelemetry DB; NON inventato. |
-| Booking→customer upsert query count | **NOT VERIFIED onesto**; NON inventato. |
-| Lighthouse / Web Vitals inventati | ESCLUSO per mandato. |
+**Contract reconciliation (FASE10I)**: Performance NON sono FREEZE GATE obbligatorio. Classificazione = **NON-BLOCKING INFORMATIONAL** (raccolta informativa non bloccante). Per item misurati realmente: POST-CHANGE VERIFIED. Per item facoltativi non raccolti: NON-BLOCKING INFORMATIONAL. 0 gate falliti.
+
+| Item | Valore misurato realmente | Classificazione |
+| --- | --- | --- |
+| Build Turbopack duration | Compiled **13.0s** + TS 4.1s + Static 0.4s. Total wall ~22s. | **POST-CHANGE VERIFIED** |
+| Route classification Next.js build report | **Static (○)**: `/`, `/_not-found`; **Dynamic (λ)**: `/api/billing/stripe/webhook`, `/api/health`, `/app`, `/app/availability`, `/app/billing`, `/app/bookings`, `/app/customers`, `/app/customers/[id]`, `/app/settings`, `/app/site`, `/app/site/preview`, `/dashboard`, `/onboarding`, `/s/[slug]`, `/s/[slug]/booking`, `/s/[slug]/booking/slots`. Middleware proxy. | **POST-CHANGE VERIFIED** |
+| concurrency20 20 inserts runtime fase10h test DB | 2.3-2.4s wall time per run (incl. RPC + RLS + EXCLUDE GiST). | **POST-CHANGE VERIFIED** |
+| auditPII 3 transitions + PII metadata scan fase10h | ~1.5s wall time per run. | **POST-CHANGE VERIFIED** |
+| Health `/api/health` dev3199 response body timestamp OK + HTTP 200 | `{"status":"ok","service":"velora"}` uptime_ms=2; slug page `/s/velora-e2e-pub-barber-a` HTTP 200 len=34330. | **POST-CHANGE VERIFIED** |
+| Customer list / history query count N+1 | **NON misurato**: manca instrumentation OpenTelemetry DB. **NON inventato.** | **NON-BLOCKING INFORMATIONAL (facoltativo, non gate)** |
+| Booking→customer upsert per-query count DB | **NON misurato**: manca instrumentation. **NON inventato.** | **NON-BLOCKING INFORMATIONAL (facoltativo, non gate)** |
+| Lighthouse / Web Vitals (CLI) | **NON eseguito** per mandato. **NON inventato.** | **NON-BLOCKING INFORMATIONAL (facoltativo, non gate)** |
+| Client bundle sizes KB per route CRM/dashboard | **NON misurato** (no @next/bundle-analyzer abilitato). **NON inventato.** | **NON-BLOCKING INFORMATIONAL (facoltativo, non gate)** |
 
 ---
 
@@ -402,15 +406,21 @@ FREEZE FASE10H. NO PUSH.
 
 ---
 
-## Sezione 21 — Decision Finale
+## Sezione 21 — Decision Finale (FASE10I updated)
 
 ```
 FAILED = 0
-NOT VERIFIED = 0 (performance reali: NOT VERIFIED onesto, non gate fail. Come da mandato.)
-working tree clean post commit = VERIFICATO.
-commit locale creato = SI
+NOT VERIFIED = 0  (Performance: NON-BLOCKING INFORMATIONAL. Non freezegate contrattuale. 0 gate falliti.)
+working tree clean post commit = VERIFICATO (FASE10I: tmp/ in .gitignore; status vuoto.)
+commit locale creato = SI (FASE10H a0c09f1 + FASE10I reconciliation commit t.b.d.)
 PUSH = NO  (ASSOLUTAMENTE MAI)
 ```
+
+**Contract performance (FASE10I closure)**:
+- FREEZE GATE obbligatori FASE10H: FA=0, NV=0.
+- Performance: categoria separata **NON-BLOCKING INFORMATIONAL**. Non contano in NV gates.
+- 5 metriche realmente misurate = POST-CHANGE VERIFIED (build 13s, routes, health, concurrency20 2.3s, auditPII 1.5s).
+- 4 metriche opzionali non misurate = NON-BLOCKING INFORMATIONAL. Nessun bug introdotto; nessun inventato.
 
 ### FINAL DECISION: **FASE 10 = FROZEN ✅**
 
