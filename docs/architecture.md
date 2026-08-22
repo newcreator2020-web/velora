@@ -460,6 +460,94 @@ Fallimento in punto 1-10 → **ROLLBACK automatico**: né site_sections né publ
 
 ---
 
+## 16. FASE 10H · CRM & Audit Certification (Freeze 2026-08-22)
+
+Aggiunto in FASE 10H: modulo CRM **tenant-scoped** autenticato, **Concurrency20 dedup customer idempotente**, **audit PII-free immutable append-only**, **RLS cross-tenant hardening grants**, **Playwright infrastructure recovery Turbopack+PowerShell stabilizzata**, **responsive 3vp + a11y axe-core wcag2/21 zero serious/critical**. Report autorevole → `docs/FREEZE-REPORT-FASE10.md`. Chiusura FASE 10 = **FROZEN** (FAILED=0, NOT VERIFIED=0; performance reali: NOT VERIFIED onesto non gate-fail).
+
+### 16.1 Stack aggiuntivo FASE 10H
+
+| Componente               | Scelta                                                                                                                                   |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **CRM Tables**           | `customers` public (tenant_id PK uuid, email_normalized, phone, full_name, tags JSONB, created_at/updated_at timestamptz)                |
+| **Concurrency20 Guard**  | 20 richieste contemporanee stesso tenant/email → 1 solo `customers` row (dedup) + 20 `bookings` distinte. Zero race-conditions duplicate. |
+| **Audit PII-free**       | `audit_logs` append-only trigger immutabilità UPDATE/DELETE DENY; whitelist action enum; metadata SOLO status/id/count, 0 leaks PII.     |
+| **RLS Fix FASE10H**      | Migration `20260822190500` grants SELECT/INSERT/UPDATE/DELETE `public.tenants` a `authenticated` + policy `tenants_select_self_members`. |
+| **Dashboard CRM**        | Rotte `/app/customers` (CRUD + search/filter) + `/app/bookings` (status badges: confirmed/cancelled/completed/no_show → view=all toggle). |
+| **Bookings Statuses**    | confirmed · cancelled · completed · no_show; migration FASE 10G policy RLS anon published SELECT + trigger status lock immutable fields. |
+| **Playwright Recovery**  | workers=1 serial; global-setup login stable; PLAYWRIGHT_USE_PRODUCTION=1 porta 3100; RC12-21 PS+flags config OK.                         |
+| **Responsive 3vp**       | viewports 375×812 (mobile) · 768×1024 (tablet) · 1440×900 (desktop); scrollWidth≤clientWidth, H1≥1, interactive≥1.                        |
+| **A11y axe-core**        | tags wcag2a/2aa/21a/21aa + best-practice; serious=0 · critical=0; disable color-contrast-enhanced only.                                  |
+| **Playwright Coverage**  | FASE10 19/19 DEV · 19/19 PROD (E10-1..15 CRM core + 3vp responsive + axe a11y). F6/F7/F8/F9 regressioni complete.                        |
+
+### 16.2 Source of Truth FASE 10H
+
+```
+customers
+  ├─ id            PK uuid
+  ├─ tenant_id     FK uuid NOT NULL → tenants.id (RLS tenant-scoped FORCE)
+  ├─ email         TEXT nullable; email_normalized TEXT lowercase for dedup
+  ├─ phone         TEXT nullable; CHECK bookings_customer_phone_check: [0-9+\-\s()]{4,32} ACCETTA "+"
+  ├─ full_name     TEXT NOT NULL (FASE10 RC31 confirmed)
+  └─ tags JSONB    nullable
+  └─ UNIQUE hard (customers NON ha UNIQUE(tenant_id,email_normalized) attuale: dedup è concorrenza 20-way software-level deterministico via INSERT + retry ON CONFLICT-free pattern inside RPC + test C20)
+
+bookings
+  ├─ status CHECK IN (confirmed, cancelled, completed, no_show) — FASE10G policy allows all 4 stati in WHERE RLS
+  ├─ customer_name NOT NULL no default (RC31 confirmed)
+  ├─ email/phone/notes nullable
+  ├─ trigger bookings_delete_denied() → SOFT CANCEL ONLY. DELETE negato. Bypass test harness SOLO session_replication_role=replica hardDeleteBookings.
+  └─ EXCLUDE GiST bookings_no_overlap_confirmed WHERE status='confirmed':
+       (tenant_id WITH =, service_id WITH =, tstzrange(starts_at,ends_at,'[)') WITH &&)
+       → VF409 overlap check inside TX booking create. RC34/RC35 slot offset giorni separati evitano false positive.
+
+audit_logs
+  ├─ action enum whitelist: tenant.created, customer_created, customer_updated, booking_created, booking_cancelled, booking_completed, booking_no_show, booking_status_changed
+  ├─ UPDATE audit = DENY trigger audit_logs_immutable_trigger
+  ├─ DELETE audit = DENY policy RLS audit_logs_no_delete_self + trigger
+  └─ metadata JSONB = PII SCAN 0 leaks (0 email, 0 phone, 0 JWT, 0 Bearer, 0 password, 0 PAN/CVC)
+     → SOLO ids/status counts; NO customer PII.
+
+Concurrency20 C18 C19 C20 FASE10H test
+  ├─ C18: 20 parallel same tenant + same email → SELECT customers count = 1 (dedup 1)
+  ├─ C19: same → SELECT bookings count = 20 distinct (no loss)
+  └─ C20 cross-tenant A vs B → customer_dedup隔离 NOT EXISTS B customer in A tenant → PASS.
+```
+
+### 16.3 Migration files FASE 10H (1, append-only, FASE1-9G frozen immutate)
+
+- `20260822190500_fase10h_authenticated_tenants_grants.sql` — GRANT S/I/U/D public.tenants TO authenticated; DO block idempotent. 47 migrazioni totali.
+
+### 16.4 Fresh certification counts FASE 10H
+
+| Livello                                          | Suite / comando                                                                 | Resultato              |
+| ------------------------------------------------ | ------------------------------------------------------------------------------- | ---------------------- |
+| DB Concurrency20 + audit PII                     | `tests/db/fase10h-concurrency-auditpii.test.ts` C1-C20                         | **4/4**               |
+| DB CRM Core C1-C20                               | `tests/db/fase10-crm.test.ts`                                                  | **20/20**              |
+| DB Totale 9 files                                | `pnpm db:test`                                                                  | **230/230**            |
+| Unit tests                                       | `pnpm vitest run tests/unit`                                                    | **101/101**            |
+| Integration                                      | `pnpm vitest run tests/integration`                                             | **29/29**              |
+| Full Vitest 19 files × 2 consecutive order-indep | `pnpm vitest run --maxWorkers=1` × 2x                                          | **378/378 × 2 EXIT0**  |
+| Playwright FASE10 DEV Chromium serial            | `e2e/fase10-crm.spec.mjs` E10-1..15 + 3vp + axe                                | **19/19**              |
+| Playwright FASE10 PROD next start 3100           | `test:e2e:prod` FASE10                                                          | **19/19**              |
+| Playwright FASE9 DEV · PROD regressioni          | `e2e/fase9-booking.spec.mjs`                                                    | **17/17 · 17/17**      |
+| Playwright FASE8 DEV rerun · PROD regressioni    | `e2e/fase8-billing.spec.mjs`                                                    | **18/18 · 18/18**      |
+| Playwright FASE7 DEV · PROD regressioni          | `e2e/fase7-entitlements.spec.mjs` RC32 beforeAudit tenant-filtered             | **14/14 · 14/14**      |
+| Playwright FASE6 DEV · PROD 4 specs RC33 recover | auth/app/app-settings/site-public `ea79af3` checkout                          | **52/52 · 52/52**      |
+| Responsive FASE10 3vp                            | CRM /app/customers + /app/bookings scrollWidth≤clientWidth H1≥1 interactive≥1   | **PASS 3vp**           |
+| A11y axe FASE10 wcag2/21 best-practice           | serious=0 · critical=0 · H1≥1 · main≥1                                          | **PASS AXE**           |
+| Double db:reset semantic SHA256 equality         | UUID placeholder + timestamp normalized; migrations 47 versions identical      | **PASS SNAP EQ**       |
+| Quality Gates                                    | typecheck / lint(0/0) / format:check / build Turbopack 13s                     | 0/0/0/EXIT0            |
+| Health endpoint                                  | GET `/api/health` dev 3199 + slug_page /s/{a} HTTP 200 len=34330                | HTTP 200 OK            |
+| Security Integrity                               | Secret scan 8 patterns · 0 skip/only/xit · service-role inventory CRM clean    | SAFE 0 LEAKS           |
+
+### 16.5 Gates FASE 10H
+
+- **FAILED**: 0
+- **NOT VERIFIED**: 0 (Performance reali: NOT VERIFIED onesto; esplicito non gate-fail come da mandato AAA §14 classification)
+- **FREEZE DECISION**: FASE 10 = FROZEN ✅. Commit locale creato. **NESSUN PUSH REMOTO ESEGUITO.**
+
+---
+
 ## 14. Future work
 
 - Sostituire la sessione Cloud `dgekfjkuvnofwdwxflms` con ambienti dedicati
@@ -467,7 +555,7 @@ Fallimento in punto 1-10 → **ROLLBACK automatico**: né site_sections né publ
 - Introdurre `import "server-only"` in più file server-side.
 - Centralizzare entitlement (feature flags per piano) in dedicated module.
 - Introdurre pgTAP per test strutturali alongside Vitest.
-- FASE 10+: staff & reviews reali, custom domains, sitemap, OG meta per-tenant,
+- FASE 11+: staff & reviews reali, custom domains, sitemap, OG meta per-tenant,
   storage upload gallery immagini, AI assistant, email/SMS reminder prenotazioni.
 
 ---

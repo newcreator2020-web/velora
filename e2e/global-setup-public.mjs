@@ -286,7 +286,11 @@ async function cleanupAndInsert(pg, spec, opts) {
     }
     await pg.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
   } catch (err) {
-    try { await pg.query(`SET LOCAL session_replication_role = DEFAULT; ROLLBACK;`); } catch (_) { /* swallow */ }
+    try {
+      await pg.query(`SET LOCAL session_replication_role = DEFAULT; ROLLBACK;`);
+    } catch (_) {
+      /* swallow */
+    }
     throw err;
   }
   return tenantId;

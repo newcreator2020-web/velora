@@ -650,7 +650,8 @@ test("E7-6 upgrade BASE→PRO trusted RPC; DB old/new correct; audit event; relo
 }) => {
   test.info().annotations.push({ type: "req", description: "E7-6" });
   const beforeAudit = await db(
-    `SELECT COUNT(*)::int as c FROM public.audit_logs WHERE action='tenant.plan_changed'`,
+    `SELECT COUNT(*)::int as c FROM public.audit_logs WHERE action='tenant.plan_changed' AND tenant_id=$1::uuid`,
+    [TENANT_A],
   );
   const result = await withPg((pg) => rpcAdminSetPlan(pg, PLATFORM_ADMIN_ID, TENANT_A, "pro"));
   expect(result.code, "upgrade RPC OK").toBe("OK");

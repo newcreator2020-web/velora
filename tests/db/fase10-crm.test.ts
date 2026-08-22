@@ -407,8 +407,8 @@ describe("FASE10 CRM CORE — DB / RLS / DEDUP / CONCURRENCY / AUDIT PII-FREE", 
 
   it("C3 — stesso tenant stesso normalized phone → riusa customer (senza email)", async () => {
     const a = anonClient();
-    const iso1 = isoPlusDays(13, 9, 0);
-    const iso2 = isoPlusDays(14, 10, 30);
+    const iso1 = isoPlusDays(14, 9, 0);
+    const iso2 = isoPlusDays(16, 10, 0);
     const r1 = await a.rpc("public_booking_create_slug", {
       p_slug: FIXED.slug_a,
       p_service_id: FIXED.svc_a,

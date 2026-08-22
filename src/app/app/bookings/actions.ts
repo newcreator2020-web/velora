@@ -8,8 +8,6 @@ import {
   updateCustomer,
   searchCustomers,
   getCustomerDetail,
-  BOOKING_LEGAL_TRANSITIONS,
-  BOOKING_STATUS,
   type BookingStatus,
   type CustomerUpdateInput,
   type CustomerSearchInput,
@@ -97,6 +95,3 @@ export async function listCustomersAction(input: CustomerSearchInput) {
 export async function getCustomerDetailAction(id: unknown) {
   return getCustomerDetail(id);
 }
-
-export { BOOKING_LEGAL_TRANSITIONS, BOOKING_STATUS };
-export type { BookingStatus };

@@ -1,0 +1,22 @@
+-- FASE 10H: restore missing authenticated role DML privileges on public.tenants
+--
+-- Root cause: information_schema.role_table_grants for role 'authenticated' on
+-- public.tenants was missing SELECT / INSERT / UPDATE / DELETE privileges
+-- (only REFERENCES / TRIGGER / TRUNCATE were granted), causing HTTP 403
+-- SQLSTATE 42501 "permission denied for table tenants" when any authenticated
+-- user (owner / manager / staff) tried to load their tenant context via the
+-- canonical Supabase REST route.
+--
+-- ctx.tenant therefore always resolved to NULL in getCurrentTenantContext()
+-- which caused the app to redirect every authenticated user to /onboarding
+-- regardless of tenant_memberships / business_profiles state.
+--
+-- RLS on public.tenants remains enabled and enforced by existing policies:
+--   * tenants_select_self_members (authenticated)
+--   * tenants_update_owner_or_platform (authenticated)
+--   * tenants_insert_platform_admin (authenticated)
+--   * tenants_delete_platform_admin (authenticated)
+--   * tenants_anon_select_published (anon)
+-- so grants alone do NOT widen the row-level access surface.
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.tenants TO authenticated;
