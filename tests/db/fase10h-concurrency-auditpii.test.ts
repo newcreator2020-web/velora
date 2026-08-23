@@ -1,3 +1,4 @@
+/** @vitest-environment node */
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { Client as PgClient } from "pg";
 import { randomUUID } from "node:crypto";

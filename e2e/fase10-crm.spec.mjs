@@ -340,8 +340,21 @@ test.beforeAll(async ({ request }) => {
   const tA = await c.query("SELECT id FROM public.tenants WHERE slug=$1 LIMIT 1", [SLUG_A]);
   if (tA.rows.length === 0) throw new Error(`Missing ${SLUG_A}, run global-setup-public`);
   ids.tenantA = tA.rows[0].id;
-  const tB = await c.query("SELECT id FROM public.tenants WHERE slug=$1 LIMIT 1", [SLUG_B]);
-  ids.tenantB = tB.rows[0]?.id ?? null;
+  let tB = await c.query("SELECT id FROM public.tenants WHERE slug=$1 LIMIT 1", [SLUG_B]);
+  if (!tB.rows[0]?.id) {
+    await c.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
+    const ins = await c.query(
+      `INSERT INTO public.tenants(name,slug,status,created_at,updated_at)
+       VALUES ($1,$2,'active',NOW(),NOW())
+       ON CONFLICT (slug) DO UPDATE SET name=EXCLUDED.name RETURNING id`,
+      ["Velora E2E Beauty B", SLUG_B],
+    );
+    await c.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
+    ids.tenantB = ins.rows[0]?.id ?? null;
+    if (!ids.tenantB) throw new Error(`failed to provision ${SLUG_B}`);
+  } else {
+    ids.tenantB = tB.rows[0].id;
+  }
 
   const svcsA = await c.query(
     "SELECT id, name FROM public.services WHERE tenant_id=$1 AND active=TRUE ORDER BY position LIMIT 1",
@@ -634,10 +647,8 @@ test("E10-10 illegal transition rejected", async ({ page: _page, request }) => {
 });
 
 test("E10-11 Tenant B non vede customer A", async ({ page }) => {
-  if (!ids.tenantB || !ids.users.ownerB) {
-    test.skip();
-    return;
-  }
+  expect(ids.tenantB).not.toBeNull();
+  expect(ids.users.ownerB).not.toBeNull();
   await login(page, EMAILS.ownerB, TEST_PW);
   await page.goto("/app/customers?q=" + encodeURIComponent(EMAILS.customer));
   await page.waitForTimeout(500);

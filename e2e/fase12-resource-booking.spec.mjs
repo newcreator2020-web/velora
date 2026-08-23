@@ -146,8 +146,21 @@ test.beforeAll(async () => {
   if (tA.rows.length === 0) throw new Error(`Missing ${SLUG_A}, run global-setup-public`);
   ids.tenantA = tA.rows[0].id;
 
-  const tB = await c.query("SELECT id FROM public.tenants WHERE slug=$1 LIMIT 1", [SLUG_B]);
-  ids.tenantB = tB.rows[0]?.id ?? null;
+  let tB = await c.query("SELECT id FROM public.tenants WHERE slug=$1 LIMIT 1", [SLUG_B]);
+  if (!tB.rows[0]?.id) {
+    await c.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
+    const ins = await c.query(
+      `INSERT INTO public.tenants(name,slug,status,created_at,updated_at)
+       VALUES ($1,$2,'active',NOW(),NOW())
+       ON CONFLICT (slug) DO UPDATE SET name=EXCLUDED.name RETURNING id`,
+      ["Velora E2E Beauty B", SLUG_B],
+    );
+    await c.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
+    ids.tenantB = ins.rows[0]?.id ?? null;
+    if (!ids.tenantB) throw new Error(`failed to provision ${SLUG_B}`);
+  } else {
+    ids.tenantB = tB.rows[0].id;
+  }
 
   const svcsA = await c.query(
     "SELECT id, name, duration_minutes, active FROM public.services WHERE tenant_id=$1 ORDER BY position",
@@ -869,10 +882,7 @@ test("E12-12 submit ANY mode → server picks first by sort_order+id determinist
 
 test("E12-13 forged resource (use tenant B's slug resource on A → denied)", async ({ request }) => {
   const c = await pgClient();
-  if (!ids.tenantB) {
-    test.skip();
-    return;
-  }
+  expect(ids.tenantB).not.toBeNull();
   await hardDeleteBookings(c, [ids.tenantA, ids.tenantB]);
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "http://127.0.0.1:54321";
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";

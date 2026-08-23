@@ -164,7 +164,7 @@ test.beforeAll(async () => {
         await c.query(
           `INSERT INTO public.resource_availability(tenant_id, resource_id, weekday, enabled, start_time, end_time, created_at, updated_at)
            VALUES ((SELECT tenant_id FROM public.staff_resources WHERE id=$1 LIMIT 1), $1, $2::int, $3::boolean, $4::time, $5::time, NOW(), NOW())
-           ON CONFLICT (tenant_id, resource_id, weekday) DO UPDATE SET
+           ON CONFLICT ON CONSTRAINT resource_availability_unique_row DO UPDATE SET
              enabled = EXCLUDED.enabled,
              start_time = EXCLUDED.start_time,
              end_time = EXCLUDED.end_time,

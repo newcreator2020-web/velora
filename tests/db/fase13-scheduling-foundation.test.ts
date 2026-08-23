@@ -1684,4 +1684,135 @@ describe("FASE13 — Scheduling Foundation DB Tests (46 tests)", () => {
       expect(String(err).toLowerCase()).toContain("check");
     });
   });
+
+  // =========================================================================
+  // GROUP D: D-01 Multi-interval resource_availability Contract Preservation
+  // Verifica: due intervalli stesso weekday consentiti; duplicate exact idempotente;
+  // cross-tenant impossible; no accidental overwrite secondo intervallo.
+  // =========================================================================
+  describe("Group D: D-01 Multi-interval resource_availability contract", () => {
+    const TENANT_A_RA = FIXED.tenantA;
+    const TENANT_B_RA = FIXED.tenantB;
+    let resTestId: string | null = null;
+    let resTestBId: string | null = null;
+
+    beforeAll(async () => {
+      const r = await client.query<{ id: string }>(
+        `SELECT id FROM public.staff_resources WHERE tenant_id = $1::uuid AND slug = 'alpha-a' LIMIT 1`,
+        [TENANT_A_RA],
+      );
+      resTestId = r.rows[0]?.id ?? null;
+      const rb = await client.query<{ id: string }>(
+        `SELECT id FROM public.staff_resources WHERE tenant_id = $1::uuid LIMIT 1`,
+        [TENANT_B_RA],
+      );
+      if (!rb.rows[0]?.id) {
+        await client.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
+        const ins = await client.query<{ id: string }>(
+          `INSERT INTO public.staff_resources(id,tenant_id,display_name,slug,active,bookable,sort_order,color_hex,created_at,updated_at)
+           VALUES (gen_random_uuid(),$1::uuid,'Resource B Test','f13b-res-test',TRUE,TRUE,100,NULL,NOW(),NOW()) RETURNING id`,
+          [TENANT_B_RA],
+        );
+        await client.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
+        resTestBId = ins.rows[0]?.id ?? null;
+      } else {
+        resTestBId = rb.rows[0]!.id;
+      }
+      await client.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
+      await client.query(
+        `DELETE FROM public.resource_availability WHERE tenant_id IN ($1::uuid,$2::uuid) AND weekday = 1`,
+        [TENANT_A_RA, TENANT_B_RA],
+      );
+      await client.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
+    });
+
+    afterAll(async () => {
+      await client.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
+      await client.query(
+        `DELETE FROM public.resource_availability WHERE tenant_id IN ($1::uuid,$2::uuid) AND weekday = 1`,
+        [TENANT_A_RA, TENANT_B_RA],
+      );
+      await client.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
+    });
+
+    it("D01-1 due intervalli stesso weekday consentiti (09-13 + 14-18)", async () => {
+      expect(resTestId).not.toBeNull();
+      await client.query(
+        `INSERT INTO public.resource_availability(tenant_id,resource_id,weekday,enabled,start_time,end_time)
+         VALUES ($1::uuid,$2::uuid,1,TRUE,'09:00'::time,'13:00'::time)
+         ON CONFLICT ON CONSTRAINT resource_availability_unique_row DO NOTHING`,
+        [TENANT_A_RA, resTestId],
+      );
+      await client.query(
+        `INSERT INTO public.resource_availability(tenant_id,resource_id,weekday,enabled,start_time,end_time)
+         VALUES ($1::uuid,$2::uuid,1,TRUE,'14:00'::time,'18:00'::time)
+         ON CONFLICT ON CONSTRAINT resource_availability_unique_row DO NOTHING`,
+        [TENANT_A_RA, resTestId],
+      );
+      const rows = await client.query<{ n: number }>(
+        `SELECT COUNT(*)::int n FROM public.resource_availability WHERE tenant_id=$1::uuid AND resource_id=$2::uuid AND weekday=1`,
+        [TENANT_A_RA, resTestId],
+      );
+      expect(rows.rows[0]!.n).toBe(2);
+    });
+
+    it("D01-2 duplicate exact interval idempotente ON CONFLICT DO NOTHING (no new row)", async () => {
+      expect(resTestId).not.toBeNull();
+      await client.query(
+        `INSERT INTO public.resource_availability(tenant_id,resource_id,weekday,enabled,start_time,end_time)
+         VALUES ($1::uuid,$2::uuid,1,TRUE,'09:00'::time,'13:00'::time)
+         ON CONFLICT ON CONSTRAINT resource_availability_unique_row DO NOTHING`,
+        [TENANT_A_RA, resTestId],
+      );
+      const rows = await client.query<{ n: number }>(
+        `SELECT COUNT(*)::int n FROM public.resource_availability WHERE tenant_id=$1::uuid AND resource_id=$2::uuid AND weekday=1`,
+        [TENANT_A_RA, resTestId],
+      );
+      expect(rows.rows[0]!.n).toBe(2);
+    });
+
+    it("D01-3 cross-tenant impossibile: stesso(resource,wd,start,end) ma tenant diverso = riga aggiunta (non collide), e NON sovrascrive tenant A", async () => {
+      expect(resTestId).not.toBeNull();
+      expect(resTestBId).not.toBeNull();
+      let errA: unknown = null;
+      try {
+        await client.query(
+          `INSERT INTO public.resource_availability(tenant_id,resource_id,weekday,enabled,start_time,end_time)
+           VALUES ($1::uuid,$2::uuid,1,TRUE,'09:00'::time,'13:00'::time)
+           ON CONFLICT ON CONSTRAINT resource_availability_unique_row DO NOTHING`,
+          [TENANT_B_RA, resTestBId],
+        );
+      } catch (e) {
+        errA = e;
+      }
+      expect(errA).toBeNull();
+      const a = await client.query<{ n: number }>(
+        `SELECT COUNT(*)::int n FROM public.resource_availability WHERE tenant_id=$1::uuid AND resource_id=$2::uuid AND weekday=1`,
+        [TENANT_A_RA, resTestId],
+      );
+      expect(a.rows[0]!.n).toBe(2);
+      const b = await client.query<{ n: number }>(
+        `SELECT COUNT(*)::int n FROM public.resource_availability WHERE tenant_id=$1::uuid AND resource_id=$2::uuid AND weekday=1`,
+        [TENANT_B_RA, resTestBId],
+      );
+      expect(b.rows[0]!.n).toBe(1);
+    });
+
+    it("D01-4 no accidental overwrite: INSERT secondo intervallo con start=14:00 non tocca riga 09:00", async () => {
+      expect(resTestId).not.toBeNull();
+      await client.query(
+        `INSERT INTO public.resource_availability(tenant_id,resource_id,weekday,enabled,start_time,end_time)
+         VALUES ($1::uuid,$2::uuid,1,TRUE,'14:00'::time,'18:00'::time)
+         ON CONFLICT ON CONSTRAINT resource_availability_unique_row DO UPDATE SET enabled=EXCLUDED.enabled RETURNING *`,
+        [TENANT_A_RA, resTestId],
+      );
+      const first = await client.query<{ start_time: string }>(
+        `SELECT start_time::text FROM public.resource_availability WHERE tenant_id=$1::uuid AND resource_id=$2::uuid AND weekday=1 ORDER BY start_time`,
+        [TENANT_A_RA, resTestId],
+      );
+      expect(first.rows).toHaveLength(2);
+      expect(first.rows[0]!.start_time).toBe("09:00:00");
+      expect(first.rows[1]!.start_time).toBe("14:00:00");
+    });
+  });
 });
