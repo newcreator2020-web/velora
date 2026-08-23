@@ -1060,5 +1060,144 @@ FASE12 definisce i mattoni fondazionali del modello multi-risorsa. I seguenti it
 6. ❌ **Analytics avanzate per risorsa** — report per-operatore (produttività, utilizzo, revenue split).
 7. ❌ **Color coding etichette risorsa** — UI multi-color per distinguere operatori su view future.
 8. ❌ **Risorse non-staff (stanze, lettini, macchinari)** — il modello lo supporta, ma la UI non etichetta/gestisce ancora categorie risorsa differenti da "principale + operatori".
-9. ❌ **Capacità di gruppo / class bookings** — slot multi-capacità (es. corsi) non implementati; vincolo resta 1 booking = 1 risorsa = 1 cliente.
-10. ❌ **Merge/split booking / ricorsione** — spostamento multi-risorsa, serie ricorrente, waitlist.
+9. ⌛ **Capacità di gruppo / class bookings** — slot multi-capacità (es. corsi) non implementati; vincolo resta 1 booking = 1 risorsa = 1 cliente.
+10. ⌛ **Merge/split booking / ricorsione** — spostamento multi-risorsa, serie ricorrente, waitlist.
+
+## 18. Operational Calendar Read Model + Agenda Multi-Layout (FASE 13C)
+
+FASE13C implementa il **primo calendario operativo production-grade** di Velora:
+read-oriented, PII-min, multi-layout day/week/agenda/tablet, refresh ibrido,
+bounded window + hard row limit. Usato da **Owner / Manager / Staff** quotidianamente.
+
+**NON** implementa: manual booking creation, drag-drop reschedule, resource reassignment,
+notifications, AI assistant, analytics dashboard. Queste rimangono fasi successive.
+
+### 18.1 Single RPC read authority (SEC-DEF hardened)
+
+Tutti i dati del calendario passano **esclusivamente** per l'RPC:
+
+```sql
+public.dashboard_calendar_get_range(
+  p_range_start  TIMESTAMPTZ,
+  p_range_end    TIMESTAMPTZ,
+  p_resource_ids UUID[] DEFAULT NULL,
+  p_statuses     TEXT[] DEFAULT ARRAY['confirmed','completed','no_show']
+)
+RETURNS TABLE ( row_type TEXT, booking_id UUID, starts_at TIMESTAMPTZ, ends_at TIMESTAMPTZ,
+               status TEXT, service_id UUID, service_name TEXT, service_duration_minutes INTEGER,
+               resource_id UUID, resource_display_name TEXT, resource_color_hex TEXT,
+               customer_display_name TEXT )
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
+```
+
+Vantaggi hardening:
+
+- `SECURITY DEFINER` + `SET search_path=''`: RLS non duplicato su 6 join diversi;
+- `auth.uid()` → `tenant_memberships(tenant_id,role)` solo ruoli `owner|manager|staff`;
+- **Nessun `tenant_id` accettato dal client** — risolto interamente server-side.
+
+### 18.2 Window + Row Bounds Contract
+
+| Bound            |                       Valore                        |                Err                | Server | Client pre-check |
+| ---------------- | :-------------------------------------------------: | :-------------------------------: | :----: | :--------------: |
+| Range window     |                    max 14 giorni                    |      WINDOW_TOO_LARGE 22023       |   ✅   |        ✅        |
+| Righe restituite |                    hard cap 1500                    | RESULT_TOO_LARGE 54000 (HTTP 413) |   ✅   |        ✅        |
+| Status filter    | whitelist `{confirmed,completed,no_show,cancelled}` |       CALENDAR_QUERY_FAILED       |   ✅   |        ✅        |
+| Ruolo            |                      staff min                      |        AUTHZ_DENIED 28000         |   ✅   |        —         |
+
+### 18.3 5 Row Types Discriminated + 8 Source of Truth
+
+Discriminator `row_type` per render senza query ripetute:
+
+| row_type                                                                  |         Source          |     Filtrabile      |
+| ------------------------------------------------------------------------- | :---------------------: | :-----------------: |
+| `booking_confirmed`                                                       |   bookings confirmed    |         SI          |
+| `booking_completed`                                                       |   bookings completed    |         SI          |
+| `booking_no_show`                                                         |    bookings no_show     |         SI          |
+| `booking_cancelled`                                                       |   bookings cancelled    | SI default excluded |
+| `business_closure` / `resource_time_off` / `extra_open` / `reduced_hours` | FASE13B schedule tables |         NO          |
+
+### 18.4 Layout Multi-Viewport Responsive (mobile first)
+
+```
+≤ 375 px smartphone → Agenda list (cards per booking, infinite scroll 1 giorno)
+  768 px tablet     → Day view max 4 staff columns + chip filter horizontal
+ ≥1440 px desktop   → Day view 5+ columns, Week 7 cols, sticky resources header
+```
+
+### 18.5 Refresh Hybrid Strategy (4 canali, non mutualmente esclusivi)
+
+1. **`focus` + visibilitychange**: throttle 300ms → revalidate;
+2. **Polling 60s** attivo solamente se `document.visibilityState === 'visible'`;
+3. **After Drawer action** (Cancel / Complete / No-Show): `revalidatePath('/app/calendar')` ottimistico;
+4. **Dedup Promise `fetchingRef.current`**: richieste simultanee → share singola risposta.
+
+### 18.6 Booking Drawer Read-Only + Authorized Actions
+
+- **Owner / Manager** → 3 azioni inline: Cancel, Mark Completed, Mark No-Show;
+- **Staff** → **NESSUNA** azione mutevole (read-only);
+- Drawer close: `Esc` key, `X` click, backdrop click;
+- **Focus trap + return focus** on opener button (EC13-17/18 PASS).
+
+### 18.7 Privacy PII Zero Contract
+
+Le righe Calendar **non espongono MAI**:
+
+- `customers.id` (internale, risk IDOR)
+- `customers.email` / `customers.phone`
+- `bookings.notes`
+- `stripe_customer_id`
+
+Solo `customer_display_name` (nome visualizzato pubblico).
+
+### 18.8 Performance Targets (verificati ≥ 10.000 storico bookings tenant)
+
+| Scope            |    p95 (measured)    |   Target   |
+| ---------------- | :------------------: | :--------: |
+| Day 1g window    |        9.5 ms        |  ≤ 150 ms  |
+| Week 7g window   |       10.0 ms        |  ≤ 250 ms  |
+| EXPLAIN Day/Week | NO Seq Scan bookings | 0 Seq Scan |
+| Day payload      |       15,150 B       |  ≤ 100 KB  |
+| Week payload     |       86,766 B       |  ≤ 500 KB  |
+
+Planner usa **Function Scan** + covering indexes FASE13B8 (bookings confirmed partial + GiST overlap).
+
+### 18.9 CSS Tailwind Specificity Fallback Pattern
+
+Inspiegabile comportamento Tailwind in produzione post-hydration:
+
+- `className="grid"` → computed `display: block`
+- `className="relative"` → computed `position: static`
+
+**Risoluzione inline fallback** per tutti gli elementi critici DayView/WeekView:
+
+```tsx
+<section style={{ display: "grid", position: "relative", gridTemplateColumns: ... }}>
+```
+
+Necessario per mantenere layout Day/Week corretti in PROD.
+
+### 18.10 Test Contract
+
+| Suite                             | Totale | PASS |         Ambiente         |
+| --------------------------------- | :----: | :--: | :----------------------: |
+| C13 DB/RPC Calendar Contract      |   20   |  20  |       Unit Vitest        |
+| P13 Performance 10k dataset       |   9    |  9   |       Unit Vitest        |
+| EC13 Calendar E2E Day/Week/Agenda |   20   |  20  |      Playwright DEV      |
+| EC13 Calendar E2E Day/Week/Agenda |   20   |  20  | Playwright PROD (build)  |
+| Double-reset determinism FASE13C  |   2    |  2   |       Unit Vitest        |
+| E12 Resource Booking regression   |   20   |  20  | Playwright DEV (regress) |
+
+### 18.11 NON-GOALS — FASE13C
+
+Rimandati a fasi successive:
+
+1. ⌛ **Booking creation manuale** via Calendar (click → modale slot create).
+2. ⌛ **Drag & Drop** reschedule / riassegnazione risorsa.
+3. ⌛ **Split/merge booking**, ricorrenza, waitlist.
+4. ⌛ **Month view**, resource Gantt, capacity reporting.
+5. ⌛ **Staff breaks** intra-day (attualmente: 2 righe RA 09-13 e 14-18).
+6. ⌛ **Calendar multi-tenant** cross view owner portal.
+7. ⌛ **Reminders / notifications** email/SMS pre-appuntamento.
+8. ⌛ **AI concierge** riempimento calendario, suggerimenti slot.
+9. ⌛ **Export iCal** sync Google/Outlook per Staff.

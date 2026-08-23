@@ -1,6 +1,7 @@
 // @vitest-environment node
 import "dotenv/config";
 import { Client as PgClient } from "pg";
+import { createClient } from "@supabase/supabase-js";
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
 
 const ALLOWED_DB_HOSTS: ReadonlySet<string> = new Set(["127.0.0.1", "localhost"]);
@@ -58,19 +59,22 @@ const buildPgOpts = () => ({
 const TENANT_PERF_SLUG = "f13-perf-harness-only";
 const TENANT_PERF_ID = "00000000-0000-4130-8000-000000000099";
 const TZ = "Europe/Rome";
+const PERF_OWNER_EMAIL = "perf-f13c-owner@velora.test.local";
+const PERF_PASSWORD = "VeloraPerfHarness99!";
 
 /**
  * Performance harness TEST-ONLY.
  *
  * Dataset: 1 dedicated tenant slug='f13-perf-harness-only', 10 active bookable
  * resources, 1 service 30min duration, 10000 historical bookings
- * (confirmed/cancelled 80/20) distributed across 90 days.
+ * (confirmed/cancelled 80/20) distributed across 360 days.
  *
  * Measures taken:
  * - EXPLAIN (ANALYZE, BUFFERS) slot V3 1 resource / 10 resources
+ * - EXPLAIN (ANALYZE, BUFFERS) Calendar RPC (Day view, Week view)
  * - 5 warmup discarded + ≥45 samples per configuration.
  * - Real min/median/p95/max computed from samples.
- * - JSON payload bytes per 7-day window.
+ * - JSON payload bytes per Day view / Week view windows.
  * - Planner check: verify no Seq Scan on public.bookings critical overlap path.
  */
 
@@ -78,6 +82,7 @@ let pg: PgClient | null = null;
 let svcId: string | null = null;
 let fromDate: string | null = null;
 let toDate: string | null = null;
+let perfOwnerUid: string | null = null;
 
 async function setupTenantResourcesAndBookings(c: PgClient, count: number) {
   await c.query("BEGIN");
@@ -185,9 +190,27 @@ async function setupTenantResourcesAndBookings(c: PgClient, count: number) {
   return { bookingsInserted };
 }
 
+async function impersonateOwner(c: PgClient, uid: string) {
+  await c.query(`SET ROLE authenticated`);
+  await c.query(`SELECT set_config('request.jwt.claim.sub', $1::text, false)`, [uid]);
+  await c.query(`SELECT set_config('request.jwt.claim.role', 'authenticated', false)`);
+}
+
 async function cleanup(c: PgClient) {
+  await c.query("RESET ROLE");
   await c.query("BEGIN");
   await c.query("SET LOCAL session_replication_role = replica");
+  await c.query(`DELETE FROM public.tenant_memberships WHERE tenant_id = $1::uuid`, [
+    TENANT_PERF_ID,
+  ]);
+  await c
+    .query(
+      `DELETE FROM public.profiles WHERE id IN (
+    SELECT user_id FROM public.tenant_memberships WHERE tenant_id = $1::uuid
+  )`,
+      [TENANT_PERF_ID],
+    )
+    .catch(() => {});
   await c.query(`DELETE FROM public.audit_logs WHERE tenant_id = $1::uuid`, [TENANT_PERF_ID]);
   await c.query(`DELETE FROM public.bookings WHERE tenant_id = $1::uuid`, [TENANT_PERF_ID]);
   await c.query(`DELETE FROM public.staff_resource_services WHERE tenant_id = $1::uuid`, [
@@ -214,9 +237,70 @@ describe("F13 Performance harness (TEST-ONLY)", () => {
     const r = await setupTenantResourcesAndBookings(pg, 10000);
     envOr("SUPABASE_SERVICE_ROLE_KEY");
     expect(r.bookingsInserted).toBeGreaterThanOrEqual(10000);
-  }, 300_000);
+    const sbSvc = createClient(
+      envOr("NEXT_PUBLIC_SUPABASE_URL"),
+      envOr("SUPABASE_SERVICE_ROLE_KEY"),
+      {
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      },
+    );
+    const ex = await sbSvc.auth.admin.listUsers().catch(() => ({ data: { users: [] } }));
+    const prior = (ex.data?.users ?? []).find((u) => u.email === PERF_OWNER_EMAIL);
+    if (prior) {
+      perfOwnerUid = prior.id;
+    } else {
+      const created = await sbSvc.auth.admin.createUser({
+        email: PERF_OWNER_EMAIL,
+        password: PERF_PASSWORD,
+        email_confirm: true,
+        user_metadata: { name: "Perf Owner F13C" },
+      });
+      if (!created.error && created.data.user?.id) {
+        perfOwnerUid = created.data.user.id;
+      } else if (created.error?.message?.includes("already been registered")) {
+        const direct = await pg!.query(`SELECT id FROM auth.users WHERE email = $1::text LIMIT 1`, [
+          PERF_OWNER_EMAIL,
+        ]);
+        if (direct.rows?.[0]?.id) perfOwnerUid = direct.rows[0].id;
+      }
+    }
+    if (!perfOwnerUid) throw new Error("perfOwnerUid not resolved (create/find/query failed)");
+    await pg!.query(
+      `INSERT INTO public.profiles(id, display_name, created_at, updated_at)
+       VALUES ($1::uuid, 'Perf Owner F13C', NOW(), NOW())
+       ON CONFLICT (id) DO UPDATE SET display_name=EXCLUDED.display_name`,
+      [perfOwnerUid],
+    );
+    await pg!.query(
+      `INSERT INTO public.tenant_memberships(tenant_id, user_id, role, status, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, 'owner', 'active', NOW(), NOW())
+       ON CONFLICT (tenant_id, user_id) DO UPDATE SET role=EXCLUDED.role, status=EXCLUDED.status`,
+      [TENANT_PERF_ID, perfOwnerUid],
+    );
+  }, 360_000);
 
   afterAll(async () => {
+    if (pg && perfOwnerUid) {
+      try {
+        await pg.query("RESET ROLE");
+        await pg
+          .query(`DELETE FROM public.tenant_memberships WHERE user_id=$1::uuid`, [perfOwnerUid])
+          .catch(() => {});
+        await pg
+          .query(`DELETE FROM public.profiles WHERE id=$1::uuid`, [perfOwnerUid])
+          .catch(() => {});
+        const sbSvc = createClient(
+          envOr("NEXT_PUBLIC_SUPABASE_URL"),
+          envOr("SUPABASE_SERVICE_ROLE_KEY"),
+          {
+            auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+          },
+        );
+        await sbSvc.auth.admin.deleteUser(perfOwnerUid).catch(() => {});
+      } catch (_e) {
+        /* non-blocking */
+      }
+    }
     if (pg) {
       await cleanup(pg);
       await pg.end().catch(() => {});
@@ -315,5 +399,113 @@ describe("F13 Performance harness (TEST-ONLY)", () => {
     expect(min).toBeGreaterThan(0);
     (globalThis as unknown as { __f13c_last_payload_bytes?: number }).__f13c_last_payload_bytes =
       payloadBytes;
+  });
+
+  it("P13-6 EXPLAIN ANALYZE Calendar Day view: NO Seq Scan public.bookings overlap", async () => {
+    expect(perfOwnerUid).not.toBeNull();
+    const base = new Date(`${fromDate}T00:00:00Z`);
+    const rStart = new Date(base.valueOf() - 2 * 3600_000).toISOString();
+    const rEnd = new Date(base.valueOf() + 22 * 3600_000).toISOString();
+    await impersonateOwner(pg!, perfOwnerUid!);
+    const plan = await pg!.query({
+      rowMode: "array",
+      text: `EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)
+             SELECT * FROM public.dashboard_calendar_get_range($1::timestamptz, $2::timestamptz, NULL, ARRAY['confirmed','completed','no_show','cancelled']::text[])`,
+      values: [rStart, rEnd],
+    });
+    const planLines = (plan.rows as string[][]).map((r) => r[0] as string);
+    const planText = planLines.join("\n");
+    const seqOnBookings =
+      /Seq Scan on public\.bookings/i.test(planText) || /Seq Scan on bookings/i.test(planText);
+    expect(seqOnBookings).toBe(false);
+    console.warn(`  [plan-cal-day] lines=${planLines.length} firstLine=${planLines[0] ?? ""}`);
+  });
+
+  it("P13-7 EXPLAIN ANALYZE Calendar Week view: NO Seq Scan public.bookings overlap", async () => {
+    expect(perfOwnerUid).not.toBeNull();
+    const base = new Date(`${fromDate}T00:00:00Z`);
+    const rStart = new Date(base.valueOf() - 2 * 3600_000).toISOString();
+    const rEnd = new Date(base.valueOf() + 7 * 86400_000 - 2 * 3600_000).toISOString();
+    await impersonateOwner(pg!, perfOwnerUid!);
+    const plan = await pg!.query({
+      rowMode: "array",
+      text: `EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)
+             SELECT * FROM public.dashboard_calendar_get_range($1::timestamptz, $2::timestamptz, NULL, ARRAY['confirmed','completed','no_show','cancelled']::text[])`,
+      values: [rStart, rEnd],
+    });
+    const planLines = (plan.rows as string[][]).map((r) => r[0] as string);
+    const planText = planLines.join("\n");
+    const seqOnBookings =
+      /Seq Scan on public\.bookings/i.test(planText) || /Seq Scan on bookings/i.test(planText);
+    expect(seqOnBookings).toBe(false);
+    console.warn(`  [plan-cal-week] lines=${planLines.length}`);
+  });
+
+  it("P13-8 warm 50 calls Calendar Day 1d window → p95 ≤ 150ms, payload ≤ 100KB", async () => {
+    expect(perfOwnerUid).not.toBeNull();
+    const base = new Date(`${fromDate}T00:00:00Z`);
+    const rStart = new Date(base.valueOf() - 2 * 3600_000).toISOString();
+    const rEnd = new Date(base.valueOf() + 22 * 3600_000).toISOString();
+    await impersonateOwner(pg!, perfOwnerUid!);
+    const samples: number[] = [];
+    let payloadBytes = 0;
+    for (let i = 0; i < 50; i++) {
+      const t0 = process.hrtime.bigint();
+      const r = await pg!.query(
+        `SELECT * FROM public.dashboard_calendar_get_range($1::timestamptz, $2::timestamptz, NULL, ARRAY['confirmed','completed','no_show','cancelled']::text[])`,
+        [rStart, rEnd],
+      );
+      const dt = Number(process.hrtime.bigint() - t0) / 1e6;
+      if (i >= 5) {
+        samples.push(dt);
+        payloadBytes = Math.max(payloadBytes, Buffer.byteLength(JSON.stringify(r.rows), "utf8"));
+      }
+    }
+    samples.sort((a, b) => a - b);
+    const min = samples[0]!;
+    const median = samples[Math.floor(samples.length / 2)]!;
+    const p95 = samples[Math.floor(samples.length * 0.95)]!;
+    const max = samples[samples.length - 1]!;
+    console.warn(
+      `  [cal-day samples=${samples.length}] min=${min.toFixed(1)}ms median=${median.toFixed(1)}ms p95=${p95.toFixed(1)}ms max=${max.toFixed(1)}ms payload=${payloadBytes}B (≤100KB? ${payloadBytes <= 100_000})`,
+    );
+    expect(samples.length).toBeGreaterThanOrEqual(45);
+    expect(min).toBeGreaterThan(0);
+    expect(p95).toBeLessThanOrEqual(150);
+    expect(payloadBytes).toBeLessThanOrEqual(100_000);
+  });
+
+  it("P13-9 warm 50 calls Calendar Week 7d window → p95 ≤ 250ms, payload ≤ 500KB", async () => {
+    expect(perfOwnerUid).not.toBeNull();
+    const base = new Date(`${fromDate}T00:00:00Z`);
+    const rStart = new Date(base.valueOf() - 2 * 3600_000).toISOString();
+    const rEnd = new Date(base.valueOf() + 7 * 86400_000 - 2 * 3600_000).toISOString();
+    await impersonateOwner(pg!, perfOwnerUid!);
+    const samples: number[] = [];
+    let payloadBytes = 0;
+    for (let i = 0; i < 50; i++) {
+      const t0 = process.hrtime.bigint();
+      const r = await pg!.query(
+        `SELECT * FROM public.dashboard_calendar_get_range($1::timestamptz, $2::timestamptz, NULL, ARRAY['confirmed','completed','no_show','cancelled']::text[])`,
+        [rStart, rEnd],
+      );
+      const dt = Number(process.hrtime.bigint() - t0) / 1e6;
+      if (i >= 5) {
+        samples.push(dt);
+        payloadBytes = Math.max(payloadBytes, Buffer.byteLength(JSON.stringify(r.rows), "utf8"));
+      }
+    }
+    samples.sort((a, b) => a - b);
+    const min = samples[0]!;
+    const median = samples[Math.floor(samples.length / 2)]!;
+    const p95 = samples[Math.floor(samples.length * 0.95)]!;
+    const max = samples[samples.length - 1]!;
+    console.warn(
+      `  [cal-week samples=${samples.length}] min=${min.toFixed(1)}ms median=${median.toFixed(1)}ms p95=${p95.toFixed(1)}ms max=${max.toFixed(1)}ms payload=${payloadBytes}B (≤500KB? ${payloadBytes <= 500_000})`,
+    );
+    expect(samples.length).toBeGreaterThanOrEqual(45);
+    expect(min).toBeGreaterThan(0);
+    expect(p95).toBeLessThanOrEqual(250);
+    expect(payloadBytes).toBeLessThanOrEqual(500_000);
   });
 });

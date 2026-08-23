@@ -143,7 +143,26 @@ const B = {
     { type: "services", position: 4, enabled: true, variant: "cards", settings: {} },
     { type: "reviews", position: 5, enabled: true, variant: "default", settings: {} },
   ],
-  services: [],
+  services: [
+    {
+      name: "Trattamento viso idratante",
+      description: "Trattamento base pelle giovane",
+      priceFrom: "35.00",
+      currency: "EUR",
+      durationMinutes: 45,
+      active: true,
+      position: 0,
+    },
+    {
+      name: "Solarium 20 min",
+      description: "Solarium lettino base",
+      priceFrom: "15.00",
+      currency: "EUR",
+      durationMinutes: 20,
+      active: true,
+      position: 1,
+    },
+  ],
 };
 const UNPUB = {
   slug: "velora-e2e-unpublished-c",

@@ -129,15 +129,55 @@ test.beforeAll(async () => {
     [ids.tenantA],
   );
   ids.resourceA2 = rA2.rows[0].id;
-  if (ids.tenantB) {
-    const rB = await c.query(
-      `INSERT INTO public.staff_resources(tenant_id, slug, display_name, active, bookable, sort_order, created_at, updated_at)
-       VALUES ($1, 'f13b-only', 'F13B Only Op', TRUE, TRUE, 50, NOW(), NOW())
-       ON CONFLICT DO NOTHING RETURNING id`,
+  if (!ids.tenantB)
+    throw new Error(
+      `Missing ${SLUG_B}: run global-setup-public. FASE13C contractual seed invariant B required.`,
+    );
+  const rB = await c.query(
+    `INSERT INTO public.staff_resources(tenant_id, slug, display_name, active, bookable, sort_order, created_at, updated_at)
+     VALUES ($1, 'f13b-only', 'F13B Only Op', TRUE, TRUE, 50, NOW(), NOW())
+     ON CONFLICT DO NOTHING RETURNING id`,
+    [ids.tenantB],
+  );
+  ids.resourceBOnly = (rB.rows[0] && rB.rows[0].id) || null;
+  if (!ids.resourceBOnly) {
+    const rBGet = await c.query(
+      "SELECT id FROM public.staff_resources WHERE tenant_id=$1 AND slug='f13b-only' LIMIT 1",
       [ids.tenantB],
     );
-    ids.resourceBOnly = (rB.rows[0] && rB.rows[0].id) || null;
+    ids.resourceBOnly = (rBGet.rows[0] && rBGet.rows[0].id) || null;
   }
+  const defaultWeekdays = [0, 1, 2, 3, 4, 5, 6];
+  const defaultTimes = [
+    [0, false, "09:00", "18:00"],
+    [1, true, "09:00", "18:00"],
+    [2, true, "09:00", "18:00"],
+    [3, true, "09:00", "18:00"],
+    [4, true, "09:00", "18:00"],
+    [5, true, "09:00", "18:00"],
+    [6, true, "09:00", "13:00"],
+  ];
+  async function ensureResourceAvailability(resources, times) {
+    for (const r of resources) {
+      if (!r) continue;
+      for (const [wd, en, s, e] of times) {
+        await c.query(
+          `INSERT INTO public.resource_availability(tenant_id, resource_id, weekday, enabled, start_time, end_time, created_at, updated_at)
+           VALUES ((SELECT tenant_id FROM public.staff_resources WHERE id=$1 LIMIT 1), $1, $2::int, $3::boolean, $4::time, $5::time, NOW(), NOW())
+           ON CONFLICT (tenant_id, resource_id, weekday) DO UPDATE SET
+             enabled = EXCLUDED.enabled,
+             start_time = EXCLUDED.start_time,
+             end_time = EXCLUDED.end_time,
+             updated_at = EXCLUDED.updated_at`,
+          [r, wd, en, s, e],
+        );
+      }
+    }
+  }
+  await ensureResourceAvailability(
+    [ids.resourcePrincipaleA, ids.resourceA1, ids.resourceA2, ids.resourceBOnly],
+    defaultTimes,
+  );
   await c.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
   await c.query(`DELETE FROM public.bookings WHERE tenant_id IN ($1,$2)`, [
     ids.tenantA,
@@ -309,7 +349,11 @@ test("E13B-9 cross-tenant forged resource slug (B-only) on tenant A returns 200 
   request,
   baseURL,
 }) => {
-  test.skip(!ids.tenantB || !ids.resourceBOnly, "Tenant B not seeded from global-setup");
+  if (!ids.tenantB || !ids.resourceBOnly) {
+    throw new Error(
+      `FASE13C contractual invariant: tenant B and resource f13b-only MUST exist. Got ids.tenantB=${ids.tenantB} ids.resourceBOnly=${ids.resourceBOnly}`,
+    );
+  }
   const j = await getSlotsJson(request, baseURL, {
     slug: SLUG_A,
     service_id: ids.svcTaglio,
@@ -324,7 +368,11 @@ test("E13B-10 Tenant B invariant: own B resource works for B services if any", a
   request,
   baseURL,
 }) => {
-  test.skip(!ids.tenantB || !ids.resourceBOnly, "Tenant B not seeded");
+  if (!ids.tenantB || !ids.resourceBOnly) {
+    throw new Error(
+      `FASE13C contractual invariant: tenant B and resource f13b-only MUST exist. Got ids.tenantB=${ids.tenantB} ids.resourceBOnly=${ids.resourceBOnly}`,
+    );
+  }
   const svcB = await (async () => {
     const c = await pgClient();
     const r = await c.query(
@@ -333,7 +381,11 @@ test("E13B-10 Tenant B invariant: own B resource works for B services if any", a
     );
     return (r.rows[0] && r.rows[0].id) || null;
   })();
-  test.skip(!svcB, "Tenant B has no services");
+  if (!svcB) {
+    throw new Error(
+      "FASE13C contractual invariant: tenant B MUST have at least 1 service. global-setup-public.mjs B.services empty?",
+    );
+  }
   const j = await getSlotsJson(request, baseURL, {
     slug: SLUG_B,
     service_id: svcB,
@@ -418,7 +470,11 @@ test("E13B-14 booking V3 RPC persists through REST: call createPublicBooking and
   request,
   baseURL,
 }) => {
-  test.skip(!ids.resourceA1, "Missing f13a-op1 resource");
+  if (!ids.resourceA1) {
+    throw new Error(
+      "FASE13C contractual invariant: f13a-op1 resource MUST exist. ids.resourceA1 is null. Setup beforeAll broken?",
+    );
+  }
   const slug = SLUG_A;
   const svcId = ids.svcTaglio;
   const resp = await request.get(
@@ -426,7 +482,11 @@ test("E13B-14 booking V3 RPC persists through REST: call createPublicBooking and
   );
   const body = await resp.json();
   const slots = (body && body.slots) || [];
-  test.skip(slots.length === 0, "No available slots on NEXT_MON Monday for ANY");
+  if (slots.length === 0) {
+    throw new Error(
+      `FASE13C contractual invariant: NEXT_MON Monday ${NEXT_MON} ANY must have available slots for A Taglio. Got 0 slots.`,
+    );
+  }
   const candidate = slots[0];
   const slotStart = new Date(candidate.iso).toISOString();
   const rnd = Math.random().toString(36).slice(2, 8);
