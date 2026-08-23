@@ -708,11 +708,11 @@ no recurring, no multi-location (fasi successive).
 
 ### 17.1 Tabelle aggiuntive (migrations append-only 13B1-13B3)
 
-| Tabella | Scope | Campi chiave |
-| ------- | ----- | ------------ |
-| `public.resource_availability` (13B1) | Orari settimanali PER-RESOURCE, MULTI-intervallo per weekday | `resource_id`, `weekday 0..6`, `enabled`, `start_time`, `end_time`, UNIQUE `(tenant,resource,weekday,start,end)` |
-| `public.business_schedule_exceptions` (13B2) | Eccezioni tenant-wide con 4 tipi e PRECEDENZA | `exception_type ∈ {slot_block, closure, special_hours, extra_open}`, `starts_at/ends_at TIMESTAMPTZ`, GiST tenant+range overlap |
-| `public.resource_time_off` (13B3) | Ferie/malattia PER-RESOURCE | `time_off_type ∈ {vacation,sick,leave,training,custom_block}`, `starts_at/ends_at`, composite FK `(tenant,resource)` |
+| Tabella                                      | Scope                                                        | Campi chiave                                                                                                                    |
+| -------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `public.resource_availability` (13B1)        | Orari settimanali PER-RESOURCE, MULTI-intervallo per weekday | `resource_id`, `weekday 0..6`, `enabled`, `start_time`, `end_time`, UNIQUE `(tenant,resource,weekday,start,end)`                |
+| `public.business_schedule_exceptions` (13B2) | Eccezioni tenant-wide con 4 tipi e PRECEDENZA                | `exception_type ∈ {slot_block, closure, special_hours, extra_open}`, `starts_at/ends_at TIMESTAMPTZ`, GiST tenant+range overlap |
+| `public.resource_time_off` (13B3)            | Ferie/malattia PER-RESOURCE                                  | `time_off_type ∈ {vacation,sick,leave,training,custom_block}`, `starts_at/ends_at`, composite FK `(tenant,resource)`            |
 
 **Limitazione documentata:** `business_availability` weekly outer rimane **1 intervallo/weekday**
 (schema frozen FASE12 non modificato). Multi-intervallo = più righe in `resource_availability`.
@@ -721,6 +721,7 @@ Pause ricorrenti = due righe `RA 09-13` + `RA 14-18` (nessuna tabella `breaks`).
 ### 17.2 Inheritance rule (PER-WEEKDAY, non globale)
 
 Per ogni weekday per ogni resource:
+
 - 0 righe `resource_availability.enabled=true` → **INHERIT** `business_availability` outer;
 - ≥1 righe `RA` → **USE ESCLUSIVAMENTE** RA (non più BA).
 
@@ -742,6 +743,7 @@ Verificato: S13-3 closure, S13-4 special, S13-5 extra, S13-6 slot_block wins.
 `business_profiles.timezone` (IANA) = unica source of truth.
 
 Helper SQL `public.scheduling_local_to_utc(date, time, tz)` distingue:
+
 - **DST_NONEXISTENT**: ora locale inesistente (DST forward marzo 2am → 3am) rilevato con roundtrip locale→UTC→locale + delta 1h;
 - **DST_AMBIGUOUS**: ora locale duplicata (DST backward ottobre 2:30am appare due volte).
 
@@ -752,6 +754,7 @@ Verificato: S13-23 DST-FWD PASS, S13-24 DST-BWD PASS.
 `SECURITY DEFINER SET search_path=''`, REVOKE PUBLIC, GRANT anon/authenticated.
 
 **Firma:**
+
 ```sql
 public_slot_get_available_v3(
   p_tenant_slug TEXT, p_service_id UUID,
@@ -762,6 +765,7 @@ public_slot_get_available_v3(
 ```
 
 **Pipeline 16-step:**
+
 1. tenant slug exists + published
 2. business profile active TZ configured
 3. service belongs tenant + active + duration valid
@@ -809,6 +813,7 @@ S13-36 concurrency 20x sameresource exactly 1 success, S13-37 20x split 2 resour
 ### 17.8 Audit whitelist 8 nuovi eventi scheduling (13B7)
 
 CHECK constraint `audit_logs_action_check` esteso con:
+
 ```
 resource_availability_changed
 business_schedule_exception_created / updated / deleted
@@ -824,6 +829,7 @@ Verificato: S13-33 audit event PII-free PASS, S13-34 audit time-off PASS, S13-35
 ### 17.9 Indexes performance (13B8)
 
 Covering/partial indexes per query planner:
+
 - `bookings_tenant_time_covering_idx (tenant,starts_at,ends_at) INCLUDE ...`
 - `srs_reverse_covering_idx (tenant,service,active,resource_id)` per SRS eligibility
 - `staff_resources_any_lookup_idx (tenant,active,bookable,sort_order ASC,id ASC) INCLUDE slug/display` per ANY candidate lookup
@@ -833,6 +839,7 @@ Covering/partial indexes per query planner:
 ### 17.10 Constants Authority SINGOLA (server/DB)
 
 Solo 1 sorgente (non UI 45 / RPC 365):
+
 ```sql
 public.scheduling_constants() → (lead_time_minutes=60, booking_horizon_days=45, slot_step_minutes=15)
 ```
@@ -841,11 +848,11 @@ Verificato: S13-21 lead_time deny PASS, S13-22 horizon deny PASS.
 
 ### 17.11 RLS policies FASE13B (tutte FORCE)
 
-| Tabella | SELECT | INSERT/UPDATE/DELETE |
-| ------- | ------ | -------------------- |
-| `resource_availability` | tenant members authenticated | OWNER/MANAGER same-tenant, STAFF READ-only, ANON 0 |
-| `business_schedule_exceptions` | tenant members | OWNER/MANAGER same-tenant, ANON 0 |
-| `resource_time_off` | tenant members | OWNER/MANAGER same-tenant, STAFF READ-only, ANON 0 |
+| Tabella                        | SELECT                       | INSERT/UPDATE/DELETE                               |
+| ------------------------------ | ---------------------------- | -------------------------------------------------- |
+| `resource_availability`        | tenant members authenticated | OWNER/MANAGER same-tenant, STAFF READ-only, ANON 0 |
+| `business_schedule_exceptions` | tenant members               | OWNER/MANAGER same-tenant, ANON 0                  |
+| `resource_time_off`            | tenant members               | OWNER/MANAGER same-tenant, STAFF READ-only, ANON 0 |
 
 Verificato: S13-9 cross-tenant WRITE deny, S13-10 staff WRITE deny, S13-11 owner allow,
 S13-12 manager allow, S13-13 anon direct SELECT deny.
@@ -860,7 +867,6 @@ INTEGRATION: 3 files → 29/29 PASS
 FULL VITEST: 24 files → 486/486 PASS [2nda run 42s; 1a run 485/486 flake race cleanup]
 TYPECHECK: 0 errors | LINT: 0 errors 0 warnings | FORMAT CHECK: 0 mismatches | BUILD: 0
 ```
-
 
 ### 16.4 Composite Tenant Integrity FK (bookings cross-tenant)
 

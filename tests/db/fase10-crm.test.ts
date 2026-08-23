@@ -61,6 +61,8 @@ const FIXED = {
   svc_b: "00000000-0000-4100-9002-0000000000b1",
   bp_a: "00000000-0000-4100-9003-0000000000a1",
   bp_b: "00000000-0000-4100-9003-0000000000b1",
+  res_a: "00000000-0000-4100-9004-0000000000a1",
+  res_b: "00000000-0000-4100-9004-0000000000b1",
   slug_a: "f10-tenant-alpha",
   slug_b: "f10-tenant-beta",
 };
@@ -252,10 +254,48 @@ async function provisionTenantsAndServices(pgc: PgClient) {
   await pgc.query(
     `INSERT INTO public.business_availability (tenant_id,weekday,enabled,start_time,end_time,created_at,updated_at) VALUES ${seed.join(",")} ON CONFLICT (tenant_id,weekday) DO NOTHING;`,
   );
+  await pgc.query(
+    `INSERT INTO public.staff_resources (id,tenant_id,slug,display_name,active,bookable,sort_order,created_at,updated_at) VALUES
+      ('${FIXED.res_a}','${FIXED.tenant_a}','f10-default-a','Default A',TRUE,TRUE,1,'${NOW}','${NOW}'),
+      ('${FIXED.res_b}','${FIXED.tenant_b}','f10-default-b','Default B',TRUE,TRUE,1,'${NOW}','${NOW}')
+     ON CONFLICT DO NOTHING;`,
+  );
+  await pgc.query(
+    `INSERT INTO public.staff_resource_services (tenant_id,resource_id,service_id,active,created_at,updated_at) VALUES
+      ('${FIXED.tenant_a}','${FIXED.res_a}','${FIXED.svc_a}',TRUE,'${NOW}','${NOW}'),
+      ('${FIXED.tenant_b}','${FIXED.res_b}','${FIXED.svc_b}',TRUE,'${NOW}','${NOW}')
+     ON CONFLICT DO NOTHING;`,
+  );
+  const rav = (tid: string, rid: string, wd: number, en: boolean, s: string, e: string) =>
+    `('${tid}','${rid}',${wd},${en},'${s}'::time,'${e}'::time,'${NOW}'::timestamptz,'${NOW}'::timestamptz)`;
+  const raSeed: string[] = [];
+  for (const [tid, rid] of [
+    [FIXED.tenant_a, FIXED.res_a],
+    [FIXED.tenant_b, FIXED.res_b],
+  ] as const) {
+    for (let wd = 0; wd < 7; wd++) {
+      const en = wd >= 1 && wd <= 5 ? true : wd === 6 ? true : false;
+      const s = "09:00";
+      const e = wd === 6 ? "13:00" : "18:00";
+      raSeed.push(rav(tid, rid, wd, en, s, e));
+    }
+  }
+  await pgc.query(
+    `INSERT INTO public.resource_availability (tenant_id,resource_id,weekday,enabled,start_time,end_time,created_at,updated_at) VALUES ${raSeed.join(",")} ON CONFLICT DO NOTHING;`,
+  );
 }
 
-function isoPlusDays(n: number, hour = 10, minute = 0): string {
+function getNextMondayAnchor(): Date {
   const d = new Date();
+  d.setUTCHours(0, 0, 0, 0);
+  const currentWeekday = d.getUTCDay();
+  const delta = currentWeekday === 1 ? 0 : (8 - currentWeekday) % 7;
+  d.setUTCDate(d.getUTCDate() + delta);
+  return d;
+}
+const _MON_ANCHOR: Date = getNextMondayAnchor();
+function isoPlusDays(n: number, hour = 10, minute = 0): string {
+  const d = new Date(_MON_ANCHOR.getTime());
   d.setUTCDate(d.getUTCDate() + n);
   d.setUTCHours(hour, minute, 0, 0);
   return d.toISOString();
@@ -285,6 +325,15 @@ describe("FASE10 CRM CORE — DB / RLS / DEDUP / CONCURRENCY / AUDIT PII-FREE", 
     );
     await pgc.query(
       `DELETE FROM public.customers WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
+    );
+    await pgc.query(
+      `DELETE FROM public.resource_availability WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
+    );
+    await pgc.query(
+      `DELETE FROM public.staff_resource_services WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
+    );
+    await pgc.query(
+      `DELETE FROM public.staff_resources WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
     );
     await pgc.query(
       `DELETE FROM public.business_availability WHERE tenant_id IN ('${FIXED.tenant_a}','${FIXED.tenant_b}');`,
@@ -379,8 +428,8 @@ describe("FASE10 CRM CORE — DB / RLS / DEDUP / CONCURRENCY / AUDIT PII-FREE", 
 
   it("C2 — stesso tenant stessa normalized email → riusa customer", async () => {
     const a = anonClient();
-    const iso1 = isoPlusDays(5, 11, 0);
-    const iso2 = isoPlusDays(6, 15, 0);
+    const iso1 = isoPlusDays(4, 10, 0);
+    const iso2 = isoPlusDays(7, 15, 0);
     const r1 = await a.rpc("public_booking_create_slug", {
       p_slug: FIXED.slug_a,
       p_service_id: FIXED.svc_a,
@@ -462,8 +511,8 @@ describe("FASE10 CRM CORE — DB / RLS / DEDUP / CONCURRENCY / AUDIT PII-FREE", 
 
   it("C5 — stessa email different tenant → 2 customer distinti", async () => {
     const a = anonClient();
-    const isoA = isoPlusDays(12, 10, 0);
-    const isoB = isoPlusDays(12, 11, 0);
+    const isoA = isoPlusDays(14, 10, 0);
+    const isoB = isoPlusDays(14, 11, 30);
     const rA = await a.rpc("public_booking_create_slug", {
       p_slug: FIXED.slug_a,
       p_service_id: FIXED.svc_a,
@@ -737,7 +786,7 @@ describe("FASE10 CRM CORE — DB / RLS / DEDUP / CONCURRENCY / AUDIT PII-FREE", 
   });
 
   it("C18 — concurrent duplicate identity → deterministic dedup (single customer via RPC)", async () => {
-    const iso = isoPlusDays(20, 14, 0);
+    const iso = isoPlusDays(21, 9, 0);
     const sharedEmail = "concurrent-dedup@test.local";
     let successCount = 0;
     let errorCount = 0;
