@@ -9,6 +9,13 @@ import {
 } from "@/app/app/bookings/actions";
 import ManualBookingDrawer from "./components/ManualBookingDrawer";
 import RescheduleDrawer, { type BookingRowForReschedule } from "./components/RescheduleDrawer";
+import { ResourceTimeOffDrawer } from "./components/ResourceTimeOffDrawer";
+import { deleteResourceTimeOffAction } from "@/app/app/timeoff.actions";
+import {
+  TIME_OFF_TYPE_LABELS,
+  type TimeOffType,
+  type PreviewConflictBooking,
+} from "@/lib/timeoff-shared";
 
 type Resource = {
   id: string;
@@ -27,6 +34,10 @@ type Status = "confirmed" | "completed" | "no_show" | "cancelled";
 type CalendarRowBase = {
   row_type: "booking" | "business_closure" | "extra_open" | "reduced_hours" | "resource_time_off";
   booking_id?: string | null;
+  time_off_id?: string | null;
+  time_off_type?: TimeOffType | null;
+  type?: TimeOffType | null;
+  title?: string | null;
   starts_at: string;
   ends_at: string;
   status?: Status | null;
@@ -408,6 +419,77 @@ export default function CalendarClient(props: Props) {
   const [activeBooking, setActiveBooking] = useState<CalendarRowBase | null>(null);
 
   // ===========================
+  // TIME-OFF DRAWER + DETAIL
+  // ===========================
+  const canWrite = props.membershipRole === "owner" || props.membershipRole === "manager";
+  const [timeOffDrawerOpen, setTimeOffDrawerOpen] = useState(false);
+  const [timeOffDrawerResource, setTimeOffDrawerResource] = useState<{
+    id: string;
+    display_name: string;
+    slug: string | null;
+  } | null>(null);
+  const [timeOffDrawerStarts, setTimeOffDrawerStarts] = useState<Date | undefined>(undefined);
+  const [timeOffDrawerEnds, setTimeOffDrawerEnds] = useState<Date | undefined>(undefined);
+  const [selectedTimeOff, setSelectedTimeOff] = useState<{
+    row: CalendarRowBase;
+    conflicts: PreviewConflictBooking[];
+    conflict_count: number;
+  } | null>(null);
+
+  const computeConflictsForTimeOff = useCallback(
+    (t: CalendarRowBase, allRows: CalendarRowBase[]): PreviewConflictBooking[] => {
+      if (t.row_type !== "resource_time_off") return [];
+      const tStart = new Date(t.starts_at).valueOf();
+      const tEnd = new Date(t.ends_at).valueOf();
+      const out: PreviewConflictBooking[] = [];
+      for (const b of allRows) {
+        if (b.row_type !== "booking") continue;
+        if (b.resource_id && t.resource_id && b.resource_id !== t.resource_id) continue;
+        if (b.status !== "confirmed") continue;
+        const bStart = new Date(b.starts_at).valueOf();
+        const bEnd = new Date(b.ends_at).valueOf();
+        if (bStart < tEnd && bEnd > tStart) {
+          out.push({
+            booking_id: b.booking_id ?? "",
+            starts_at: b.starts_at,
+            ends_at: b.ends_at,
+            service_id: b.service_id ?? "",
+            service_name: b.service_name ?? "",
+            resource_id: b.resource_id ?? "",
+            status: b.status ?? "",
+          });
+        }
+      }
+      return out;
+    },
+    [],
+  );
+
+  const openTimeOffDetail = useCallback(
+    (row: CalendarRowBase) => {
+      const conflicts = computeConflictsForTimeOff(row, rows);
+      setSelectedTimeOff({ row, conflicts, conflict_count: conflicts.length });
+    },
+    [computeConflictsForTimeOff, rows],
+  );
+
+  const openNewTimeOff = useCallback((resource: Resource, dateStr: string) => {
+    setTimeOffDrawerResource({
+      id: resource.id,
+      display_name: resource.display_name ?? resource.slug ?? resource.id,
+      slug: resource.slug,
+    });
+    const d = new Date(dateStr);
+    const s = new Date(d);
+    s.setHours(9, 0, 0, 0);
+    const e = new Date(d);
+    e.setHours(18, 0, 0, 0);
+    setTimeOffDrawerStarts(s);
+    setTimeOffDrawerEnds(e);
+    setTimeOffDrawerOpen(true);
+  }, []);
+
+  // ===========================
   // RESPONSIVE DETECTION (matches required default agenda at 375)
   // ===========================
   const [viewport, setViewport] = useState<"mobile" | "tablet" | "desktop">(
@@ -553,6 +635,9 @@ export default function CalendarClient(props: Props) {
           anchor={anchor}
           viewDays={view === "week" ? 7 : 1}
           onOpen={(b) => setActiveBooking(b)}
+          canWrite={canWrite}
+          onTimeOffClick={openTimeOffDetail}
+          computeConflicts={(t) => computeConflictsForTimeOff(t, rows)}
         />
       ) : effectiveView === "week" ? (
         <WeekView
@@ -566,6 +651,10 @@ export default function CalendarClient(props: Props) {
           onSlotClick={(d: string, r: Resource | null) => {
             openManualDrawer(new Date(d), r?.slug ?? "any");
           }}
+          canWrite={canWrite}
+          onNewTimeOff={openNewTimeOff}
+          onTimeOffClick={openTimeOffDetail}
+          computeConflicts={(t) => computeConflictsForTimeOff(t, rows)}
         />
       ) : (
         <DayView
@@ -589,6 +678,10 @@ export default function CalendarClient(props: Props) {
           onSlotClick={(d: string, r: Resource | null) => {
             openManualDrawer(new Date(d), r?.slug ?? "any");
           }}
+          canWrite={canWrite}
+          onNewTimeOff={openNewTimeOff}
+          onTimeOffClick={openTimeOffDetail}
+          computeConflicts={(t) => computeConflictsForTimeOff(t, rows)}
         />
       )}
 
@@ -611,6 +704,39 @@ export default function CalendarClient(props: Props) {
           }}
         />
       ) : null}
+
+      {selectedTimeOff ? (
+        <TimeOffDetailDrawer
+          t={selectedTimeOff}
+          tz={timezone}
+          onClose={() => setSelectedTimeOff(null)}
+          canWrite={canWrite}
+          onDeleted={() => {
+            setSelectedTimeOff(null);
+            showToast("Assenza eliminata");
+            void fetchData(true);
+          }}
+        />
+      ) : null}
+
+      <ResourceTimeOffDrawer
+        open={timeOffDrawerOpen}
+        onOpenChange={(o) => setTimeOffDrawerOpen(o)}
+        resource={timeOffDrawerResource ?? undefined}
+        resources={allResourcesSorted.map((r) => ({
+          id: r.id,
+          display_name: r.display_name ?? r.slug ?? r.id,
+          slug: r.slug,
+        }))}
+        timezone={timezone}
+        startsAt={timeOffDrawerStarts}
+        endsAt={timeOffDrawerEnds}
+        canWrite={canWrite}
+        onChanged={() => {
+          showToast("Assenza salvata");
+          void fetchData(true);
+        }}
+      />
 
       <ManualBookingDrawer
         open={manualOpen}
@@ -808,6 +934,10 @@ function DayView(props: {
   onPickRes: (v: string) => void;
   onOpen: (b: CalendarRowBase) => void;
   onSlotClick?: (d: string, r: Resource | null) => void;
+  canWrite: boolean;
+  onNewTimeOff: (r: Resource, dateStr: string) => void;
+  onTimeOffClick: (r: CalendarRowBase) => void;
+  computeConflicts: (t: CalendarRowBase) => PreviewConflictBooking[];
 }) {
   const hours: number[] = [];
   for (let h = 6; h <= 22; h++) hours.push(h);
@@ -956,13 +1086,25 @@ function DayView(props: {
             data-cal-res-header={r.id}
             className="border-b border-neutral-200 bg-neutral-50 px-2 py-2 text-xs font-semibold text-neutral-700"
           >
-            <div className="flex items-center gap-2">
-              <span
-                aria-hidden
-                className="inline-block h-2.5 w-2.5 rounded-full"
-                style={{ background: r.color_hex ?? "#cbd5e1" }}
-              />
-              {r.display_name ?? r.slug ?? r.id}
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <span
+                  aria-hidden
+                  className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                  style={{ background: r.color_hex ?? "#cbd5e1" }}
+                />
+                <span className="truncate">{r.display_name ?? r.slug ?? r.id}</span>
+              </div>
+              {props.canWrite && r.id !== "__nores__" ? (
+                <button
+                  type="button"
+                  aria-label={`Aggiungi assenza per ${r.display_name ?? r.slug ?? r.id}`}
+                  onClick={() => props.onNewTimeOff(r, props.rangeStartISO)}
+                  className="shrink-0 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-400/40"
+                >
+                  + Assenza
+                </button>
+              ) : null}
             </div>
           </div>
         ))}
@@ -1061,20 +1203,38 @@ function DayView(props: {
                 position: "relative",
               }}
             >
-              {timeoffs.map((t, i) => (
-                <div
-                  data-cal-block="resource_time_off"
-                  key={`to-${i}`}
-                  className="pointer-events-none absolute inset-x-0 rounded-sm bg-amber-100/40 ring-1 ring-inset ring-amber-300/60"
-                  style={{
-                    position: "absolute",
-                    top: `${yTop(t.starts_at)}%`,
-                    height: `${heightPx(t.starts_at, t.ends_at)}%`,
-                  }}
-                >
-                  <div className="px-2 py-1 text-[10px] font-semibold text-amber-800">Ferie</div>
-                </div>
-              ))}
+              {timeoffs.map((t, i) => {
+                const conflicts = props.computeConflicts(t);
+                const cc = conflicts.length;
+                const typeLabel =
+                  TIME_OFF_TYPE_LABELS[(t.time_off_type ?? t.type ?? "vacation") as TimeOffType] ??
+                  "Assenza";
+                return (
+                  <button
+                    data-cal-block="resource_time_off"
+                    data-time-off-conflicts={String(cc)}
+                    key={`to-${i}`}
+                    type="button"
+                    onClick={() => props.onTimeOffClick(t)}
+                    aria-label={`${typeLabel} ${t.resource_display_name ?? ""} ${timeOnly(t.starts_at, props.tz)}-${timeOnly(t.ends_at, props.tz)}${cc > 0 ? `, ${cc} prenotazioni da gestire` : ""}`}
+                    className="group absolute inset-x-0 rounded-sm bg-amber-100/70 ring-1 ring-inset ring-amber-300 text-left hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-500/60 transition-colors"
+                    style={{
+                      position: "absolute",
+                      top: `${yTop(t.starts_at)}%`,
+                      height: `${heightPx(t.starts_at, t.ends_at)}%`,
+                    }}
+                  >
+                    <div className="px-2 py-1 text-[10px] font-semibold text-amber-900 flex items-center justify-between gap-1">
+                      <span className="truncate">{typeLabel}</span>
+                      {cc > 0 ? (
+                        <span className="shrink-0 rounded-full bg-amber-800 text-amber-50 px-1.5 py-0.5 text-[9px] font-bold">
+                          {cc} da gestire
+                        </span>
+                      ) : null}
+                    </div>
+                  </button>
+                );
+              })}
               {list.map((b) => (
                 <BookingBlock
                   key={b.booking_id ?? Math.random()}
@@ -1173,6 +1333,10 @@ function WeekView(props: {
   rangeEndISO: string;
   onOpen: (b: CalendarRowBase) => void;
   onSlotClick?: (d: string, r: Resource | null) => void;
+  canWrite: boolean;
+  onNewTimeOff: (r: Resource, dateStr: string) => void;
+  onTimeOffClick: (r: CalendarRowBase) => void;
+  computeConflicts: (t: CalendarRowBase) => PreviewConflictBooking[];
 }) {
   const days: Date[] = [];
   const weekStart = new Date(props.rangeStartISO);
@@ -1184,14 +1348,19 @@ function WeekView(props: {
 
   const bookingsByDayRes = useMemo(() => {
     const map: Record<string, CalendarRowBase[]> = {};
+    const toMap: Record<string, CalendarRowBase[]> = {};
     for (const r of props.rows) {
-      if (r.row_type !== "booking") continue;
       const d = dateOnly(r.starts_at, props.tz);
       const key = `${d}__${r.resource_id ?? "noid"}`;
-      if (!map[key]) map[key] = [];
-      map[key].push(r);
+      if (r.row_type === "booking") {
+        if (!map[key]) map[key] = [];
+        map[key].push(r);
+      } else if (r.row_type === "resource_time_off") {
+        if (!toMap[key]) toMap[key] = [];
+        toMap[key].push(r);
+      }
     }
-    return map;
+    return { bookings: map, timeoffs: toMap };
   }, [props.rows, props.tz]);
 
   return (
@@ -1237,15 +1406,40 @@ function WeekView(props: {
       {props.resources.map((r) => (
         <div key={`wk-res-${r.id}`} className="contents" style={{ display: "contents" }}>
           <div
-            className="sticky left-0 z-10 flex items-center gap-2 border-b border-r border-neutral-100 bg-white px-2 py-2 text-xs font-medium text-neutral-700"
+            className="sticky left-0 z-10 flex items-center justify-between gap-2 border-b border-r border-neutral-100 bg-white px-2 py-2 text-xs font-medium text-neutral-700"
             style={{ position: "sticky" }}
           >
-            <span
-              aria-hidden
-              className="inline-block h-2.5 w-2.5 rounded-full"
-              style={{ background: r.color_hex ?? "#cbd5e1" }}
-            />
-            <span className="truncate">{r.display_name ?? r.slug ?? r.id}</span>
+            <div className="flex min-w-0 items-center gap-2">
+              <span
+                aria-hidden
+                className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                style={{ background: r.color_hex ?? "#cbd5e1" }}
+              />
+              <span className="truncate">{r.display_name ?? r.slug ?? r.id}</span>
+            </div>
+            {props.canWrite ? (
+              <div className="flex shrink-0 gap-1">
+                {days.slice(0, 1).map((d) => {
+                  const iso = new Intl.DateTimeFormat("en-CA", {
+                    timeZone: props.tz,
+                    year: "numeric",
+                    month: "2-digit",
+                    day: "2-digit",
+                  }).format(d);
+                  return (
+                    <button
+                      key={`wto-${r.id}`}
+                      type="button"
+                      aria-label={`Aggiungi assenza ${r.display_name ?? r.slug ?? r.id}`}
+                      onClick={() => props.onNewTimeOff(r, iso)}
+                      className="rounded-md border border-amber-200 bg-amber-50 px-1 py-0.5 text-[9px] font-medium text-amber-800 hover:bg-amber-100"
+                    >
+                      +A
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
           {days.map((d) => {
             const iso = new Intl.DateTimeFormat("en-CA", {
@@ -1255,12 +1449,41 @@ function WeekView(props: {
               day: "2-digit",
             }).format(d);
             const key = `${iso}__${r.id}`;
-            const list = bookingsByDayRes[key] ?? [];
+            const list = bookingsByDayRes.bookings[key] ?? [];
+            const tofs = bookingsByDayRes.timeoffs[key] ?? [];
             return (
               <div
                 key={`${r.id}-${iso}`}
                 className="space-y-1 border-b border-l border-neutral-100 p-1"
               >
+                {tofs.map((t, ti) => {
+                  const cc = props.computeConflicts(t).length;
+                  const typeLabel =
+                    TIME_OFF_TYPE_LABELS[
+                      (t.time_off_type ?? t.type ?? "vacation") as TimeOffType
+                    ] ?? "Assenza";
+                  return (
+                    <button
+                      key={`wk-to-${ti}-${t.starts_at}`}
+                      data-cal-block="resource_time_off"
+                      data-time-off-conflicts={String(cc)}
+                      type="button"
+                      onClick={() => props.onTimeOffClick(t)}
+                      className="block w-full rounded-md border border-amber-300/60 bg-amber-100/60 px-1.5 py-1 text-left text-[10px] font-semibold text-amber-900 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="truncate">
+                          {timeOnly(t.starts_at, props.tz)} {typeLabel}
+                        </span>
+                        {cc > 0 ? (
+                          <span className="shrink-0 rounded-full bg-amber-800 px-1 text-[9px] font-bold text-amber-50">
+                            {cc}
+                          </span>
+                        ) : null}
+                      </div>
+                    </button>
+                  );
+                })}
                 {list.map((b) => (
                   <button
                     data-booking-id={b.booking_id ?? undefined}
@@ -1300,18 +1523,33 @@ function AgendaView(props: {
   anchor: string;
   viewDays: number;
   onOpen: (b: CalendarRowBase) => void;
+  canWrite: boolean;
+  onTimeOffClick: (r: CalendarRowBase) => void;
+  computeConflicts: (t: CalendarRowBase) => PreviewConflictBooking[];
 }) {
   const groups = useMemo(() => {
-    const map = new Map<string, CalendarRowBase[]>();
+    const bk = new Map<string, CalendarRowBase[]>();
+    const to = new Map<string, CalendarRowBase[]>();
     for (const r of props.rows) {
-      if (r.row_type !== "booking") continue;
       const d = dateOnly(r.starts_at, props.tz);
-      if (!map.has(d)) map.set(d, []);
-      map.get(d)!.push(r);
+      if (r.row_type === "booking") {
+        if (!bk.has(d)) bk.set(d, []);
+        bk.get(d)!.push(r);
+      } else if (r.row_type === "resource_time_off") {
+        if (!to.has(d)) to.set(d, []);
+        to.get(d)!.push(r);
+      }
     }
-    for (const arr of map.values())
+    for (const arr of bk.values())
       arr.sort((a, b) => new Date(a.starts_at).valueOf() - new Date(b.starts_at).valueOf());
-    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    for (const arr of to.values())
+      arr.sort((a, b) => new Date(a.starts_at).valueOf() - new Date(b.starts_at).valueOf());
+    const allDays = new Set([...bk.keys(), ...to.keys()]);
+    const out: Array<[string, { bookings: CalendarRowBase[]; timeoffs: CalendarRowBase[] }]> = [];
+    for (const day of [...allDays].sort((a, b) => a.localeCompare(b))) {
+      out.push([day, { bookings: bk.get(day) ?? [], timeoffs: to.get(day) ?? [] }]);
+    }
+    return out;
   }, [props.rows, props.tz]);
 
   return (
@@ -1324,7 +1562,7 @@ function AgendaView(props: {
           Nessun appuntamento nel periodo selezionato.
         </div>
       ) : (
-        groups.map(([day, list]) => (
+        groups.map(([day, { bookings: list, timeoffs: tofs }]) => (
           <section
             key={day}
             aria-label={`Appuntamenti ${day}`}
@@ -1334,6 +1572,48 @@ function AgendaView(props: {
               {day}
             </div>
             <ul className="divide-y divide-neutral-100">
+              {tofs.map((t, ti) => {
+                const cc = props.computeConflicts(t).length;
+                const typeLabel =
+                  TIME_OFF_TYPE_LABELS[(t.time_off_type ?? t.type ?? "vacation") as TimeOffType] ??
+                  "Assenza";
+                return (
+                  <li key={`ag-to-${ti}-${t.starts_at}`}>
+                    <button
+                      type="button"
+                      data-cal-block="resource_time_off"
+                      data-time-off-conflicts={String(cc)}
+                      onClick={() => props.onTimeOffClick(t)}
+                      className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left bg-amber-50/50 hover:bg-amber-50 focus:bg-amber-50 focus:outline-none"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center gap-1 text-sm font-semibold text-amber-900 tabular-nums">
+                            {timeOnly(t.starts_at, props.tz)}
+                            <span aria-hidden>–</span>
+                            {timeOnly(t.ends_at, props.tz)}
+                          </span>
+                          <span className="rounded-full bg-amber-200 px-2 py-0.5 text-[11px] font-bold text-amber-900">
+                            {typeLabel}
+                          </span>
+                          {cc > 0 ? (
+                            <span className="rounded-full bg-amber-800 px-2 py-0.5 text-[11px] font-bold text-amber-50">
+                              {cc} da gestire
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="mt-1 text-xs text-amber-800/80 truncate">
+                          Operatore: {t.resource_display_name ?? "—"}
+                        </div>
+                      </div>
+                      <span
+                        aria-hidden
+                        className="mt-1 inline-block h-6 w-1 shrink-0 rounded-full bg-amber-500"
+                      />
+                    </button>
+                  </li>
+                );
+              })}
               {list.map((b) => (
                 <li key={b.booking_id ?? String(b.starts_at) + (b.customer_display_name ?? "")}>
                   <button
@@ -1577,6 +1857,203 @@ function BookingDrawer(props: {
               Non disponi delle autorizzazioni per modificare lo stato di questa prenotazione.
             </p>
           ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===========================
+// TIME-OFF DETAIL DRAWER
+// ===========================
+function TimeOffDetailDrawer(props: {
+  t: {
+    row: CalendarRowBase;
+    conflicts: PreviewConflictBooking[];
+    conflict_count: number;
+  };
+  tz: string;
+  onClose: () => void;
+  canWrite: boolean;
+  onDeleted: () => void;
+}) {
+  const { row, conflicts, conflict_count } = props.t;
+  const typeLabel =
+    TIME_OFF_TYPE_LABELS[(row.time_off_type ?? row.type ?? "vacation") as TimeOffType] ?? "Assenza";
+  const tofId = row.time_off_id ?? row.booking_id ?? "";
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [delState, delAct] = useActionState(deleteResourceTimeOffAction, null);
+
+  useEffect(() => {
+    if (delState?.ok === true) {
+      props.onDeleted();
+    }
+  }, [delState, props]);
+
+  return (
+    <div
+      data-tof-detail-drawer="true"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="tof-detail-title"
+      className="fixed inset-0 z-50 flex items-end justify-end bg-neutral-900/40 sm:items-center sm:justify-center"
+    >
+      <button
+        type="button"
+        aria-label="Chiudi dettaglio assenza"
+        onClick={props.onClose}
+        className="absolute inset-0 h-full w-full cursor-default appearance-none bg-transparent"
+      />
+      <div className="relative w-full max-w-md rounded-t-2xl border border-neutral-200 bg-white shadow-xl sm:rounded-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <h2 id="tof-detail-title" className="truncate text-base font-semibold text-neutral-900">
+              Dettaglio {typeLabel.toLowerCase()}
+            </h2>
+            <div className="mt-1 text-xs text-neutral-500 truncate">
+              {row.resource_display_name ?? "Operatore"} · {timeOnly(row.starts_at, props.tz)}–
+              {timeOnly(row.ends_at, props.tz)}
+            </div>
+          </div>
+          <button
+            type="button"
+            aria-label="Chiudi dettaglio"
+            onClick={props.onClose}
+            className="rounded-md p-1 text-neutral-500 hover:bg-neutral-100"
+          >
+            ✕
+          </button>
+        </div>
+
+        <dl className="divide-y divide-neutral-100 px-4 text-sm">
+          <div className="flex items-center justify-between gap-4 py-3">
+            <dt className="text-neutral-500">Tipo</dt>
+            <dd>
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">
+                {typeLabel}
+              </span>
+            </dd>
+          </div>
+          <div className="flex items-center justify-between gap-4 py-3">
+            <dt className="text-neutral-500">Operatore</dt>
+            <dd className="font-medium text-neutral-900 truncate">
+              {row.resource_display_name ?? "—"}
+            </dd>
+          </div>
+          <div className="flex items-center justify-between gap-4 py-3">
+            <dt className="text-neutral-500">Data</dt>
+            <dd className="font-medium text-neutral-900">
+              {fmt(row.starts_at, props.tz, {
+                weekday: "short",
+                day: "2-digit",
+                month: "2-digit",
+                year: "numeric",
+              })}
+            </dd>
+          </div>
+          <div className="flex items-center justify-between gap-4 py-3">
+            <dt className="text-neutral-500">Fascia oraria</dt>
+            <dd className="font-medium text-neutral-900 tabular-nums">
+              {timeOnly(row.starts_at, props.tz)} – {timeOnly(row.ends_at, props.tz)}
+            </dd>
+          </div>
+          <div className="flex items-center justify-between gap-4 py-3">
+            <dt className="text-neutral-500">Prenotazioni sovrapposte</dt>
+            <dd>
+              {conflict_count === 0 ? (
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+                  Nessuna
+                </span>
+              ) : (
+                <span className="rounded-full bg-amber-800 px-2 py-0.5 text-xs font-bold text-amber-50">
+                  {conflict_count} da gestire
+                </span>
+              )}
+            </dd>
+          </div>
+        </dl>
+
+        {conflict_count > 0 ? (
+          <div className="border-t border-neutral-100 px-4 py-3">
+            <div className="mb-2 text-xs font-semibold text-neutral-600">
+              Prenotazioni coinvolte
+            </div>
+            <ul className="max-h-56 divide-y divide-neutral-100 overflow-y-auto rounded-lg border border-neutral-200 bg-neutral-50/40 dark:border-neutral-800 dark:bg-neutral-950/50">
+              {conflicts.map((b) => (
+                <li key={b.booking_id} className="px-3 py-2">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="truncate text-sm font-medium text-neutral-900">
+                      {b.service_name || "Servizio"}
+                    </span>
+                    <span className="shrink-0 text-[11px] font-mono text-neutral-500">
+                      #{b.booking_id.slice(0, 8)}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 text-xs text-neutral-600">
+                    {timeOnly(b.starts_at, props.tz)} — {timeOnly(b.ends_at, props.tz)}
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
+              Le prenotazioni esistenti{" "}
+              <span className="font-semibold">NON verranno cancellate o spostate</span>. Gestiscile
+              manualmente se necessario.
+            </p>
+          </div>
+        ) : null}
+
+        <div className="space-y-2 border-t border-neutral-200 px-4 py-4">
+          {delState && !delState.ok ? (
+            <div
+              role="alert"
+              aria-live="assertive"
+              className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700"
+            >
+              {delState.message}
+              {delState.code ? <span className="ml-1 opacity-60">[{delState.code}]</span> : null}
+            </div>
+          ) : null}
+          {props.canWrite ? (
+            confirmDel ? (
+              <form action={delAct}>
+                <input type="hidden" name="time_off_id" value={tofId} />
+                <div className="space-y-2">
+                  <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+                    Confermi di voler eliminare definitivamente questa assenza? Gli slot torneranno
+                    disponibili pubblicamente.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDel(false)}
+                      className="flex-1 rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm font-semibold text-neutral-800 hover:bg-neutral-50"
+                    >
+                      Annulla
+                    </button>
+                    <button
+                      type="submit"
+                      className="flex-1 rounded-md bg-rose-600 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500/40"
+                    >
+                      Elimina
+                    </button>
+                  </div>
+                </div>
+              </form>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmDel(true)}
+                className="w-full rounded-md border border-rose-300 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500/40"
+              >
+                Elimina assenza
+              </button>
+            )
+          ) : (
+            <p className="text-xs text-neutral-500">
+              Non disponi delle autorizzazioni per eliminare questa assenza.
+            </p>
+          )}
         </div>
       </div>
     </div>

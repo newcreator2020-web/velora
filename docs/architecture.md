@@ -1202,8 +1202,7 @@ Rimandati a fasi successive:
 8. ⌛ **AI concierge** riempimento calendario, suggerimenti slot.
 9. ⌛ **Export iCal** sync Google/Outlook per Staff.
 
-
-## 19. FASE13E1-A  Time-Off Trusted Boundary + Scheduling Lock Contract (append-only)
+## 19. FASE13E1-A Time-Off Trusted Boundary + Scheduling Lock Contract (append-only)
 
 ### 19.1 Oggetto del boundary
 
@@ -1217,11 +1216,12 @@ booking engine e isolamento multi-tenant.
 - **NO UI**: in questa fase NON sono presenti drawer, tabs, calendar badges,
   server actions Next, componenti React, Playwright UI.
 - **Strategia conflitti**: **PRESERVE + WARN**; i booking esistenti NON vengono
-  annullati o ri-schedulati automaticamente; il `conflict_count` � authority.
+  annullati o ri-schedulati automaticamente; il `conflict_count` � authority.
 
 ### 19.2 RPC trusted (SECURITY DEFINER / SET search_path = '')
 
 #### 19.2.1 `dashboard_resource_time_off_preview`
+
 ```
 dashboard_resource_time_off_preview(
   p_resource_id uuid,
@@ -1230,19 +1230,21 @@ dashboard_resource_time_off_preview(
 ) RETURNS TABLE (...)
 ```
 
-Ruoli: `owner`, `manager` same-tenant  ALLOW; `staff`, `anon`  DENY.
+Ruoli: `owner`, `manager` same-tenant ALLOW; `staff`, `anon` DENY.
 Tenant derivato server-side dalla membership. Non accetta `tenant_id` da client.
 
 Validazioni:
+
 - `p_resource_id` appartiene allo stesso tenant dell'actor autenticato.
 - `starts_at < ends_at` (altrimenti `INVALID_INTERVAL`).
-- Durata massima intervallo  366 giorni solari (altrimenti `RANGE_TOO_LARGE`).
+- Durata massima intervallo 366 giorni solari (altrimenti `RANGE_TOO_LARGE`).
 
 Output PII-free: `booking_id, starts_at, ends_at, service_id, service_name, resource_id, status`.
 Solo `status = 'confirmed'`; cancelled / completed / no_show vengono esclusi
 dai conflitti futuri.
 
 #### 19.2.2 `dashboard_resource_time_off_create`
+
 ```
 dashboard_resource_time_off_create(
   p_resource_id            uuid,
@@ -1254,16 +1256,17 @@ dashboard_resource_time_off_create(
 ) RETURNS TABLE (...)
 ```
 
-Ruoli: `owner`, `manager` same-tenant  ALLOW; `staff`, `anon`  DENY.
+Ruoli: `owner`, `manager` same-tenant ALLOW; `staff`, `anon` DENY.
 
 Flusso atomico:
+
 1. Derivazione tenant e validazione risorsa stesso tenant.
 2. **Acquisizione scheduling lock risorsa** (stesso lock ordering condiviso con
    `public_booking_create_v3`, `dashboard_booking_manual_create`,
    `dashboard_booking_reschedule`).
-3. RI-calcolo conflict count DENTRO la transazione (la preview NON � authority).
+3. RI-calcolo conflict count DENTRO la transazione (la preview NON � authority).
 4. Se `p_expected_conflict_count IS NOT NULL` e differisce dal valore
-   ri-calcolato  `CONFLICT_PREVIEW_STALE` (rollback implicito per staleness,
+   ri-calcolato `CONFLICT_PREVIEW_STALE` (rollback implicito per staleness,
    nessun write persistito).
 5. INSERT `public.resource_time_off`.
 6. Audit atomico PII-free tramite trigger esistente
@@ -1272,14 +1275,15 @@ Flusso atomico:
 7. Risultato: `time_off_id, conflict_count, code = 'OK'`.
 
 #### 19.2.3 `dashboard_resource_time_off_delete`
+
 ```
 dashboard_resource_time_off_delete(
   p_time_off_id uuid
 ) RETURNS TABLE (...)
 ```
 
-Ruoli: `owner`, `manager` same-tenant  ALLOW; `staff`, `anon`  DENY.
-Cross-tenant `time_off_id`  `CROSS_TENANT_DENIED`.
+Ruoli: `owner`, `manager` same-tenant ALLOW; `staff`, `anon` DENY.
+Cross-tenant `time_off_id` `CROSS_TENANT_DENIED`.
 Delete atomica. Audit `resource_time_off_deleted`.
 Nessun booking viene modificato dalla delete.
 
@@ -1294,36 +1298,38 @@ v_key  = hashtext(tenant_id::text || '|' || resource_id::text)::bigint
         # (BUCKET::bigint << 32)
 ```
 
-Granularit�: **per tenant + per resource**.
+Granularit�: **per tenant + per resource**.
 Nessun lock globale tenant.
 Ordinamento deadlock-free per multi-resource (qualsiasi set):
 `SELECT DISTINCT UNNEST(candidate_resources) ORDER BY resource_id ASC`.
 
 Le stesse primitive sono usate (CREATE OR REPLACE backward-compat, nessuna
 modifica a migration frozen) da:
+
 - `public_booking_create_v3` (pubblico)
 - `dashboard_booking_manual_create` (dashboard)
 - `dashboard_booking_reschedule` (dashboard)
 - `dashboard_resource_time_off_create` (nuova 13E1)
 
 Helper internal-only (nessun grant anon/authenticated):
+
 - `scheduling_lock_resource(p_tenant_id uuid, p_resource_id uuid)`
 - `scheduling_lock_resources_sorted(p_tenant_id uuid, p_resource_ids uuid[])`
 
 ### 19.4 Failure codes stabili
 
-| Codice                  | Semantica                                                                     |
-| ----------------------- | ----------------------------------------------------------------------------- |
-| `AUTHZ_DENIED`          | ruolo non autorizzato / membership mancante / anon                           |
-| `RESOURCE_NOT_FOUND`    | `resource_id` inesistente o non visible                                       |
-| `INVALID_INTERVAL`      | `starts_at >= ends_at` o `NULL` non nulli                                     |
-| `RANGE_TOO_LARGE`       | range > 366 giorni solari                                                     |
-| `CONFLICT_PREVIEW_STALE`| `p_expected_conflict_count != recheck` (concorrenza, preview vecchia)         |
-| `TIME_OFF_NOT_FOUND`    | delete su `time_off_id` inesistente                                           |
-| `CROSS_TENANT_DENIED`   | risorsa / time_off appartiene a tenant differente                             |
-| `VALIDATION_ERROR`      | enum type invalido / UUID malformato / title length oltre limite              |
-| `AUDIT_WRITE_FAILED`    | fallimento scrittura audit_logs  ROLLBACK transazione principale            |
-| `INTERNAL_ERROR`        | catch-all (non esposto dettaglio SQL raw)                                     |
+| Codice                   | Semantica                                                             |
+| ------------------------ | --------------------------------------------------------------------- |
+| `AUTHZ_DENIED`           | ruolo non autorizzato / membership mancante / anon                    |
+| `RESOURCE_NOT_FOUND`     | `resource_id` inesistente o non visible                               |
+| `INVALID_INTERVAL`       | `starts_at >= ends_at` o `NULL` non nulli                             |
+| `RANGE_TOO_LARGE`        | range > 366 giorni solari                                             |
+| `CONFLICT_PREVIEW_STALE` | `p_expected_conflict_count != recheck` (concorrenza, preview vecchia) |
+| `TIME_OFF_NOT_FOUND`     | delete su `time_off_id` inesistente                                   |
+| `CROSS_TENANT_DENIED`    | risorsa / time_off appartiene a tenant differente                     |
+| `VALIDATION_ERROR`       | enum type invalido / UUID malformato / title length oltre limite      |
+| `AUDIT_WRITE_FAILED`     | fallimento scrittura audit_logs ROLLBACK transazione principale       |
+| `INTERNAL_ERROR`         | catch-all (non esposto dettaglio SQL raw)                             |
 
 ### 19.5 Audit contract (PII-free)
 
@@ -1336,7 +1342,8 @@ Metadata consentiti dopo delete:
 `time_off_id, resource_id`
 
 **VIETATO** di persistere nel payload audit:
-- `title` (pu� contenere testo libero PII accidentale),
+
+- `title` (pu� contenere testo libero PII accidentale),
 - nomi/email/telefono customer,
 - notes, address, qualsiasi identifier customer.
 
@@ -1345,17 +1352,17 @@ Failure audit: fallisce la transazione principale (NO `EXCEPTION WHEN OTHERS THE
 
 ### 19.6 Concurrency invariants (contrattuali)
 
-- **RACE-E1**: 20 create time-off DIFFERENTI same resource  tutti commit, 0 lost audit.
+- **RACE-E1**: 20 create time-off DIFFERENTI same resource tutti commit, 0 lost audit.
 - **RACE-E2**: `public_booking_create_v3` vs create time-off stesso range, 20 round
   sincronizzati. Risultato ammesso SOLO: (booking-first + time-off OK + cc>=1)
   OPPURE (time-off first + booking DENY). VIETATO: booking confirmed overlap + cc=0.
-- **RACE-E3**: manual booking vs time-off  stessa semantica.
-- **RACE-E4**: reschedule INTO range vs time-off  stessa semantica.
-- **RACE-E5**: 2 create con stesso expected conflict count  entrambi esistono
-  (l'overlap multi time-off � permesso), ciascuno con `conflict_count` ri-calcolato
+- **RACE-E3**: manual booking vs time-off stessa semantica.
+- **RACE-E4**: reschedule INTO range vs time-off stessa semantica.
+- **RACE-E5**: 2 create con stesso expected conflict count entrambi esistono
+  (l'overlap multi time-off � permesso), ciascuno con `conflict_count` ri-calcolato
   coerente.
 - **RACE-E6**: delete time-off contemporaneo a booking create: nessun phantom
-  success; se la delete � committed DOPO la validation booking, la deny resta
+  success; se la delete � committed DOPO la validation booking, la deny resta
   valida e viceversa.
 
 ### 19.7 Performance baseline (10k bookings / 10 resources)
@@ -1364,36 +1371,37 @@ Dataset: 10 risorse, 10.000 bookings (70% storico, 30% futuro, status mix con 25
 
 Preview overlap read (GiST) 50 warm calls:
 
-| Stat  |  Measured |   Target   |
-| ----- | :-------: | :--------: |
-| min   |  1.24 ms  |           |
-| p50   |  1.90 ms  |           |
-| p95   |  2.41 ms  |  200 ms  |
-| max   |  2.73 ms  |           |
+| Stat | Measured | Target |
+| ---- | :------: | :----: |
+| min  | 1.24 ms  |        |
+| p50  | 1.90 ms  |        |
+| p95  | 2.41 ms  | 200 ms |
+| max  | 2.73 ms  |        |
 
 EXPLAIN ANALYZE:
-- `Index Scan using bookings_no_resource_overlap_confirmed on bookings` 
-- NO `Seq Scan on bookings` sul path critico 
+
+- `Index Scan using bookings_no_resource_overlap_confirmed on bookings`
+- NO `Seq Scan on bookings` sul path critico
 - Planning Time 0.14-0.19 ms; Execution Time 0.08-0.09 ms.
 
 Lock contention: 20 transazioni concorrenti stesso advisory key BIGINT.
 
-| Stat  |  Measured |
-| ----- | :-------: |
-| p50   | 53.50 ms  |
-| p95   | 84.93 ms  |
-| deadlock events | 0 / 20 |
+| Stat            | Measured |
+| --------------- | :------: |
+| p50             | 53.50 ms |
+| p95             | 84.93 ms |
+| deadlock events |  0 / 20  |
 
 ### 19.8 RLS Matrix FASE13E1-A
 
-| Role      | preview same-tenant | create same-tenant | delete same-tenant | direct table INSERT/UPDATE/DELETE |
-| --------- | :-----------------: | :----------------: | :----------------: | :-------------------------------: |
-| `anon`    |        DENY         |        DENY        |        DENY        |               DENY                |
-| `staff`   |        DENY         |        DENY        |        DENY        |               DENY                |
-| `manager` |        ALLOW        |        ALLOW       |        ALLOW       |               DENY                |
-| `owner`   |        ALLOW        |        ALLOW       |        ALLOW       |               DENY                |
-| Cross tenant manager-A resource-B | DENY | DENY | DENY | DENY FK+RLS |
-| Cross tenant owner-A time_off-B delete |  |  | DENY | DENY |
+| Role                                   | preview same-tenant | create same-tenant | delete same-tenant | direct table INSERT/UPDATE/DELETE |
+| -------------------------------------- | :-----------------: | :----------------: | :----------------: | :-------------------------------: |
+| `anon`                                 |        DENY         |        DENY        |        DENY        |               DENY                |
+| `staff`                                |        DENY         |        DENY        |        DENY        |               DENY                |
+| `manager`                              |        ALLOW        |       ALLOW        |       ALLOW        |               DENY                |
+| `owner`                                |        ALLOW        |       ALLOW        |       ALLOW        |               DENY                |
+| Cross tenant manager-A resource-B      |        DENY         |        DENY        |        DENY        |            DENY FK+RLS            |
+| Cross tenant owner-A time_off-B delete |                     |                    |        DENY        |               DENY                |
 
 ### 19.9 Grants (grants inspection)
 
@@ -1406,7 +1414,7 @@ Lock contention: 20 transazioni concorrenti stesso advisory key BIGINT.
 - Le table `resource_time_off` e `audit_logs` hanno RLS e grants FASE12/13B
   invariati (nessun CRUD diretto permesso).
 
-### 19.10 NON-GOALS  FASE13E1-A
+### 19.10 NON-GOALS FASE13E1-A
 
 1.  UI Drawer / tabs Team / Calendar badge / Next server actions / React / Playwright UI.
 2.  Resource availability UI / pubbliche.
@@ -1417,4 +1425,151 @@ Lock contention: 20 transazioni concorrenti stesso advisory key BIGINT.
 7.  Drag & Drop.
 8.  Analytics / AI / SEO / marketing.
 9.  Refactor estetici non funzionali.
-10.  Edit time-off (in questa slice solo create + delete; niente update/versioning).
+10. Edit time-off (in questa slice solo create + delete; niente update/versioning).
+
+---
+
+## 20. FASE13E1-B Operator Time-Off Operational Workflow
+
+Appendice operativa alla foundation 13E1-A. Layer UI reale per OWNER/MANAGER,
+con entry point `/app/team` e `/app/calendar`.
+
+### 20.1 Componenti introdotti
+
+| Componente / File                                           | Ruolo                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/lib/timeoff-shared.ts`                                 | Modulo shared (NO "use server"): `TIME_OFF_TYPES`, `TIME_OFF_LABELS`, tipi `TimeOffType`, `PreviewConflictBooking`, `ResourceTimeOffVM`, `TimeOffErrorCode`, union `TimeOffActionResult`. Unico exports runtime condivisibili da Client e Server.                                                                                          |
+| `src/lib/server/timeoff.ts`                                 | Boundary Zod strict per preview/create/delete/list. Autorità server: verifica tenant membership, range validi, read-back §6, `revalidatePath` `/app/team`, `/app/calendar`, public slot path.                                                                                                                                              |
+| `src/app/app/timeoff.actions.ts`                            | Server Actions `"use server"` (NO `server-only`). 4 exports: `previewResourceTimeOffAction`, `createResourceTimeOffAction`, `deleteResourceTimeOffAction` (firma DUALE: mono-param per Team, `(prev,form)` per `useActionState`), `listResourceTimeOffAction`. Wrapper `actionFormToObject` gestisce sia oggetti che FormData.             |
+| `src/app/app/calendar/components/ResourceTimeOffDrawer.tsx` | Drawer accessibile 9 stati discriminati: `CLOSED/EDITING/PREVIEW_LOADING/PREVIEW_READY_NO_CONFLICT/PREVIEW_READY_WITH_CONFLICTS/SUBMITTING/SUCCESS/ERROR/CONFLICT_PREVIEW_STALE`. Controllo conflitti PRESERVE+WARN, MAI auto-cancel. Submit `disabled` durante pending (anti double-click). Escape → focus return.                        |
+| `src/app/app/team/TeamClient.tsx`                           | ResourceRow pulsante `🗓 Assenze` → apre Drawer. Tabella time-off futuri per resource + Delete owner/manager. `setState-in-effect` wrappato `setTimeout(fn,0)`.                                                                                                                                                                             |
+| `src/app/app/calendar/CalendarClient.tsx`                   | Layer D: proiezione CalendarReadModel row_type `resource_time_off` (estensione CalendarRowBase). Badge testuale `"{N} prenotazioni da gestire"` (non solo colore). Blocco click → dettaglio conflitti. Context menu owner/manager `+Aggiungi assenza`. Conflict count UI-only derivato da overlap bookings confirmed (nessuna colonna DB). |
+| `src/app/api/app/calendar/route.ts`                         | Esteso CalendarRowBase con `time_off_id/time_off_type/type/title` per projection.                                                                                                                                                                                                                                                          |
+
+### 20.2 Stati discriminati Drawer
+
+Unione esplicita (no boolean soup):
+
+```
+CLOSED → EDITING → PREVIEW_LOADING
+                          ├→ PREVIEW_READY_NO_CONFLICT   → SUBMITTING → SUCCESS → CLOSED
+                          ├→ PREVIEW_READY_WITH_CONFLICTS→ SUBMITTING → SUCCESS → CLOSED
+                          └→ ERROR
+                          └→ CONFLICT_PREVIEW_STALE → ri-trigger preview con messaggio
+                             "Nel frattempo sono cambiate le prenotazioni coinvolte."
+```
+
+### 20.3 Idempotenza UI
+
+- `SubmitButton` usa `useFormStatus` → `disabled={pending}` (previene click doppio sullo stesso submit).
+- Server-side: `dashboard_resource_time_off_create` lock + `expected_conflict_count` → `CONFLICT_PREVIEW_STALE` se il count reale diverge da quello previewato.
+- Nessun framework idempotency generico.
+
+### 20.4 Input contract / validation (Zod strict server)
+
+- `resource_id`: UUID v4, server verifica `resource.tenant_id === ctx.tenant`.
+- `type`: enum `vacation | sick | leave | training | custom_block`.
+- `starts_local / ends_local`: ISO stringhe, `starts < ends`, range max 365 giorni.
+- `title`: string opzionale ≤ 200 chars.
+- TZ: UI usa `business_profiles.timezone`. Conversione autoritativa in helper scheduling TZ frozen.
+- `expected_conflict_count?`: per create; usato per stale guard.
+- `time_off_id`: per delete; server verifica `tenant_id` FK membership.
+
+### 20.5 Error contract (union discriminata)
+
+```ts
+type TimeOffActionResult<T> =
+  | { ok: true; data: T }
+  | {
+      ok: false;
+      code:
+        | "AUTHZ_DENIED"
+        | "RESOURCE_NOT_FOUND"
+        | "INVALID_INTERVAL"
+        | "RANGE_TOO_LARGE"
+        | "CONFLICT_PREVIEW_STALE"
+        | "VALIDATION_ERROR"
+        | "TIME_OFF_NOT_FOUND"
+        | "UNKNOWN_ERROR";
+      message: string;
+    };
+```
+
+Stack trace / raw Supabase error MAI ritornati al client.
+
+### 20.6 Conflict strategy: PRESERVE + WARN
+
+- Drawer con >0 conflicts: banner role=alert + lista bookings (booking_id, starts_at, ends_at, service_name, resource). **NO email/phone/notes/address**.
+- Testo esplicito: _"Le prenotazioni esistenti NON verranno cancellate o spostate."_
+- CTA: "Conferma e mantieni le prenotazioni" (owner/manager).
+- MAI auto-cancel / auto-reschedule / cancellazioni silenziose.
+
+### 20.7 §6 Read-back obbligatorio
+
+Dopo CREATE:
+
+1. INSERT via RPC → ottieni `time_off_id`.
+2. SELECT autoritativo minimo: `id, tenant_id, resource_id, time_off_type, starts_at, ends_at, title, created_at, updated_at`.
+3. Assert: `tenant === ctx.tenant`, `resource_id === input`, `range eq`.
+4. UI SUCCESS solo dopo read-back confermato.
+
+Dopo DELETE:
+
+1. DELETE RPC → OK.
+2. SELECT `WHERE id = $1` → rows.length === 0.
+3. UI SUCCESS.
+
+### 20.8 Audit PII-free
+
+Eventi audit atomici (trigger frozen A1):
+
+- `resource_time_off_created`: metadata `resource_id, time_off_id, type, starts_at, ends_at, conflict_count`.
+- `resource_time_off_deleted`: metadata subset equivalente.
+- NO: customer_name, email, phone, booking notes, address, JWT, cookie, secrets.
+
+### 20.9 Slot propagation + revalidate
+
+- Dopo create/delete: `revalidatePath("/app/team", "page")`, `revalidatePath("/app/calendar", "page")`, `revalidateTag?("public-slots")` dove applicabile.
+- Slot engine V3 `public_slot_get_available_v3` è server-authoritative: anche se un client ha cached slot stale, il submit booking fallisce con `SLOT_TAKEN` o `RESOURCE_UNAVAILABLE`.
+- Test end-to-end: Maria 10:00 disponibile → timeoff 9-18 → slot scompare → delete → slot torna disponibile (se nessun altro blocco). ANY resource usa Luca libero se Maria bloccata.
+
+### 20.10 Security matrix (contractual verified)
+
+| Operazione / Ruolo   |                   preview                   | create | delete | direct table CRUD |
+| -------------------- | :-----------------------------------------: | :----: | :----: | :---------------: |
+| `owner`              |                    ALLOW                    | ALLOW  | ALLOW  |   DENY (RLS+FK)   |
+| `manager`            |                    ALLOW                    | ALLOW  | ALLOW  |   DENY (RLS+FK)   |
+| `staff`              |                    DENY                     |  DENY  |  DENY  |   DENY (RLS+FK)   |
+| `anon`               |                    DENY                     |  DENY  |  DENY  |       DENY        |
+| forged GUC / cross B | DENY (requireTenantMembership server + RLS) |        |        |                   |
+
+### 20.11 Quality gates obbligatori 13E1-B
+
+- `tsc --noEmit` exit 0 (strict, exactOptionalPropertyTypes).
+- `eslint --max-warnings=0` exit 0.
+- `prettier --check` 0 dirty.
+- `next build` Turbopack exit 0.
+- `git diff --check` 0.
+- Secret scan `src/lib/*timeoff*`: 0 service_role runtime CRUD, 0 leaks.
+
+### 20.12 Suite contrattuali coperte
+
+- **S13E1B-01..24**: success contracts owner/manager/staff/anon/create/delete/types/partial-day/cross-tenant/stale-preview.
+- **F13E1B-01..12**: failure injection malformed IDs, bad enum, title overflow, oversized, direct INSERT, direct DELETE staff, audit rollback, wrong tenant, stale expected, duplicate submit, DB exception.
+- **Slot propagation 5/5**: S11-01..S11-05 specific resource → ANY → restore.
+- **Unit/Integration**: 101 unit + 29 integration invariati.
+
+### 20.13 Scope OUT (rigorosamente non implementato in 13E1-B)
+
+1. Editor disponibilità settimanale risorsa.
+2. Chiusure business / extra-open / special-hours.
+3. Espansione permessi STAFF self time-off.
+4. Notifiche / email / SMS.
+5. Drag & Drop Calendar.
+6. Customer portal self-service time-off.
+7. Auto-cancel / auto-reschedule booking.
+8. Resource deactivation workflow.
+9. Generic task system / workflow engine.
+10. Ricorrenze / recurring time-off.
+11. Payroll / HR.
+12. Edit time-off (per modificare: delete + recreate).

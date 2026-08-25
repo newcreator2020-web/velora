@@ -11,6 +11,9 @@ import {
   type TeamResource,
 } from "./actions";
 import type { ResourceActionResult } from "@/lib/server/resources";
+import { ResourceTimeOffDrawer } from "@/app/app/calendar/components/ResourceTimeOffDrawer";
+import { deleteResourceTimeOffAction, listResourceTimeOffAction } from "@/app/app/timeoff.actions";
+import { TIME_OFF_TYPE_LABELS, type ResourceTimeOffVM } from "@/lib/timeoff-shared";
 
 type Service = { id: string; name: string; duration_minutes: number; active: boolean };
 
@@ -140,11 +143,13 @@ function ResourceRow({
   services,
   refresh,
   canWrite,
+  timezone,
 }: {
   r: TeamResource;
   services: Service[];
   refresh: () => void;
   canWrite: boolean;
+  timezone?: string;
 }) {
   const [updState, updAction] = useFormState(
     updateResourceAction,
@@ -152,6 +157,10 @@ function ResourceRow({
   );
   const [servicesState, setServicesState] = useState<EligibilityState>(() => ({}));
   const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [timeOffs, setTimeOffs] = useState<ResourceTimeOffVM[]>([]);
+  const [timeOffsLoading, setTimeOffsLoading] = useState(false);
+  const [tofMsg, setTofMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -182,6 +191,53 @@ function ResourceRow({
     setSaveMsg({ ok: res.ok, text: res.message });
   };
 
+  const loadTimeOffs = async () => {
+    setTimeOffsLoading(true);
+    try {
+      const rows = await listResourceTimeOffAction({ resource_id: r.id });
+      setTimeOffs(rows);
+    } finally {
+      setTimeOffsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const t = window.setTimeout(() => {
+      if (!cancelled) void loadTimeOffs().then(() => cancelled);
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [r.id]);
+
+  const onDeleteTimeOff = async (id: string) => {
+    if (!canWrite) return;
+    const res = await deleteResourceTimeOffAction({ time_off_id: id });
+    setTofMsg({ ok: res.ok, text: res.message ?? "" });
+    if (res.ok) {
+      setTimeOffs((prev) => prev.filter((t) => t.id !== id));
+      setTimeout(loadTimeOffs, 50);
+    }
+  };
+
+  function fmtRangeShort(isoStart: string, isoEnd: string) {
+    const s = new Date(isoStart);
+    const e = new Date(isoEnd);
+    try {
+      const it = new Intl.DateTimeFormat("it-IT", {
+        dateStyle: "short",
+        timeStyle: "short",
+        timeZone: timezone,
+      });
+      return `${it.format(s)} → ${it.format(e)}`;
+    } catch {
+      return `${isoStart.slice(0, 16)} → ${isoEnd.slice(0, 16)}`;
+    }
+  }
+
   return (
     <li className={card}>
       <div className="flex flex-col gap-4">
@@ -201,6 +257,15 @@ function ResourceRow({
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(true)}
+              disabled={!canWrite}
+              className={btnSecondary + " gap-2"}
+              aria-label={`Assenze di ${r.display_name}`}
+            >
+              <span aria-hidden>🗓</span> Assenze
+            </button>
             <button
               type="button"
               onClick={onToggleActive}
@@ -358,6 +423,94 @@ function ResourceRow({
             </div>
           ) : null}
         </div>
+
+        <section
+          aria-labelledby={`tof-${r.id}-title`}
+          className="border-t border-neutral-100 pt-4 dark:border-neutral-800"
+        >
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h3
+              id={`tof-${r.id}-title`}
+              className="text-xs font-semibold text-neutral-600 dark:text-neutral-400"
+            >
+              Assenze / ferie
+            </h3>
+            <button
+              type="button"
+              onClick={loadTimeOffs}
+              className="text-xs text-neutral-500 underline-offset-2 hover:underline"
+            >
+              Aggiorna
+            </button>
+          </div>
+          {timeOffsLoading ? (
+            <div className="text-xs text-neutral-500">Caricamento…</div>
+          ) : timeOffs.length === 0 ? (
+            <div className="text-xs text-neutral-500">Nessuna assenza futura programmata.</div>
+          ) : (
+            <ul className="divide-y divide-neutral-100 rounded-lg border border-neutral-200 bg-neutral-50/40 dark:divide-neutral-800 dark:border-neutral-800 dark:bg-neutral-950/50">
+              {timeOffs.map((t) => (
+                <li
+                  key={t.id}
+                  className="flex flex-wrap items-center justify-between gap-3 px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+                      {TIME_OFF_TYPE_LABELS[t.type as keyof typeof TIME_OFF_TYPE_LABELS] ?? t.type}
+                      {t.title ? (
+                        <span className="ml-2 text-xs text-neutral-500">· {t.title}</span>
+                      ) : null}
+                    </div>
+                    <div className="mt-0.5 text-xs text-neutral-600 dark:text-neutral-400">
+                      {fmtRangeShort(t.starts_at, t.ends_at)}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onDeleteTimeOff(t.id)}
+                    disabled={!canWrite}
+                    className={
+                      btnGhost +
+                      " text-rose-700 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40"
+                    }
+                    aria-label={`Elimina assenza ${t.id}`}
+                  >
+                    Elimina
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {tofMsg ? (
+            <div
+              role="status"
+              aria-live="polite"
+              className={
+                "mt-2 text-xs " +
+                (tofMsg.ok
+                  ? "text-emerald-700 dark:text-emerald-400"
+                  : "text-rose-700 dark:text-rose-400")
+              }
+            >
+              {tofMsg.text}
+            </div>
+          ) : null}
+        </section>
+
+        <ResourceTimeOffDrawer
+          open={drawerOpen}
+          onOpenChange={(o) => {
+            setDrawerOpen(o);
+            if (!o) setTimeout(loadTimeOffs, 50);
+          }}
+          resource={{ id: r.id, display_name: r.display_name, slug: r.slug }}
+          resources={[{ id: r.id, display_name: r.display_name, slug: r.slug }]}
+          timezone={timezone}
+          canWrite={canWrite}
+          onChanged={() => {
+            setTimeout(loadTimeOffs, 50);
+          }}
+        />
       </div>
     </li>
   );
@@ -366,9 +519,11 @@ function ResourceRow({
 export function TeamClient({
   initial,
   canWrite,
+  timezone,
 }: {
   initial: Awaited<ReturnType<typeof listResourcesAction>>;
   canWrite: boolean;
+  timezone?: string;
 }) {
   const [data, setData] = useState(initial);
   const refresh = async () => {
@@ -417,6 +572,7 @@ export function TeamClient({
                 services={data.services.filter((s) => s.active)}
                 refresh={refresh}
                 canWrite={canWrite}
+                {...(timezone ? { timezone } : {})}
               />
             ))
           )}

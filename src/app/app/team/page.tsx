@@ -12,5 +12,6 @@ export default async function AppTeamPage() {
   await requireTenantMembership();
   const canWrite = ROLE_CAN_WRITE.has(ctx.membership.role);
   const initial = await listResourcesAction();
-  return <TeamClient initial={initial} canWrite={canWrite} />;
+  const timezone = ctx.business_profile?.timezone;
+  return <TeamClient initial={initial} canWrite={canWrite} {...(timezone ? { timezone } : {})} />;
 }
