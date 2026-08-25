@@ -1201,3 +1201,220 @@ Rimandati a fasi successive:
 7. âŒ› **Reminders / notifications** email/SMS pre-appuntamento.
 8. âŒ› **AI concierge** riempimento calendario, suggerimenti slot.
 9. âŒ› **Export iCal** sync Google/Outlook per Staff.
+
+
+## 19. FASE13E1-A  Time-Off Trusted Boundary + Scheduling Lock Contract (append-only)
+
+### 19.1 Oggetto del boundary
+
+Questa sezione definisce il confine di sicurezza e concorrenza per le assenze
+dell'operatore (operator time-off): preview conflitti, creazione atomica,
+cancellazione atomica, strategia di locking deterministica condivisa con il
+booking engine e isolamento multi-tenant.
+
+- **Migration**: `20260824180000_fase13e1_timeoff_operational_boundary.sql` (append-only,
+  non modifica FASE1..FASE13D frozen).
+- **NO UI**: in questa fase NON sono presenti drawer, tabs, calendar badges,
+  server actions Next, componenti React, Playwright UI.
+- **Strategia conflitti**: **PRESERVE + WARN**; i booking esistenti NON vengono
+  annullati o ri-schedulati automaticamente; il `conflict_count` è authority.
+
+### 19.2 RPC trusted (SECURITY DEFINER / SET search_path = '')
+
+#### 19.2.1 `dashboard_resource_time_off_preview`
+```
+dashboard_resource_time_off_preview(
+  p_resource_id uuid,
+  p_starts_at   timestamptz,
+  p_ends_at     timestamptz
+) RETURNS TABLE (...)
+```
+
+Ruoli: `owner`, `manager` same-tenant  ALLOW; `staff`, `anon`  DENY.
+Tenant derivato server-side dalla membership. Non accetta `tenant_id` da client.
+
+Validazioni:
+- `p_resource_id` appartiene allo stesso tenant dell'actor autenticato.
+- `starts_at < ends_at` (altrimenti `INVALID_INTERVAL`).
+- Durata massima intervallo  366 giorni solari (altrimenti `RANGE_TOO_LARGE`).
+
+Output PII-free: `booking_id, starts_at, ends_at, service_id, service_name, resource_id, status`.
+Solo `status = 'confirmed'`; cancelled / completed / no_show vengono esclusi
+dai conflitti futuri.
+
+#### 19.2.2 `dashboard_resource_time_off_create`
+```
+dashboard_resource_time_off_create(
+  p_resource_id            uuid,
+  p_type                   text,
+  p_starts_at              timestamptz,
+  p_ends_at                timestamptz,
+  p_title                  text DEFAULT NULL,
+  p_expected_conflict_count integer DEFAULT NULL
+) RETURNS TABLE (...)
+```
+
+Ruoli: `owner`, `manager` same-tenant  ALLOW; `staff`, `anon`  DENY.
+
+Flusso atomico:
+1. Derivazione tenant e validazione risorsa stesso tenant.
+2. **Acquisizione scheduling lock risorsa** (stesso lock ordering condiviso con
+   `public_booking_create_v3`, `dashboard_booking_manual_create`,
+   `dashboard_booking_reschedule`).
+3. RI-calcolo conflict count DENTRO la transazione (la preview NON è authority).
+4. Se `p_expected_conflict_count IS NOT NULL` e differisce dal valore
+   ri-calcolato  `CONFLICT_PREVIEW_STALE` (rollback implicito per staleness,
+   nessun write persistito).
+5. INSERT `public.resource_time_off`.
+6. Audit atomico PII-free tramite trigger esistente
+   `resource_time_off_audit()` (FASE13B7). **Nessun duplicato** di chiamate
+   `_audit_insert_trusted` nella RPC.
+7. Risultato: `time_off_id, conflict_count, code = 'OK'`.
+
+#### 19.2.3 `dashboard_resource_time_off_delete`
+```
+dashboard_resource_time_off_delete(
+  p_time_off_id uuid
+) RETURNS TABLE (...)
+```
+
+Ruoli: `owner`, `manager` same-tenant  ALLOW; `staff`, `anon`  DENY.
+Cross-tenant `time_off_id`  `CROSS_TENANT_DENIED`.
+Delete atomica. Audit `resource_time_off_deleted`.
+Nessun booking viene modificato dalla delete.
+
+### 19.3 Locking Strategy condiviso (deterministico)
+
+**Locking strategy ufficiale FASE13E1-A**:
+`pg_advisory_xact_lock(bigint)` a singolo argomento, 64-bit, con algoritmo:
+
+```
+BUCKET = 131
+v_key  = hashtext(tenant_id::text || '|' || resource_id::text)::bigint
+        # (BUCKET::bigint << 32)
+```
+
+Granularità: **per tenant + per resource**.
+Nessun lock globale tenant.
+Ordinamento deadlock-free per multi-resource (qualsiasi set):
+`SELECT DISTINCT UNNEST(candidate_resources) ORDER BY resource_id ASC`.
+
+Le stesse primitive sono usate (CREATE OR REPLACE backward-compat, nessuna
+modifica a migration frozen) da:
+- `public_booking_create_v3` (pubblico)
+- `dashboard_booking_manual_create` (dashboard)
+- `dashboard_booking_reschedule` (dashboard)
+- `dashboard_resource_time_off_create` (nuova 13E1)
+
+Helper internal-only (nessun grant anon/authenticated):
+- `scheduling_lock_resource(p_tenant_id uuid, p_resource_id uuid)`
+- `scheduling_lock_resources_sorted(p_tenant_id uuid, p_resource_ids uuid[])`
+
+### 19.4 Failure codes stabili
+
+| Codice                  | Semantica                                                                     |
+| ----------------------- | ----------------------------------------------------------------------------- |
+| `AUTHZ_DENIED`          | ruolo non autorizzato / membership mancante / anon                           |
+| `RESOURCE_NOT_FOUND`    | `resource_id` inesistente o non visible                                       |
+| `INVALID_INTERVAL`      | `starts_at >= ends_at` o `NULL` non nulli                                     |
+| `RANGE_TOO_LARGE`       | range > 366 giorni solari                                                     |
+| `CONFLICT_PREVIEW_STALE`| `p_expected_conflict_count != recheck` (concorrenza, preview vecchia)         |
+| `TIME_OFF_NOT_FOUND`    | delete su `time_off_id` inesistente                                           |
+| `CROSS_TENANT_DENIED`   | risorsa / time_off appartiene a tenant differente                             |
+| `VALIDATION_ERROR`      | enum type invalido / UUID malformato / title length oltre limite              |
+| `AUDIT_WRITE_FAILED`    | fallimento scrittura audit_logs  ROLLBACK transazione principale            |
+| `INTERNAL_ERROR`        | catch-all (non esposto dettaglio SQL raw)                                     |
+
+### 19.5 Audit contract (PII-free)
+
+Trigger esistente FASE13B7 `resource_time_off_audit` AFTER INSERT / UPDATE / DELETE.
+
+Metadata consentiti dopo create:
+`time_off_id, resource_id, type, starts_at, ends_at, conflict_count`
+
+Metadata consentiti dopo delete:
+`time_off_id, resource_id`
+
+**VIETATO** di persistere nel payload audit:
+- `title` (può contenere testo libero PII accidentale),
+- nomi/email/telefono customer,
+- notes, address, qualsiasi identifier customer.
+
+Failure audit: fallisce la transazione principale (NO `EXCEPTION WHEN OTHERS THEN NULL`).
+`public.audit_logs` UPDATE/DELETE DENY (immutabile).
+
+### 19.6 Concurrency invariants (contrattuali)
+
+- **RACE-E1**: 20 create time-off DIFFERENTI same resource  tutti commit, 0 lost audit.
+- **RACE-E2**: `public_booking_create_v3` vs create time-off stesso range, 20 round
+  sincronizzati. Risultato ammesso SOLO: (booking-first + time-off OK + cc>=1)
+  OPPURE (time-off first + booking DENY). VIETATO: booking confirmed overlap + cc=0.
+- **RACE-E3**: manual booking vs time-off  stessa semantica.
+- **RACE-E4**: reschedule INTO range vs time-off  stessa semantica.
+- **RACE-E5**: 2 create con stesso expected conflict count  entrambi esistono
+  (l'overlap multi time-off è permesso), ciascuno con `conflict_count` ri-calcolato
+  coerente.
+- **RACE-E6**: delete time-off contemporaneo a booking create: nessun phantom
+  success; se la delete è committed DOPO la validation booking, la deny resta
+  valida e viceversa.
+
+### 19.7 Performance baseline (10k bookings / 10 resources)
+
+Dataset: 10 risorse, 10.000 bookings (70% storico, 30% futuro, status mix con 2580 confirmed future pool).
+
+Preview overlap read (GiST) 50 warm calls:
+
+| Stat  |  Measured |   Target   |
+| ----- | :-------: | :--------: |
+| min   |  1.24 ms  |           |
+| p50   |  1.90 ms  |           |
+| p95   |  2.41 ms  |  200 ms  |
+| max   |  2.73 ms  |           |
+
+EXPLAIN ANALYZE:
+- `Index Scan using bookings_no_resource_overlap_confirmed on bookings` 
+- NO `Seq Scan on bookings` sul path critico 
+- Planning Time 0.14-0.19 ms; Execution Time 0.08-0.09 ms.
+
+Lock contention: 20 transazioni concorrenti stesso advisory key BIGINT.
+
+| Stat  |  Measured |
+| ----- | :-------: |
+| p50   | 53.50 ms  |
+| p95   | 84.93 ms  |
+| deadlock events | 0 / 20 |
+
+### 19.8 RLS Matrix FASE13E1-A
+
+| Role      | preview same-tenant | create same-tenant | delete same-tenant | direct table INSERT/UPDATE/DELETE |
+| --------- | :-----------------: | :----------------: | :----------------: | :-------------------------------: |
+| `anon`    |        DENY         |        DENY        |        DENY        |               DENY                |
+| `staff`   |        DENY         |        DENY        |        DENY        |               DENY                |
+| `manager` |        ALLOW        |        ALLOW       |        ALLOW       |               DENY                |
+| `owner`   |        ALLOW        |        ALLOW       |        ALLOW       |               DENY                |
+| Cross tenant manager-A resource-B | DENY | DENY | DENY | DENY FK+RLS |
+| Cross tenant owner-A time_off-B delete |  |  | DENY | DENY |
+
+### 19.9 Grants (grants inspection)
+
+- `scheduling_lock_resource(s)`: **NO grant PUBLIC / authenticated** (internal-only).
+- `dashboard_resource_time_off_preview/create/delete`:
+  `REVOKE ALL ON FUNCTION ... FROM PUBLIC;`
+  `GRANT EXECUTE ON FUNCTION ... TO authenticated, anon, service_role;`
+  (grant ad `anon` serve a ricevere `AUTHZ_DENIED` semantico invece di raw SQLSTATE
+  42501; la RPC comunque fallisce authz server-side prima di qualsiasi write).
+- Le table `resource_time_off` e `audit_logs` hanno RLS e grants FASE12/13B
+  invariati (nessun CRUD diretto permesso).
+
+### 19.10 NON-GOALS  FASE13E1-A
+
+1.  UI Drawer / tabs Team / Calendar badge / Next server actions / React / Playwright UI.
+2.  Resource availability UI / pubbliche.
+3.  Business closures / global tenant off-time.
+4.  Cambio permessi STAFF.
+5.  Auto-cancel / auto-reschedule bookings overlapping.
+6.  Notifications / reminders.
+7.  Drag & Drop.
+8.  Analytics / AI / SEO / marketing.
+9.  Refactor estetici non funzionali.
+10.  Edit time-off (in questa slice solo create + delete; niente update/versioning).
