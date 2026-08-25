@@ -39,6 +39,15 @@ export default async function AppCalendarPage(props: CalendarPageProps) {
     .order("display_name");
   const resources = (resourcesRows.data ?? []) as unknown[];
 
+  const servicesRows = await supabase
+    .from("services")
+    .select("id,name,active,duration_minutes,currency,price_from")
+    .eq("tenant_id", ctx.tenant!.id)
+    .eq("active", true)
+    .order("position")
+    .order("name");
+  const services = (servicesRows.data ?? []) as unknown[];
+
   const initialStatuses = cal.window.statuses;
 
   return (
@@ -71,6 +80,16 @@ export default async function AppCalendarPage(props: CalendarPageProps) {
             color_hex: string | null;
             created_at: string | null;
             updated_at: string | null;
+          }>
+        }
+        initialServices={
+          services as Array<{
+            id: string;
+            name: string;
+            active: boolean;
+            duration_minutes: number | null;
+            currency: string;
+            price_from: number | null;
           }>
         }
         membershipRole={cal.membership_role}

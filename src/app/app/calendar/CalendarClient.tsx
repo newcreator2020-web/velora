@@ -1,13 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useActionState, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   cancelBookingAction,
   completeBookingAction,
   noShowBookingAction,
 } from "@/app/app/bookings/actions";
-import { useFormState } from "react-dom";
+import ManualBookingDrawer from "./components/ManualBookingDrawer";
+import RescheduleDrawer, { type BookingRowForReschedule } from "./components/RescheduleDrawer";
 
 type Resource = {
   id: string;
@@ -33,9 +34,20 @@ type CalendarRowBase = {
   service_name?: string | null;
   service_duration_minutes?: number | null;
   resource_id?: string | null;
+  resource_slug?: string | null;
   resource_display_name?: string | null;
   resource_color_hex?: string | null;
   customer_display_name?: string | null;
+  revision?: number | null;
+};
+
+type ServiceOption = {
+  id: string;
+  name: string;
+  active: boolean;
+  duration_minutes: number | null;
+  currency: string;
+  price_from: number | null;
 };
 
 type Props = {
@@ -47,6 +59,7 @@ type Props = {
   initialStatuses: Status[];
   initialResourceIds: string[] | null;
   initialResources: Resource[];
+  initialServices: ServiceOption[];
   membershipRole: "owner" | "manager" | "staff";
 };
 
@@ -152,6 +165,16 @@ function StatusBadge({ status }: { status: Status }) {
   );
 }
 
+function nearestSlot15Future(): Date {
+  const now = new Date();
+  const plus1h = new Date(now.getTime() + 60 * 60 * 1000);
+  const m = Math.ceil(plus1h.getMinutes() / 15) * 15;
+  const d = new Date(plus1h);
+  d.setMinutes(0, 0, 0);
+  d.setMinutes(m);
+  return d;
+}
+
 export default function CalendarClient(props: Props) {
   const pathname = usePathname();
   const router = useRouter();
@@ -168,6 +191,29 @@ export default function CalendarClient(props: Props) {
   const [statusCSV, setStatusCSV] = useState<string>(
     query.get("status") || props.initialStatuses.join(","),
   );
+
+  const [servicesList, _setServicesList] = useState<ServiceOption[]>(props.initialServices);
+
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualStartsAt, setManualStartsAt] = useState<Date | undefined>(undefined);
+  const [manualResourceSlug, setManualResourceSlug] = useState<string | undefined>(undefined);
+
+  const [rescheduleOpen, setRescheduleOpen] = useState(false);
+  const [rescheduleBooking, setRescheduleBooking] = useState<BookingRowForReschedule | null>(null);
+  const [rescheduleOnlyResource, setRescheduleOnlyResource] = useState(false);
+
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<number | null>(null);
+  const showToast = useCallback((m: string) => {
+    setToast(m);
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 3000);
+  }, []);
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    };
+  }, []);
 
   const selectedResourceIDs = useMemo(() => {
     if (!resourceFilter || resourceFilter === "all") return [] as string[];
@@ -417,11 +463,43 @@ export default function CalendarClient(props: Props) {
     return filteredRes.slice(0, maxCols);
   }, [filteredRes, maxCols, effectiveView]);
 
+  const openManualDrawer = useCallback((startsAt?: Date, resourceSlug?: string) => {
+    setManualStartsAt(startsAt);
+    setManualResourceSlug(resourceSlug);
+    setManualOpen(true);
+  }, []);
+
+  const openReschedule = useCallback((b: CalendarRowBase, onlyResource: boolean) => {
+    setRescheduleBooking({
+      booking_id: b.booking_id ?? null,
+      starts_at: b.starts_at,
+      ends_at: b.ends_at,
+      service_id: b.service_id ?? null,
+      service_name: b.service_name ?? null,
+      resource_id: b.resource_id ?? null,
+      resource_slug: b.resource_slug ?? null,
+      revision: b.revision ?? null,
+      status: b.status ?? null,
+    });
+    setRescheduleOnlyResource(onlyResource);
+    setRescheduleOpen(true);
+  }, []);
+
   // ===========================
   // RENDER
   // ===========================
   return (
     <div className="space-y-3" aria-label="Calendario operativo">
+      {toast ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed left-1/2 top-4 z-[60] -translate-x-1/2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-800 shadow-lg"
+        >
+          {toast}
+        </div>
+      ) : null}
+
       <Toolbar
         view={view}
         setView={updateView}
@@ -439,6 +517,7 @@ export default function CalendarClient(props: Props) {
           else set.add(s);
           updateStatus([...set]);
         }}
+        onNewBooking={() => openManualDrawer(nearestSlot15Future(), "any")}
       />
 
       {errorCode ? (
@@ -484,6 +563,9 @@ export default function CalendarClient(props: Props) {
           rangeStartISO={rangeInfo?.start ?? props.initialRangeStart}
           rangeEndISO={rangeInfo?.end ?? props.initialRangeEnd}
           onOpen={(b) => setActiveBooking(b)}
+          onSlotClick={(d: string, r: Resource | null) => {
+            openManualDrawer(new Date(d), r?.slug ?? "any");
+          }}
         />
       ) : (
         <DayView
@@ -504,6 +586,9 @@ export default function CalendarClient(props: Props) {
             }
           }}
           onOpen={(b) => setActiveBooking(b)}
+          onSlotClick={(d: string, r: Resource | null) => {
+            openManualDrawer(new Date(d), r?.slug ?? "any");
+          }}
         />
       )}
 
@@ -514,6 +599,58 @@ export default function CalendarClient(props: Props) {
           onClose={() => setActiveBooking(null)}
           role={props.membershipRole}
           onStatusChanged={() => {
+            void fetchData(true);
+          }}
+          onReschedule={() => {
+            setActiveBooking(null);
+            openReschedule(activeBooking, false);
+          }}
+          onChangeResource={() => {
+            setActiveBooking(null);
+            openReschedule(activeBooking, true);
+          }}
+        />
+      ) : null}
+
+      <ManualBookingDrawer
+        open={manualOpen}
+        onOpenChange={(o) => setManualOpen(o)}
+        startsAt={manualStartsAt}
+        resourceSlug={manualResourceSlug}
+        resources={allResourcesSorted.map((r) => ({
+          id: r.id,
+          slug: r.slug,
+          display_name: r.display_name,
+        }))}
+        services={servicesList.map((s) => ({
+          id: s.id,
+          name: s.name,
+          duration_minutes: s.duration_minutes,
+        }))}
+        onCreated={() => {
+          showToast("Appuntamento creato");
+          void fetchData(true);
+        }}
+      />
+
+      {rescheduleBooking ? (
+        <RescheduleDrawer
+          open={rescheduleOpen}
+          onOpenChange={(o) => setRescheduleOpen(o)}
+          booking={rescheduleBooking}
+          onlyResource={rescheduleOnlyResource}
+          resources={allResourcesSorted.map((r) => ({
+            id: r.id,
+            slug: r.slug,
+            display_name: r.display_name,
+          }))}
+          services={servicesList.map((s) => ({
+            id: s.id,
+            name: s.name,
+            duration_minutes: s.duration_minutes,
+          }))}
+          onUpdated={() => {
+            showToast("Appuntamento spostato");
             void fetchData(true);
           }}
         />
@@ -534,10 +671,20 @@ function Toolbar(props: {
   onSelectResource: (csv: string) => void;
   selectedStatuses: Status[];
   onToggleStatus: (s: Status) => void;
+  onNewBooking: () => void;
 }) {
   return (
     <div className="flex flex-wrap items-stretch justify-between gap-3 rounded-xl border border-neutral-200 bg-white p-3 shadow-sm">
       <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={props.onNewBooking}
+          className="inline-flex h-9 items-center justify-center gap-1 rounded-md bg-neutral-900 px-3 text-sm font-semibold text-white hover:bg-neutral-800 focus:outline-none focus:ring-2 focus:ring-neutral-500/30"
+        >
+          <span aria-hidden="true">+</span>
+          <span>Nuovo appuntamento</span>
+        </button>
+        <span className="mx-1 h-6 w-px bg-neutral-200 sm:mx-2" aria-hidden="true" />
         <button
           type="button"
           aria-label="Giorno precedente"
@@ -660,6 +807,7 @@ function DayView(props: {
   selectedIDs: string[];
   onPickRes: (v: string) => void;
   onOpen: (b: CalendarRowBase) => void;
+  onSlotClick?: (d: string, r: Resource | null) => void;
 }) {
   const hours: number[] = [];
   for (let h = 6; h <= 22; h++) hours.push(h);
@@ -693,7 +841,7 @@ function DayView(props: {
   const nowPct = (() => {
     const frac24 = (nowMs - startOfDayMs) / dayHours;
     const frac = (frac24 - viewStartFrac) / viewSpanFrac;
-    return Math.min(Math.max(0, frac), 1) * 100;
+    return Math.round(Math.min(Math.max(0, frac), 1) * 10000) / 100;
   })();
 
   const bookingsByResource = useMemo(() => {
@@ -1024,6 +1172,7 @@ function WeekView(props: {
   rangeStartISO: string;
   rangeEndISO: string;
   onOpen: (b: CalendarRowBase) => void;
+  onSlotClick?: (d: string, r: Resource | null) => void;
 }) {
   const days: Date[] = [];
   const weekStart = new Date(props.rangeStartISO);
@@ -1234,7 +1383,7 @@ function AgendaView(props: {
 }
 
 // ===========================
-// BOOKING DRAWER (read-only)
+// BOOKING DRAWER (read-only + operational)
 // ===========================
 function BookingDrawer(props: {
   booking: CalendarRowBase;
@@ -1242,13 +1391,16 @@ function BookingDrawer(props: {
   onClose: () => void;
   role: "owner" | "manager" | "staff";
   onStatusChanged: () => void;
+  onReschedule?: () => void;
+  onChangeResource?: () => void;
 }) {
   const b = props.booking;
   const canOperate = props.role === "owner" || props.role === "manager";
+  const canReschedule = props.role === "owner" || props.role === "manager";
 
-  const [cancelState, cancelAct] = useFormState(cancelBookingAction, null);
-  const [completeState, completeAct] = useFormState(completeBookingAction, null);
-  const [noShowState, noShowAct] = useFormState(noShowBookingAction, null);
+  const [cancelState, cancelAct] = useActionState(cancelBookingAction, null);
+  const [completeState, completeAct] = useActionState(completeBookingAction, null);
+  const [noShowState, noShowAct] = useActionState(noShowBookingAction, null);
 
   useEffect(() => {
     if (cancelState?.ok === true || completeState?.ok === true || noShowState?.ok === true) {
@@ -1396,6 +1548,27 @@ function BookingDrawer(props: {
                   <p className="mt-1 text-xs text-amber-700">{noShowState.error}</p>
                 ) : null}
               </form>
+            </>
+          ) : null}
+
+          {canReschedule && b.booking_id && b.status === "confirmed" ? (
+            <>
+              <button
+                type="button"
+                data-cal-drawer-reschedule="true"
+                onClick={props.onReschedule}
+                className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm font-semibold text-neutral-800 hover:bg-neutral-50"
+              >
+                Sposta appuntamento
+              </button>
+              <button
+                type="button"
+                data-cal-drawer-resource="true"
+                onClick={props.onChangeResource}
+                className="w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm font-semibold text-neutral-800 hover:bg-neutral-50"
+              >
+                Cambia operatore
+              </button>
             </>
           ) : null}
 

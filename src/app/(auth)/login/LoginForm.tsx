@@ -1,6 +1,7 @@
 "use client";
 
-import { useFormState as useActionStateCompat, useFormStatus } from "react-dom";
+import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 import { loginAction, type LoginActionResult } from "./actions";
 
 const initial: LoginActionResult = { ok: false };
@@ -29,7 +30,7 @@ function SubmitButton({ disabled }: { disabled?: boolean }) {
 }
 
 export function LoginForm() {
-  const [state, action] = useActionStateCompat(loginAction, initial);
+  const [state, action] = useActionState(loginAction, initial);
 
   return (
     <form
