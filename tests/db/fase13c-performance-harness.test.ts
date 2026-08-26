@@ -197,6 +197,7 @@ async function impersonateOwner(c: PgClient, uid: string) {
 }
 
 async function cleanup(c: PgClient) {
+  await c.query("ROLLBACK").catch(() => {});
   await c.query("RESET ROLE");
   await c.query("BEGIN");
   await c.query("SET LOCAL session_replication_role = replica");

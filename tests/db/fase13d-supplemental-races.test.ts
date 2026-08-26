@@ -254,112 +254,206 @@ describe("F13D Supplemental Races B/E standalone (no public-v3)", { timeout: 180
     const start = MON(11, 0);
     const end = END(start, 30);
     const pgC = await pg();
+    // Cross-suite contamination guard: any bookings/time_off/bse in MON(11,0) range
+    // from prior suites will alter capacity or cause deadlock/lock-invert. Clean first.
+    await pgC.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
+    await pgC.query(
+      `DELETE FROM public.bookings
+       WHERE tenant_id = $1::uuid
+         AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+      [UUIDS.tenant, start, end],
+    );
+    await pgC.query(
+      `DELETE FROM public.resource_time_off
+       WHERE tenant_id = $1::uuid
+         AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+      [UUIDS.tenant, start, end],
+    );
+    await pgC.query(
+      `DELETE FROM public.business_schedule_exceptions
+       WHERE tenant_id = $1::uuid
+         AND exception_type IN ('closure','slot_block')
+         AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+      [UUIDS.tenant, start, end],
+    );
+    await pgC.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
     const initial = await countConfirmedBookingsAt(pgC, UUIDS.tenant, start, end);
     expect(initial).toBe(0);
     const ownerCl = await login(UUIDS.owner);
-    const results = await Promise.all(
-      Array.from({ length: 20 }).map(async () => {
-        const suf = randomUUID().slice(0, 10);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const r = await ownerCl.rpc("dashboard_booking_manual_create" as any, {
-          p_customer_id: null,
-          p_customer_name: "RaceB " + suf,
-          p_customer_email: "raceb-" + suf + "@test.local",
-          p_customer_phone:
-            "+39" + String(Math.floor(Math.random() * 9_000_000_000 + 1_000_000_000)),
-          p_service_id: UUIDS.svc1,
-          p_starts_at: start,
-          p_resource_slug: "any",
-          p_notes: null,
-        });
-        if (r.error)
-          return { ok: false, code: "RPC_ERROR:" + (r.error as { message?: string }).message };
-        const row = ((Array.isArray(r.data) ? r.data[0] : r.data) ?? {}) as {
-          code?: string;
-        };
-        const ok = !!(row && row.code === "OK");
-        return { ok, code: row?.code ?? "?" };
-      }),
-    );
-    const winners = results.filter((x) => x.ok).length;
-    const losers = results.filter((x) => !x.ok && x.code === "SLOT_TAKEN").length;
-    const others = results.filter((x) => !x.ok && x.code !== "SLOT_TAKEN");
-    if (others.length > 0) {
-      console.error("[RACE-B non-SLOT_TAKEN losers]", JSON.stringify(others.slice(0, 10)));
+    try {
+      const results = await Promise.all(
+        Array.from({ length: 20 }).map(async () => {
+          const suf = randomUUID().slice(0, 10);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const r = await ownerCl.rpc("dashboard_booking_manual_create" as any, {
+            p_customer_id: null,
+            p_customer_name: "RaceB " + suf,
+            p_customer_email: "raceb-" + suf + "@test.local",
+            p_customer_phone:
+              "+39" + String(Math.floor(Math.random() * 9_000_000_000 + 1_000_000_000)),
+            p_service_id: UUIDS.svc1,
+            p_starts_at: start,
+            p_resource_slug: "any",
+            p_notes: null,
+          });
+          if (r.error)
+            return { ok: false, code: "RPC_ERROR:" + (r.error as { message?: string }).message };
+          const row = ((Array.isArray(r.data) ? r.data[0] : r.data) ?? {}) as {
+            code?: string;
+          };
+          const ok = !!(row && row.code === "OK");
+          return { ok, code: row?.code ?? "?" };
+        }),
+      );
+      const winners = results.filter((x) => x.ok).length;
+      const losers = results.filter((x) => !x.ok && x.code === "SLOT_TAKEN").length;
+      expect(winners).toBeGreaterThanOrEqual(1);
+      expect(winners).toBeLessThanOrEqual(2);
+      expect(winners + losers).toBe(results.length);
+      const after = await countConfirmedBookingsAt(pgC, UUIDS.tenant, start, end);
+      expect(after).toBe(winners);
+    } finally {
+      // POST-RACE idempotency cleanup: remove any data created in this test so
+      // a subsequent full-vitest run WITHOUT db:reset still sees empty fixture ranges.
+      await pgC.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
+      await pgC.query(
+        `DELETE FROM public.bookings
+         WHERE tenant_id = $1::uuid
+           AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+        [UUIDS.tenant, start, end],
+      );
+      await pgC.query(
+        `DELETE FROM public.resource_time_off
+         WHERE tenant_id = $1::uuid
+           AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+        [UUIDS.tenant, start, end],
+      );
+      await pgC.query(
+        `DELETE FROM public.business_schedule_exceptions
+         WHERE tenant_id = $1::uuid
+           AND exception_type IN ('closure','slot_block')
+           AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+        [UUIDS.tenant, start, end],
+      );
+      await pgC.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
     }
-    expect(winners).toBeGreaterThanOrEqual(1);
-    expect(winners).toBeLessThanOrEqual(2);
-    expect(winners + losers).toBe(results.length);
-    const after = await countConfirmedBookingsAt(pgC, UUIDS.tenant, start, end);
-    expect(after).toBe(winners);
   }, 60000);
 
   it("RACE-E: 2 concurrent reschedule same booking same expected_rev => 1 OK 1 CONCURRENT_UPDATE rev+1", async () => {
     const pgC = await pg();
     const ownerCl = await login(UUIDS.owner);
     const baseStart = MON(14, 0);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pre = await ownerCl.rpc("dashboard_booking_manual_create" as any, {
-      p_customer_id: null,
-      p_customer_name: "RaceE Target B",
-      p_customer_email: "racee-" + randomUUID().slice(0, 8) + "@test.local",
-      p_customer_phone: "+390000000011",
-      p_service_id: UUIDS.svc1,
-      p_starts_at: baseStart,
-      p_resource_slug: "res1",
-      p_notes: null,
-    });
-    expect(pre.error).toBeFalsy();
-    const preRow = ((Array.isArray(pre.data) ? pre.data[0] : pre.data) ?? {}) as {
-      code?: string;
-      booking_id?: string;
-      revision?: number;
-    };
-    expect(preRow.code).toBe("OK");
-    const bookingId = preRow.booking_id!;
-    const rev0 = Number(preRow.revision ?? 0);
     const newStart = MON(15, 0);
     const newStart2 = MON(16, 0);
-    const results = await Promise.all([
-      (async () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const r = await ownerCl.rpc("dashboard_booking_reschedule" as any, {
-          p_booking_id: bookingId,
-          p_expected_revision: rev0,
-          p_new_starts_at: newStart,
-          p_new_resource_slug: "same",
-          p_new_service_id: null,
-        });
-        if (r.error) return { ok: false, code: "RPC_ERROR" };
-        const row = ((Array.isArray(r.data) ? r.data[0] : r.data) ?? {}) as { code?: string };
-        return { ok: row.code === "OK", code: row.code ?? "" };
-      })(),
-      (async () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const r = await ownerCl.rpc("dashboard_booking_reschedule" as any, {
-          p_booking_id: bookingId,
-          p_expected_revision: rev0,
-          p_new_starts_at: newStart2,
-          p_new_resource_slug: "same",
-          p_new_service_id: null,
-        });
-        if (r.error) return { ok: false, code: "RPC_ERROR" };
-        const row = ((Array.isArray(r.data) ? r.data[0] : r.data) ?? {}) as { code?: string };
-        return { ok: row.code === "OK", code: row.code ?? "" };
-      })(),
-    ]);
-    const winners = results.filter((x) => x.ok).length;
-    const concurrent = results.filter((x) => !x.ok && x.code === "CONCURRENT_UPDATE").length;
-    expect(winners).toBe(1);
-    expect(concurrent).toBe(1);
-    const after = await pgC.query(`SELECT starts_at, revision FROM public.bookings WHERE id=$1`, [
-      bookingId,
-    ]);
-    expect(after.rows[0]!.revision).toBe(rev0 + 1);
-    const finalStartISO = new Date(after.rows[0]!.starts_at as string).toISOString();
-    const okFinal =
-      finalStartISO === new Date(newStart).toISOString() ||
-      finalStartISO === new Date(newStart2).toISOString();
-    expect(okFinal).toBe(true);
+    // Cross-suite contamination guard: clean range 14:00-16:30 (base start + both new starts 30min).
+    const _cleanStart = baseStart;
+    const _cleanEnd = END(newStart2, 30);
+    await pgC.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
+    await pgC.query(
+      `DELETE FROM public.bookings
+       WHERE tenant_id = $1::uuid
+         AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+      [UUIDS.tenant, _cleanStart, _cleanEnd],
+    );
+    await pgC.query(
+      `DELETE FROM public.resource_time_off
+       WHERE tenant_id = $1::uuid
+         AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+      [UUIDS.tenant, _cleanStart, _cleanEnd],
+    );
+    await pgC.query(
+      `DELETE FROM public.business_schedule_exceptions
+       WHERE tenant_id = $1::uuid
+         AND exception_type IN ('closure','slot_block')
+         AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+      [UUIDS.tenant, _cleanStart, _cleanEnd],
+    );
+    await pgC.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pre = await ownerCl.rpc("dashboard_booking_manual_create" as any, {
+        p_customer_id: null,
+        p_customer_name: "RaceE Target B",
+        p_customer_email: "racee-" + randomUUID().slice(0, 8) + "@test.local",
+        p_customer_phone: "+390000000011",
+        p_service_id: UUIDS.svc1,
+        p_starts_at: baseStart,
+        p_resource_slug: "res1",
+        p_notes: null,
+      });
+      expect(pre.error).toBeFalsy();
+      const preRow = ((Array.isArray(pre.data) ? pre.data[0] : pre.data) ?? {}) as {
+        code?: string;
+        booking_id?: string;
+        revision?: number;
+      };
+      expect(preRow.code).toBe("OK");
+      const bookingId = preRow.booking_id!;
+      const rev0 = Number(preRow.revision ?? 0);
+      const results = await Promise.all([
+        (async () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const r = await ownerCl.rpc("dashboard_booking_reschedule" as any, {
+            p_booking_id: bookingId,
+            p_expected_revision: rev0,
+            p_new_starts_at: newStart,
+            p_new_resource_slug: "same",
+            p_new_service_id: null,
+          });
+          if (r.error) return { ok: false, code: "RPC_ERROR" };
+          const row = ((Array.isArray(r.data) ? r.data[0] : r.data) ?? {}) as { code?: string };
+          return { ok: row.code === "OK", code: row.code ?? "" };
+        })(),
+        (async () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const r = await ownerCl.rpc("dashboard_booking_reschedule" as any, {
+            p_booking_id: bookingId,
+            p_expected_revision: rev0,
+            p_new_starts_at: newStart2,
+            p_new_resource_slug: "same",
+            p_new_service_id: null,
+          });
+          if (r.error) return { ok: false, code: "RPC_ERROR" };
+          const row = ((Array.isArray(r.data) ? r.data[0] : r.data) ?? {}) as { code?: string };
+          return { ok: row.code === "OK", code: row.code ?? "" };
+        })(),
+      ]);
+      const winners = results.filter((x) => x.ok).length;
+      const concurrent = results.filter((x) => !x.ok && x.code === "CONCURRENT_UPDATE").length;
+      expect(winners).toBe(1);
+      expect(concurrent).toBe(1);
+      const after = await pgC.query(`SELECT starts_at, revision FROM public.bookings WHERE id=$1`, [
+        bookingId,
+      ]);
+      expect(after.rows[0]!.revision).toBe(rev0 + 1);
+      const finalStartISO = new Date(after.rows[0]!.starts_at as string).toISOString();
+      const okFinal =
+        finalStartISO === new Date(newStart).toISOString() ||
+        finalStartISO === new Date(newStart2).toISOString();
+      expect(okFinal).toBe(true);
+    } finally {
+      // POST-RACE idempotency cleanup: restore empty fixture range 14..16:30.
+      await pgC.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
+      await pgC.query(
+        `DELETE FROM public.bookings
+         WHERE tenant_id = $1::uuid
+           AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+        [UUIDS.tenant, _cleanStart, _cleanEnd],
+      );
+      await pgC.query(
+        `DELETE FROM public.resource_time_off
+         WHERE tenant_id = $1::uuid
+           AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+        [UUIDS.tenant, _cleanStart, _cleanEnd],
+      );
+      await pgC.query(
+        `DELETE FROM public.business_schedule_exceptions
+         WHERE tenant_id = $1::uuid
+           AND exception_type IN ('closure','slot_block')
+           AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+        [UUIDS.tenant, _cleanStart, _cleanEnd],
+      );
+      await pgC.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
+    }
   }, 60000);
 });

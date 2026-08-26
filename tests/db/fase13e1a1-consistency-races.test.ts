@@ -220,7 +220,9 @@ beforeAll(async () => {
     }
   }
   // stub per funzioni RPC che dipendono da member_role_for_tenant non definita nel boundary corrente
+  // DROP prima perché CREATE OR REPLACE non rinomina parametri (errore cannot change name of input parameter)
   await db.query(`
+    DROP FUNCTION IF EXISTS public.member_role_for_tenant(UUID,UUID) CASCADE;
     CREATE OR REPLACE FUNCTION public.member_role_for_tenant(p_tenant_id UUID, p_user_id UUID)
     RETURNS TEXT LANGUAGE plpgsql STABLE AS $f$
     BEGIN

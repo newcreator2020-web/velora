@@ -560,13 +560,25 @@ test("E13E1B-E14 — Badge conflitti testuale ('N prenotazioni da gestire') non 
   await clickByText(page, "button", /Continua/i);
   await page.waitForTimeout(600);
   try {
-    await clickByText(page, "button", /Conferma (l'assenza|e mantieni)/i);
+    await clickByText(page, "button", /Conferma (l'assenza|e mantieni)/i, { timeout: 20000 });
   } catch {
-    await page
-      .locator("button")
-      .filter({ hasText: /Conferma/i })
-      .first()
-      .click();
+    try {
+      const btn = page
+        .locator("button")
+        .filter({ hasText: /Conferma/i })
+        .first();
+      await expect(btn).toBeVisible({ timeout: 15_000 });
+      await Promise.race([
+        expect(btn)
+          .toBeEnabled({ timeout: 10_000 })
+          .catch(() => {}),
+        page.waitForTimeout(10_000),
+      ]);
+      await btn.click({ timeout: 10_000 });
+    } catch (_btnE) {
+      await page.screenshot({ path: "test-results/e14-debug.png", fullPage: true });
+      throw _btnE;
+    }
   }
   await page.waitForTimeout(1200);
   await page.goto(`${BASE}/app/calendar`, { waitUntil: "domcontentloaded" });

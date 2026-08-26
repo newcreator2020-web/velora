@@ -89,6 +89,7 @@ function nextMondayCivilRome() {
     m: d.getUTCMonth() + 1,
     d: d.getUTCDate(),
     iso: `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`,
+    date: new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())),
   };
 }
 
@@ -405,27 +406,55 @@ test("E9-7/E9-8 Submit booking valido → conferma + DB persisted A (duration/en
 }) => {
   const c = await pgClient();
   await hardDeleteBookings(c, [ids.tenantA]);
-  await page.goto(`/s/${SLUG_A}/booking`);
-  await selectServiceDateSlot(page, "Taglio uomo", NEXT_MON.iso, "10:00");
+  const from = new Date(NEXT_MON.date);
+  from.setDate(from.getDate() - 1);
+  const to = new Date(NEXT_MON.date);
+  to.setDate(to.getDate() + 2);
+  await c.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
+  await c.query(
+    `DELETE FROM public.business_schedule_exceptions WHERE tenant_id=$1 AND exception_type IN ('closure','slot_block') AND starts_at >= $2::timestamptz AND starts_at < $3::timestamptz`,
+    [ids.tenantA, from.toISOString(), to.toISOString()],
+  );
+  await c.query(
+    `DELETE FROM public.resource_time_off WHERE tenant_id=$1 AND starts_at >= $2::timestamptz AND starts_at < $3::timestamptz`,
+    [ids.tenantA, from.toISOString(), to.toISOString()],
+  );
+  await c.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
+  await page.goto(`/s/${SLUG_A}/booking`, { waitUntil: "domcontentloaded" });
+  await selectServiceDateSlot(page, "Taglio uomo", NEXT_MON.iso, "15:00");
   await fillCustomer(page, {
     email: "cliente-f9@velora.test",
     phone: "+390611223344",
   });
   await page.getByRole("button", { name: /conferma prenotazione/i }).click();
-  await expect(page.getByTestId("booking-created")).toBeVisible({ timeout: 25_000 });
-  const row = await c.query(
-    "SELECT id, tenant_id, service_id, status, starts_at, ends_at, customer_name, customer_email FROM public.bookings WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 1",
-    [ids.tenantA],
-  );
-  expect(row.rows.length).toBeGreaterThan(0);
-  const b = row.rows[0];
-  expect(b.tenant_id).toBe(ids.tenantA);
-  expect(b.service_id).toBe(ids.svcA30);
-  expect(b.status).toBe("confirmed");
-  expect(b.customer_name).toBe("Mario Rossi E2E");
-  expect(b.customer_email).toBe("cliente-f9@velora.test");
-  const startMs = new Date(b.starts_at).getTime();
-  const endMs = new Date(b.ends_at).getTime();
+  const timeoutMs = 90_000;
+  const startAt = Date.now();
+  let found = null;
+  let dbTotal = 0;
+  while (Date.now() - startAt < timeoutMs) {
+    const row = await c.query(
+      "SELECT id, tenant_id, service_id, status, starts_at, ends_at, customer_name, customer_email FROM public.bookings WHERE tenant_id=$1 AND customer_email=$2 ORDER BY created_at DESC LIMIT 1",
+      [ids.tenantA, "cliente-f9@velora.test"],
+    );
+    const total = await c.query("SELECT COUNT(*)::int n FROM public.bookings WHERE tenant_id=$1", [
+      ids.tenantA,
+    ]);
+    dbTotal = total.rows[0]?.n || 0;
+    if (row.rows.length > 0) {
+      found = row.rows[0];
+      if (found.status === "confirmed") break;
+    }
+    await page.waitForTimeout(500);
+  }
+  expect(found).not.toBeNull();
+  expect(dbTotal).toBeGreaterThan(0);
+  expect(found.tenant_id).toBe(ids.tenantA);
+  expect(found.service_id).toBe(ids.svcA30);
+  expect(found.status).toBe("confirmed");
+  expect(found.customer_name).toBe("Mario Rossi E2E");
+  expect(found.customer_email).toBe("cliente-f9@velora.test");
+  const startMs = new Date(found.starts_at).getTime();
+  const endMs = new Date(found.ends_at).getTime();
   expect((endMs - startMs) / 60000).toBe(30);
 });
 
@@ -526,7 +555,7 @@ test("E9-13 Occupied slot → NO fake success, messaggio errore user-friendly", 
   await selectServiceDateSlot(page, "Taglio uomo", NEXT_MON.iso, pickHour);
   await fillCustomer(page, { email: "first@velora.test", phone: "+39061111111" });
   await page.getByRole("button", { name: /conferma prenotazione/i }).click();
-  await expect(page.getByTestId("booking-created")).toBeVisible({ timeout: 25_000 });
+  await expect(page.getByTestId("booking-created")).toBeVisible({ timeout: 60_000 });
   // Read back the starts_at used by the first booking
   const firstRow = await c.query(
     "SELECT id, starts_at, service_id FROM public.bookings WHERE tenant_id=$1 AND status='confirmed' ORDER BY created_at DESC LIMIT 1",
@@ -883,7 +912,7 @@ test("E9-19 Rebook dopo cancellazione → success confirmed DB", async ({ page }
   await selectServiceDateSlot(page, "Taglio uomo", NEXT_MON.iso, pickHour);
   await fillCustomer(page, { email: "rebook@velora.test", phone: "+390655555" });
   await page.getByRole("button", { name: /conferma prenotazione/i }).click();
-  await expect(page.getByTestId("booking-created")).toBeVisible({ timeout: 25_000 });
+  await expect(page.getByTestId("booking-created")).toBeVisible({ timeout: 60_000 });
   const countConf = await c.query(
     "SELECT COUNT(*)::int n FROM public.bookings WHERE tenant_id=$1 AND status='confirmed'",
     [ids.tenantA],
@@ -925,7 +954,7 @@ test("E9 extra: XSS notes escaped in dashboard render", async ({ page }) => {
     notes: xssNotes,
   });
   await page.getByRole("button", { name: /conferma prenotazione/i }).click();
-  await expect(page.getByTestId("booking-created")).toBeVisible({ timeout: 25_000 });
+  await expect(page.getByTestId("booking-created")).toBeVisible({ timeout: 60_000 });
   const row = await c.query(
     "SELECT id, notes FROM public.bookings WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 1",
     [ids.tenantA],

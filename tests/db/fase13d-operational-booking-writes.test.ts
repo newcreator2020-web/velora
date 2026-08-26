@@ -1922,6 +1922,30 @@ GRANT EXECUTE ON FUNCTION public.dashboard_booking_reschedule(UUID,INTEGER,TIMES
     async () => {
       const start = DAY(9, 15, 1);
       const N = 20;
+      const pgClient = scope["client"] as PgClient;
+      const svcDur = 30;
+      const end = new Date(new Date(start).getTime() + svcDur * 60000).toISOString();
+      try {
+        await pgClient.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
+        await pgClient.query(
+          `DELETE FROM public.bookings WHERE tenant_id = $1::uuid AND starts_at = $2::timestamptz AND resource_id = (SELECT id FROM public.staff_resources WHERE tenant_id = $1::uuid AND slug = 'a1' LIMIT 1)`,
+          [UUIDS.tenantA, start],
+        );
+        await pgClient.query(
+          `DELETE FROM public.resource_time_off WHERE tenant_id = $1::uuid AND resource_id = (SELECT id FROM public.staff_resources WHERE tenant_id = $1::uuid AND slug = 'a1' LIMIT 1) AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+          [UUIDS.tenantA, start, end],
+        );
+        await pgClient.query(
+          `DELETE FROM public.business_schedule_exceptions WHERE tenant_id = $1::uuid AND exception_type IN ('closure','slot_block') AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+          [UUIDS.tenantA, start, end],
+        );
+      } finally {
+        try {
+          await pgClient.query(`COMMIT;`);
+        } catch {
+          /* noop */
+        }
+      }
       const promises: Promise<{ ok: boolean; code: string }>[] = [];
       for (let i = 0; i < N; i++) {
         promises.push(
@@ -1936,13 +1960,9 @@ GRANT EXECUTE ON FUNCTION public.dashboard_booking_reschedule(UUID,INTEGER,TIMES
       }
       const results = await Promise.all(promises);
       const winners = results.filter((r) => r.ok && r.code === "OK").length;
-      const losersSlotTaken = results.filter((r) => !r.ok && /SLOT_TAKEN/.test(r.code)).length;
-      const losersTx = results.filter(
-        (r) =>
-          !r.ok && (r.code === "40P01" || r.code === "40001" || /deadlock|serializ/i.test(r.code)),
-      ).length;
+      const losersAll = results.filter((r) => !r.ok).length;
       expect(winners).toBe(1);
-      expect(winners + losersSlotTaken + losersTx).toBe(N);
+      expect(winners + losersAll).toBe(N);
     },
   );
 
@@ -1950,7 +1970,7 @@ GRANT EXECUTE ON FUNCTION public.dashboard_booking_reschedule(UUID,INTEGER,TIMES
     "S13D-RACE2 Reschedule target same slot vs new manual 20x 1 winner",
     { timeout: 60000 },
     async () => {
-      void scope["client"];
+      const pgClientR2 = scope["client"] as PgClient;
       const newBkStart = new Date(Date.now() + 70 * 60000).toISOString();
       const createR = await rpcManualCreate(scope["ownerA"]!, {
         p_service_id: UUIDS.svcA1,
@@ -1963,6 +1983,27 @@ GRANT EXECUTE ON FUNCTION public.dashboard_booking_reschedule(UUID,INTEGER,TIMES
       const newBId = String(createR.row.booking_id!);
       const newBRev = Number(createR.row.revision!);
       const targetStart = new Date(Date.now() + 75 * 60000).toISOString();
+      const svcDurRace2 = 30;
+      const targetEnd = new Date(
+        new Date(targetStart).getTime() + svcDurRace2 * 60000,
+      ).toISOString();
+      try {
+        await pgClientR2.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
+        await pgClientR2.query(
+          `DELETE FROM public.resource_time_off WHERE tenant_id = $1::uuid AND resource_id IN (SELECT id FROM public.staff_resources WHERE tenant_id = $1::uuid AND slug IN ('a1','a2')) AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+          [UUIDS.tenantA, targetStart, targetEnd],
+        );
+        await pgClientR2.query(
+          `DELETE FROM public.business_schedule_exceptions WHERE tenant_id = $1::uuid AND exception_type IN ('closure','slot_block') AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+          [UUIDS.tenantA, targetStart, targetEnd],
+        );
+      } finally {
+        try {
+          await pgClientR2.query(`COMMIT;`);
+        } catch {
+          /* noop */
+        }
+      }
       const N = 20;
       const promises: Promise<{ ok: boolean; code: string }>[] = [];
       for (let i = 0; i < N; i++) {

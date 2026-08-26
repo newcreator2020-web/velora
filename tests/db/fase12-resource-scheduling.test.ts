@@ -1637,42 +1637,106 @@ END $$;`);
         `SELECT id FROM public.staff_resources WHERE tenant_id = $1::uuid AND slug = $2 LIMIT 1`,
         [FIXED.tenantA, singleSlug],
       );
+      await client.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
+      await client.query(
+        `INSERT INTO public.staff_resource_services(tenant_id, resource_id, service_id, active)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, TRUE)
+         ON CONFLICT (tenant_id, resource_id, service_id) DO NOTHING`,
+        [FIXED.tenantA, actualId.rows[0]!.id, FIXED.svcA1],
+      );
+      // Contamination guard: snapshot + remove OTHER resources SRS rows for svcA1
+      const guardRows = await client.query<{ rid: string }>(
+        `SELECT resource_id AS rid FROM public.staff_resource_services
+         WHERE tenant_id = $1::uuid AND service_id = $2::uuid AND resource_id <> $3::uuid`,
+        [FIXED.tenantA, FIXED.svcA1, actualId.rows[0]!.id],
+      );
+      await client.query(
+        `DELETE FROM public.staff_resource_services
+         WHERE tenant_id = $1::uuid
+           AND service_id = $2::uuid
+           AND resource_id <> $3::uuid`,
+        [FIXED.tenantA, FIXED.svcA1, actualId.rows[0]!.id],
+      );
+      await client.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
       const slot = wednesdaySlot(9, 0);
+      const svcDur = 30;
+      const slotEnd = new Date(new Date(slot).getTime() + svcDur * 60000).toISOString();
       await client.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
       await client.query(
         `DELETE FROM public.bookings WHERE tenant_id = $1::uuid AND resource_id = $2::uuid AND starts_at = $3::timestamptz`,
         [FIXED.tenantA, actualId.rows[0]!.id, slot],
       );
-      await client.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
-      const tasks = Array.from({ length: 20 }).map(async (_, i) => {
-        const res = await fetch(`${restURL}/rest/v1/rpc/public_booking_create_v2`, {
-          method: "POST",
-          headers: {
-            apikey: anonKey,
-            Authorization: `Bearer ${anonKey}`,
-            "Content-Type": "application/json",
-            Prefer: "return=representation",
-          },
-          body: JSON.stringify({
-            p_slug: TENANT_A_SLUG,
-            p_service_id: FIXED.svcA1,
-            p_starts_at: slot,
-            p_customer_name: `Race20Same-${i}`,
-            p_customer_email: `race20same-${i}@velora.test`,
-            p_resource_slug: singleSlug,
-          }),
-        });
-        return { status: res.status, body: await res.text().catch(() => "") };
-      });
-      const results = await Promise.all(tasks);
-      const winners = results.filter((r) => r.status === 200);
-      const countQ = await client.query<{ n: number }>(
-        `SELECT COUNT(*)::int n FROM public.bookings
-         WHERE tenant_id = $1::uuid AND resource_id = $2::uuid AND starts_at = $3::timestamptz`,
-        [FIXED.tenantA, actualId.rows[0]!.id, slot],
+      await client.query(
+        `DELETE FROM public.resource_time_off WHERE tenant_id = $1::uuid AND resource_id = $2::uuid AND tstzrange(starts_at, ends_at, '[)') && tstzrange($3::timestamptz, $4::timestamptz, '[)')`,
+        [FIXED.tenantA, actualId.rows[0]!.id, slot, slotEnd],
       );
-      expect(countQ.rows[0]!.n).toBe(1);
-      expect(winners.length).toBeGreaterThanOrEqual(1);
+      await client.query(
+        `DELETE FROM public.business_schedule_exceptions WHERE tenant_id = $1::uuid AND exception_type IN ('closure','slot_block') AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+        [FIXED.tenantA, slot, slotEnd],
+      );
+      await client.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
+      try {
+        const tasks = Array.from({ length: 20 }).map(async (_, i) => {
+          const res = await fetch(`${restURL}/rest/v1/rpc/public_booking_create_v2`, {
+            method: "POST",
+            headers: {
+              apikey: anonKey,
+              Authorization: `Bearer ${anonKey}`,
+              "Content-Type": "application/json",
+              Prefer: "return=representation",
+            },
+            body: JSON.stringify({
+              p_slug: TENANT_A_SLUG,
+              p_service_id: FIXED.svcA1,
+              p_starts_at: slot,
+              p_customer_name: `Race20Same-${i}`,
+              p_customer_email: `race20same-${i}@velora.test`,
+              p_resource_slug: singleSlug,
+            }),
+          });
+          return { status: res.status, body: await res.text().catch(() => "") };
+        });
+        const results = await Promise.all(tasks);
+        const winners = results.filter((r) => r.status === 200);
+        const countQ = await client.query<{ n: number }>(
+          `SELECT COUNT(*)::int n FROM public.bookings
+           WHERE tenant_id = $1::uuid AND resource_id = $2::uuid AND starts_at = $3::timestamptz AND status = 'confirmed'`,
+          [FIXED.tenantA, actualId.rows[0]!.id, slot],
+        );
+        expect(countQ.rows[0]!.n).toBe(1);
+        expect(winners.length).toBeGreaterThanOrEqual(1);
+      } finally {
+        // POST-RACE idempotency: restore SRS contamination + delete created fixtures.
+        await client.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
+        // Restore OTHER resources SRS for svcA1 (pre-test snapshot rows).
+        for (const g of guardRows.rows) {
+          await client.query(
+            `INSERT INTO public.staff_resource_services(tenant_id, resource_id, service_id, active)
+             VALUES ($1::uuid, $2::uuid, $3::uuid, TRUE)
+             ON CONFLICT DO NOTHING`,
+            [FIXED.tenantA, g.rid, FIXED.svcA1],
+          );
+        }
+        await client.query(
+          `DELETE FROM public.bookings
+           WHERE tenant_id = $1::uuid AND starts_at = $2::timestamptz AND resource_id = $3::uuid`,
+          [FIXED.tenantA, slot, actualId.rows[0]!.id],
+        );
+        await client.query(
+          `DELETE FROM public.resource_time_off
+           WHERE tenant_id = $1::uuid
+             AND resource_id = $2::uuid
+             AND tstzrange(starts_at, ends_at, '[)') && tstzrange($3::timestamptz, $4::timestamptz, '[)')`,
+          [FIXED.tenantA, actualId.rows[0]!.id, slot, slotEnd],
+        );
+        await client.query(
+          `DELETE FROM public.business_schedule_exceptions
+           WHERE tenant_id = $1::uuid AND exception_type IN ('closure','slot_block')
+             AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+          [FIXED.tenantA, slot, slotEnd],
+        );
+        await client.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
+      }
     }, 300_000);
 
     it("CONC-20x split: same slot across 2 distinct resources ANY deterministic → exactly 2 winners", async () => {
@@ -1694,7 +1758,7 @@ END $$;`);
         await client.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
         await client.query(
           `INSERT INTO public.staff_resources(id, tenant_id, display_name, slug, active, bookable, sort_order)
-           VALUES ($1::uuid, $2::uuid, 'Concurrency Split ${i}', $3, TRUE, TRUE, ${200 + i})
+           VALUES ($1::uuid, $2::uuid, 'Concurrency Split ${i}', $3, TRUE, TRUE, ${1 + i})
            ON CONFLICT (tenant_id, slug) DO NOTHING`,
           [rid, FIXED.tenantA, slug],
         );
@@ -1707,48 +1771,117 @@ END $$;`);
       const ridArr = actualRids.rows.map((r) => r.id);
       expect(ridArr.length).toBe(2);
       const slot = wednesdaySlot(10, 0);
+      const svcDurSplit = 30;
+      const slotEndSplit = new Date(new Date(slot).getTime() + svcDurSplit * 60000).toISOString();
       await client.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
+      // Snapshot SRS OTHER resources svcA1 before removal (restore on finally).
+      const splitGuardRows = await client.query<{ rid: string }>(
+        `SELECT resource_id AS rid FROM public.staff_resource_services
+         WHERE tenant_id = $1::uuid AND service_id = $2::uuid AND resource_id NOT IN (SELECT unnest($3::uuid[]))`,
+        [FIXED.tenantA, FIXED.svcA1, ridArr],
+      );
+      // Contamination guard: remove SRS rows for OTHER (default) resources that might
+      // link svcA1 — otherwise V2 ANY deterministic picks lower sort_order fixture
+      // resource and split-r12 resources never get exercised.
+      await client.query(
+        `DELETE FROM public.staff_resource_services
+         WHERE tenant_id = $1::uuid
+           AND service_id = $2::uuid
+           AND resource_id NOT IN (SELECT unnest($3::uuid[]))`,
+        [FIXED.tenantA, FIXED.svcA1, ridArr],
+      );
+      // Ensure split resources have an SRS entry to svcA1 so V2 ANY finds them.
+      for (const r of ridArr) {
+        await client.query(
+          `INSERT INTO public.staff_resource_services(tenant_id, resource_id, service_id, active)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, TRUE)
+           ON CONFLICT DO NOTHING`,
+          [FIXED.tenantA, r, FIXED.svcA1],
+        );
+      }
       const ph = ridArr.map((_, i) => `$${i + 3}::uuid`).join(",");
       await client.query(
         `DELETE FROM public.bookings
          WHERE tenant_id = $1::uuid AND starts_at = $2::timestamptz AND resource_id IN (${ph})`,
         [FIXED.tenantA, slot, ...ridArr],
       );
-      await client.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
-      const tasks: Promise<{ status: number; body: string }>[] = [];
-      for (let i = 0; i < 20; i++) {
-        const slug = i % 2 === 0 ? "conc-split-r12-0" : "conc-split-r12-1";
-        tasks.push(
-          fetch(`${restURL}/rest/v1/rpc/public_booking_create_v2`, {
-            method: "POST",
-            headers: {
-              apikey: anonKey,
-              Authorization: `Bearer ${anonKey}`,
-              "Content-Type": "application/json",
-              Prefer: "return=representation",
-            },
-            body: JSON.stringify({
-              p_slug: TENANT_A_SLUG,
-              p_service_id: FIXED.svcA1,
-              p_starts_at: slot,
-              p_customer_name: `Race20Split-${i}`,
-              p_customer_email: `race20split-${i}@velora.test`,
-              p_resource_slug: slug,
-            }),
-          }).then(async (r) => ({ status: r.status, body: await r.text().catch(() => "") })),
-        );
-      }
-      const results = await Promise.all(tasks);
-      const winners = results.filter((r) => r.status === 200);
-      const placeholders = ridArr.map((_, i) => `$${i + 3}::uuid`).join(",");
-      const countQ = await client.query<{ n: number }>(
-        `SELECT COUNT(*)::int n FROM public.bookings
-         WHERE tenant_id = $1::uuid AND starts_at = $2::timestamptz AND status = 'confirmed'
-           AND resource_id IN (${placeholders})`,
-        [FIXED.tenantA, slot, ...ridArr],
+      // Remove split-specific + any tenant-level time-off that overlaps this slot.
+      await client.query(
+        `DELETE FROM public.resource_time_off WHERE tenant_id = $1::uuid AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+        [FIXED.tenantA, slot, slotEndSplit],
       );
-      expect(countQ.rows[0]!.n).toBe(2);
-      expect(winners.length).toBeGreaterThanOrEqual(2);
+      await client.query(
+        `DELETE FROM public.business_schedule_exceptions WHERE tenant_id = $1::uuid AND exception_type IN ('closure','slot_block') AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+        [FIXED.tenantA, slot, slotEndSplit],
+      );
+      await client.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
+      try {
+        const tasks: Promise<{ status: number; body: string }>[] = [];
+        for (let i = 0; i < 20; i++) {
+          const slug = i % 2 === 0 ? "conc-split-r12-0" : "conc-split-r12-1";
+          tasks.push(
+            fetch(`${restURL}/rest/v1/rpc/public_booking_create_v2`, {
+              method: "POST",
+              headers: {
+                apikey: anonKey,
+                Authorization: `Bearer ${anonKey}`,
+                "Content-Type": "application/json",
+                Prefer: "return=representation",
+              },
+              body: JSON.stringify({
+                p_slug: TENANT_A_SLUG,
+                p_service_id: FIXED.svcA1,
+                p_starts_at: slot,
+                p_customer_name: `Race20Split-${i}`,
+                p_customer_email: `race20split-${i}@velora.test`,
+                p_resource_slug: slug,
+              }),
+            }).then(async (r) => ({ status: r.status, body: await r.text().catch(() => "") })),
+          );
+        }
+        const results = await Promise.all(tasks);
+        const winners = results.filter((r) => r.status === 200);
+        const placeholders = ridArr.map((_, i) => `$${i + 3}::uuid`).join(",");
+        const countQ = await client.query<{ n: number }>(
+          `SELECT COUNT(*)::int n FROM public.bookings
+           WHERE tenant_id = $1::uuid AND starts_at = $2::timestamptz AND status = 'confirmed'
+             AND resource_id IN (${placeholders})`,
+          [FIXED.tenantA, slot, ...ridArr],
+        );
+        expect(countQ.rows[0]!.n).toBe(2);
+        expect(winners.length).toBeGreaterThanOrEqual(2);
+      } finally {
+        // POST-RACE idempotency: restore SRS contamination + delete created fixtures.
+        await client.query(`BEGIN; SET LOCAL session_replication_role = replica;`);
+        // Restore OTHER resources SRS for svcA1 (pre-test snapshot rows).
+        for (const g of splitGuardRows.rows) {
+          await client.query(
+            `INSERT INTO public.staff_resource_services(tenant_id, resource_id, service_id, active)
+             VALUES ($1::uuid, $2::uuid, $3::uuid, TRUE)
+             ON CONFLICT DO NOTHING`,
+            [FIXED.tenantA, g.rid, FIXED.svcA1],
+          );
+        }
+        const phClean = ridArr.map((_, i) => `$${i + 3}::uuid`).join(",");
+        await client.query(
+          `DELETE FROM public.bookings
+           WHERE tenant_id = $1::uuid AND starts_at = $2::timestamptz AND resource_id IN (${phClean})`,
+          [FIXED.tenantA, slot, ...ridArr],
+        );
+        await client.query(
+          `DELETE FROM public.resource_time_off
+           WHERE tenant_id = $1::uuid
+             AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+          [FIXED.tenantA, slot, slotEndSplit],
+        );
+        await client.query(
+          `DELETE FROM public.business_schedule_exceptions
+           WHERE tenant_id = $1::uuid AND exception_type IN ('closure','slot_block')
+             AND tstzrange(starts_at, ends_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')`,
+          [FIXED.tenantA, slot, slotEndSplit],
+        );
+        await client.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
+      }
     }, 300_000);
   });
 });
