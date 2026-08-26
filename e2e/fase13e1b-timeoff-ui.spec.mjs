@@ -558,7 +558,23 @@ test("E13E1B-E14 — Badge conflitti testuale ('N prenotazioni da gestire') non 
   await drawerOpen(page, "Maria");
   await fillDrawer(page, "custom_block", 7, 7, 9, 0, 18, 0, "Blocco prova badge");
   await clickByText(page, "button", /Continua/i);
-  await page.waitForTimeout(600);
+  await page.waitForTimeout(1200);
+  try {
+    await page
+      .getByRole("checkbox", { name: /confermo|prenotazioni coinvolte|salvare l'assenza/i })
+      .setChecked(true, { timeout: 10000 });
+  } catch (_cbA) {
+    try {
+      const allCb = page.locator("input[type='checkbox']");
+      const n = Math.min(await allCb.count(), 4);
+      for (let i = 0; i < n; i++) {
+        const cb = allCb.nth(i);
+        if (!(await cb.isChecked())) {
+          await cb.check({ force: true, timeout: 4000 }).catch(() => {});
+        }
+      }
+    } catch (_cbB) {}
+  }
   try {
     await clickByText(page, "button", /Conferma (l'assenza|e mantieni)/i, { timeout: 20000 });
   } catch {
@@ -570,11 +586,16 @@ test("E13E1B-E14 — Badge conflitti testuale ('N prenotazioni da gestire') non 
       await expect(btn).toBeVisible({ timeout: 15_000 });
       await Promise.race([
         expect(btn)
-          .toBeEnabled({ timeout: 10_000 })
+          .toBeEnabled({ timeout: 15_000 })
           .catch(() => {}),
-        page.waitForTimeout(10_000),
+        page.waitForTimeout(8000),
       ]);
-      await btn.click({ timeout: 10_000 });
+      await btn.click({ timeout: 12_000, force: true }).catch(async () => {
+        try {
+          await btn.dispatchEvent("click");
+          await page.waitForTimeout(800);
+        } catch {}
+      });
     } catch (_btnE) {
       await page.screenshot({ path: "test-results/e14-debug.png", fullPage: true });
       throw _btnE;

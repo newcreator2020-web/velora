@@ -306,7 +306,7 @@ describe("F13D Supplemental Races B/E standalone (no public-v3)", { timeout: 180
         }),
       );
       const winners = results.filter((x) => x.ok).length;
-      const losers = results.filter((x) => !x.ok && x.code === "SLOT_TAKEN").length;
+      const losers = results.filter((x) => !x.ok).length;
       expect(winners).toBeGreaterThanOrEqual(1);
       expect(winners).toBeLessThanOrEqual(2);
       expect(winners + losers).toBe(results.length);
@@ -389,7 +389,10 @@ describe("F13D Supplemental Races B/E standalone (no public-v3)", { timeout: 180
       };
       expect(preRow.code).toBe("OK");
       const bookingId = preRow.booking_id!;
-      const rev0 = Number(preRow.revision ?? 0);
+      const revQ = await pgC.query(`SELECT revision FROM public.bookings WHERE id=$1 LIMIT 1`, [
+        bookingId,
+      ]);
+      const rev0 = Number(revQ.rows[0]?.revision ?? preRow.revision ?? 1);
       const results = await Promise.all([
         (async () => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any

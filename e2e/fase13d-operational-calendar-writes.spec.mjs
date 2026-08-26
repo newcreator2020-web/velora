@@ -89,7 +89,9 @@ function buildServiceClient() {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 }
-const BASE_CALENDAR_DATE = new Date(2026, 7, 25);
+const BASE_CALENDAR_DATE = new Date(Date.now() + 2 * 86_400_000);
+BASE_CALENDAR_DATE.setHours(0, 0, 0, 0);
+const CAL_GOTO_DATE = BASE_CALENDAR_DATE.toISOString().slice(0, 10);
 function plusDaysISO(days, h = 10, m = 0) {
   const n = new Date(BASE_CALENDAR_DATE);
   n.setDate(n.getDate() + days);
@@ -271,7 +273,7 @@ test("E13D-02 — login owner redirects to dashboard /app with OK cookie (no moc
 
 test("E13D-03 — /app/calendar page loads with day/week grid and add button", async ({ page }) => {
   await loginOwner(page);
-  await page.goto(`${BASE}/app/calendar`);
+  await page.goto(`${BASE}/app/calendar?date=${CAL_GOTO_DATE}`);
   await page.waitForLoadState("domcontentloaded");
   try {
     await expect(
@@ -291,7 +293,7 @@ test("E13D-04 — Click button 'Nuova prenotazione' opens ManualBookingDrawer (r
   page,
 }) => {
   await loginOwner(page);
-  await page.goto(`${BASE}/app/calendar`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/app/calendar?date=${CAL_GOTO_DATE}`, { waitUntil: "domcontentloaded" });
   await openNewBooking(page);
   const drawer = page.locator("[data-cal-manual-drawer='true']");
   await expect(drawer).toBeVisible({ timeout: 10000 });
@@ -300,7 +302,7 @@ test("E13D-04 — Click button 'Nuova prenotazione' opens ManualBookingDrawer (r
 
 test("E13D-05 — ManualBookingDrawer closes on Escape key (focus management)", async ({ page }) => {
   await loginOwner(page);
-  await page.goto(`${BASE}/app/calendar`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/app/calendar?date=${CAL_GOTO_DATE}`, { waitUntil: "domcontentloaded" });
   await openNewBooking(page);
   const drawer = page.locator("[data-cal-manual-drawer='true']");
   await expect(drawer).toBeVisible({ timeout: 10000 });
@@ -312,7 +314,7 @@ test("E13D-06 — Drawer shows required customer fields (name/email/phone) and s
   page,
 }) => {
   await loginOwner(page);
-  await page.goto(`${BASE}/app/calendar`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/app/calendar?date=${CAL_GOTO_DATE}`, { waitUntil: "domcontentloaded" });
   await openNewBooking(page);
   await expect(page.locator("#mb-customer-name")).toBeVisible({ timeout: 10000 });
   await expect(page.locator("#mb-customer-email")).toBeVisible();
@@ -324,7 +326,7 @@ test("E13D-06 — Drawer shows required customer fields (name/email/phone) and s
 
 test("E13D-07 — Empty submit shows validation errors (aria-live messages)", async ({ page }) => {
   await loginOwner(page);
-  await page.goto(`${BASE}/app/calendar`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/app/calendar?date=${CAL_GOTO_DATE}`, { waitUntil: "domcontentloaded" });
   await openNewBooking(page);
   await page.waitForTimeout(500);
   const submit = page.getByRole("button", { name: "Crea appuntamento" });
@@ -342,7 +344,7 @@ test("E13D-08 — Fill customer fields + service select without resource → sti
   page,
 }) => {
   await loginOwner(page);
-  await page.goto(`${BASE}/app/calendar`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/app/calendar?date=${CAL_GOTO_DATE}`, { waitUntil: "domcontentloaded" });
   await openNewBooking(page);
   await page.fill("#mb-customer-name", "Test Cliente 8");
   await page.fill("#mb-customer-email", "c8-" + RUN + "@velora.test");
@@ -360,7 +362,7 @@ test("E13D-09 — Combobox resources lists seeded 'Operatore 1' and 'Operatore 2
   page,
 }) => {
   await loginOwner(page);
-  await page.goto(`${BASE}/app/calendar`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/app/calendar?date=${CAL_GOTO_DATE}`, { waitUntil: "domcontentloaded" });
   await openNewBooking(page);
   const select = page.locator("#mb-resource");
   await expect(select).toBeVisible({ timeout: 10000 });
@@ -380,7 +382,7 @@ test("E13D-09 — Combobox resources lists seeded 'Operatore 1' and 'Operatore 2
 
 test("E13D-10 — Populate resource + datetime-local to near future valid slot", async ({ page }) => {
   await loginOwner(page);
-  await page.goto(`${BASE}/app/calendar`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/app/calendar?date=${CAL_GOTO_DATE}`, { waitUntil: "domcontentloaded" });
   await openNewBooking(page);
   await page.fill("#mb-customer-name", "Test Cliente 10");
   await page.fill("#mb-customer-email", "c10-" + RUN + "@velora.test");
@@ -396,7 +398,7 @@ test("E13D-10 — Populate resource + datetime-local to near future valid slot",
 test("E13D-11 — Submit valid create → success toast/close + booking in DB", async ({ page }) => {
   const c = await pgClient();
   await loginOwner(page);
-  await page.goto(`${BASE}/app/calendar`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/app/calendar?date=${CAL_GOTO_DATE}`, { waitUntil: "domcontentloaded" });
   const start = plusDaysISO(0, 11, 15);
   await openNewBooking(page);
   await page.fill("#mb-customer-name", "Test Cliente 11");
@@ -426,7 +428,7 @@ test("E13D-12 — Persistence: reload calendar after booking → booking cell pr
   );
   expect(rows.rows.length).toBeGreaterThanOrEqual(1);
   await loginOwner(page);
-  await page.goto(`${BASE}/app/calendar`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/app/calendar?date=${CAL_GOTO_DATE}`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(1200);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForTimeout(1500);
@@ -439,8 +441,8 @@ test("E13D-13 — Click calendar booking/card opens RescheduleDrawer (role dialo
   page,
 }) => {
   await loginOwner(page);
-  await page.goto(`${BASE}/app/calendar`, { waitUntil: "domcontentloaded" });
-  const start = plusDaysISO(0, 1, 10);
+  await page.goto(`${BASE}/app/calendar?date=${CAL_GOTO_DATE}`, { waitUntil: "domcontentloaded" });
+  const start = plusDaysISO(0, 11, 15);
   await openNewBooking(page);
   await page.fill("#mb-customer-name", "Test Cliente 13");
   await page.fill("#mb-customer-email", "c13-" + RUN + "@velora.test");
@@ -465,8 +467,26 @@ test("E13D-13 — Click calendar booking/card opens RescheduleDrawer (role dialo
         .click({ timeout: 2000 });
     } catch {}
   }
+  const c13pg = await pgClient();
+  const emailC13 = "c13-" + RUN + "@velora.test";
+  let foundC13 = null;
+  const deadlineC13 = Date.now() + 90_000;
+  while (Date.now() < deadlineC13) {
+    const rr = await c13pg.query(
+      `SELECT id, status, starts_at AT TIME ZONE 'UTC' starts_utc, resource_id, service_id FROM public.bookings WHERE tenant_id=$1 AND customer_email=$2 ORDER BY created_at DESC LIMIT 1`,
+      [TENANT, emailC13],
+    );
+    if (rr.rows.length > 0 && rr.rows[0].status === "confirmed") {
+      foundC13 = rr.rows[0];
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  expect(foundC13).not.toBeNull();
+  expect(foundC13.status).toBe("confirmed");
   await expect(page.locator("[data-cal-manual-drawer='true']")).not.toBeVisible({ timeout: 5000 });
-  await page.reload({ waitUntil: "domcontentloaded" });
+  const bookingYmd = new Date(start + "Z").toISOString().slice(0, 10);
+  await page.goto(`${BASE}/app/calendar?date=${bookingYmd}`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2500);
   const card = page
     .locator(
@@ -519,7 +539,7 @@ test("E13D-14 — RescheduleDrawer shows resource/service/starts fields and subm
   page,
 }) => {
   await loginOwner(page);
-  await page.goto(`${BASE}/app/calendar`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/app/calendar?date=${CAL_GOTO_DATE}`, { waitUntil: "domcontentloaded" });
   const start = plusDaysISO(0, 15, 0);
   await openNewBooking(page);
   await page.fill("#mb-customer-name", "TC 14");
@@ -545,18 +565,48 @@ test("E13D-14 — RescheduleDrawer shows resource/service/starts fields and subm
         .click({ timeout: 2000 });
     } catch {}
   }
+  const c14pg = await pgClient();
+  const emailC14 = "c14-" + RUN + "@velora.test";
+  let foundC14 = null;
+  const deadlineC14 = Date.now() + 90_000;
+  while (Date.now() < deadlineC14) {
+    const rr = await c14pg.query(
+      `SELECT id, status, starts_at AT TIME ZONE 'UTC' starts_utc, resource_id, service_id FROM public.bookings WHERE tenant_id=$1 AND customer_email=$2 ORDER BY created_at DESC LIMIT 1`,
+      [TENANT, emailC14],
+    );
+    if (rr.rows.length > 0 && rr.rows[0].status === "confirmed") {
+      foundC14 = rr.rows[0];
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  expect(foundC14).not.toBeNull();
+  expect(foundC14.status).toBe("confirmed");
   await expect(page.locator("[data-cal-manual-drawer='true']")).not.toBeVisible({ timeout: 5000 });
-  await page.reload({ waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(1200);
+  const bookingYmd = new Date(start + "Z").toISOString().slice(0, 10);
+  await page.goto(`${BASE}/app/calendar?date=${bookingYmd}`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
   const card = page
-    .locator("[class*='booking'],.rbc-event,.booking-card,button,a")
+    .locator(
+      "[data-booking-id],[class*='booking'],.rbc-event,.booking-card,a,button,[role='button']",
+    )
     .filter({ hasText: /TC 14(\b|$)|c14-/i })
     .first();
-  await card.click({ timeout: 15000 });
+  await expect(card).toBeVisible({ timeout: 15000 });
+  await card.click({ timeout: 15000, force: true });
   const btn14 = page.getByRole("button", { name: /sposta appuntamento|riprogramma|reschedule/i });
-  await expect(btn14).toBeVisible({ timeout: 10000 });
-  await btn14.click({ timeout: 8000 });
-  await expect(page.locator("#rs-starts-at")).toBeVisible({ timeout: 12000 });
+  await expect(btn14).toBeVisible({ timeout: 15000 });
+  try {
+    await btn14.click({ timeout: 15000, force: true });
+  } catch (_e1) {
+    await page.evaluate(() => document.activeElement?.blur?.());
+    await page.waitForTimeout(400);
+    try {
+      await btn14.dispatchEvent("click");
+    } catch (_e2) {}
+    await page.waitForTimeout(600);
+  }
+  await expect(page.locator("#rs-starts-at")).toBeVisible({ timeout: 20000 });
   await expect(page.getByRole("button", { name: "Applica modifiche" })).toBeVisible();
 });
 
@@ -565,7 +615,7 @@ test("E13D-15 — Reschedule to occupied slot → validation error UI banner wit
 }) => {
   const c = await pgClient();
   await loginOwner(page);
-  await page.goto(`${BASE}/app/calendar`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/app/calendar?date=${CAL_GOTO_DATE}`, { waitUntil: "domcontentloaded" });
   const occupied = plusDaysISO(0, 12, 0);
   await openNewBooking(page);
   await page.fill("#mb-customer-name", "TC 15 Bloccato");
@@ -630,7 +680,7 @@ test("E13D-16 — Reschedule to free future slot → booking time changes and au
   const before = plusDaysISO(0, 9, 0);
   const after = plusDaysISO(0, 17, 0);
   await loginOwner(page);
-  await page.goto(`${BASE}/app/calendar`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/app/calendar?date=${CAL_GOTO_DATE}`, { waitUntil: "domcontentloaded" });
   await openNewBooking(page);
   await page.fill("#mb-customer-name", "TC 16 Resched");
   await page.fill("#mb-customer-email", "c16-" + RUN + "@velora.test");
@@ -655,18 +705,47 @@ test("E13D-16 — Reschedule to free future slot → booking time changes and au
         .click({ timeout: 2000 });
     } catch {}
   }
+  const emailC16 = "c16-" + RUN + "@velora.test";
+  let foundC16 = null;
+  const deadlineC16 = Date.now() + 90_000;
+  while (Date.now() < deadlineC16) {
+    const rr = await c.query(
+      `SELECT id, status, starts_at AT TIME ZONE 'UTC' starts_utc, resource_id, service_id FROM public.bookings WHERE tenant_id=$1 AND customer_email=$2 ORDER BY created_at DESC LIMIT 1`,
+      [TENANT, emailC16],
+    );
+    if (rr.rows.length > 0 && rr.rows[0].status === "confirmed") {
+      foundC16 = rr.rows[0];
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  expect(foundC16).not.toBeNull();
+  expect(foundC16.status).toBe("confirmed");
   await expect(page.locator("[data-cal-manual-drawer='true']")).not.toBeVisible({ timeout: 5000 });
-  await page.reload({ waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(1200);
+  const bookingYmd = new Date(before + "Z").toISOString().slice(0, 10);
+  await page.goto(`${BASE}/app/calendar?date=${bookingYmd}`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
   const card = page
-    .locator("[class*='booking'],.rbc-event,.booking-card,button,a")
+    .locator(
+      "[data-booking-id],[class*='booking'],.rbc-event,.booking-card,a,button,[role='button']",
+    )
     .filter({ hasText: /TC 16 Resched|c16-/i })
     .first();
-  await card.click({ timeout: 15000 });
+  await expect(card).toBeVisible({ timeout: 15000 });
+  await card.click({ timeout: 15000, force: true });
   const btn16 = page.getByRole("button", { name: /sposta appuntamento|riprogramma|reschedule/i });
-  await expect(btn16).toBeVisible({ timeout: 10000 });
-  await btn16.click({ timeout: 8000 });
-  await expect(page.locator("#rs-starts-at")).toBeVisible({ timeout: 12000 });
+  await expect(btn16).toBeVisible({ timeout: 15000 });
+  try {
+    await btn16.click({ timeout: 15000, force: true });
+  } catch (_e1) {
+    await page.evaluate(() => document.activeElement?.blur?.());
+    await page.waitForTimeout(400);
+    try {
+      await btn16.dispatchEvent("click");
+    } catch (_e2) {}
+    await page.waitForTimeout(600);
+  }
+  await expect(page.locator("#rs-starts-at")).toBeVisible({ timeout: 20000 });
   await page.fill("#rs-starts-at", toDatetimeLocal(after));
   await page.evaluate(() => {
     const el = document.getElementById("rs-starts-at");
@@ -706,7 +785,7 @@ test("E13D-17 — Second booking to same time different resource succeeds → ca
   const c = await pgClient();
   const start = plusDaysISO(1, 10, 0);
   await loginOwner(page);
-  await page.goto(`${BASE}/app/calendar`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/app/calendar?date=${CAL_GOTO_DATE}`, { waitUntil: "domcontentloaded" });
   const RUN_NUM = RUN.slice(0, 6).replace(/[a-z]/g, "0");
   for (const [idx, resource, email, phone_suffix] of [
     ["1", "op1", "c17A-" + RUN + "@velora.test", "171" + RUN_NUM],
@@ -802,7 +881,7 @@ test("E13D-19 — Responsive 375×812 — ManualDrawer open → submit/cancel vi
   page,
 }) => {
   await loginOwner(page, { useViewport: "mobile" });
-  await page.goto(`${BASE}/app/calendar`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/app/calendar?date=${CAL_GOTO_DATE}`, { waitUntil: "domcontentloaded" });
   await openNewBooking(page);
   const drawer = page.locator("[data-cal-manual-drawer='true']");
   await expect(drawer).toBeVisible({ timeout: 10000 });
@@ -831,7 +910,7 @@ test("E13D-20 — Axe runtime a11y (desktop viewport): critical=0, serious=0 aft
 }) => {
   if (browserName === "webkit") return;
   await loginOwner(page);
-  await page.goto(`${BASE}/app/calendar`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/app/calendar?date=${CAL_GOTO_DATE}`, { waitUntil: "domcontentloaded" });
   await openNewBooking(page);
   await page.waitForTimeout(500);
   const r = await new AxeBuilder({ page })

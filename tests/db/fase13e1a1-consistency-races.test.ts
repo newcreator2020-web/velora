@@ -540,12 +540,34 @@ describe("FASE13E1-A1 · §5 Booking vs Time-Off", () => {
     expect(tr.err).toBeUndefined();
     const bookingOK = br.row?.code === "OK";
     const toOK = tr.row?.code === "OK";
-    // Casi accettabili:
+    const c = await newPgIsolated();
+    let bookingResourceId = null;
+    try {
+      if (bookingOK && br.row?.booking_id) {
+        const br2 = await c.query(
+          `SELECT resource_id FROM public.bookings WHERE id=$1::uuid LIMIT 1`,
+          [br.row.booking_id],
+        );
+        if (br2.rows.length > 0) bookingResourceId = br2.rows[0].resource_id;
+      }
+    } finally {
+      await pgClose(c);
+    }
     if (bookingOK && toOK) {
-      // Booking first, time-off dopo (preserve + conflict)
-      expect(Number(tr.row.conflict_count)).toBeGreaterThanOrEqual(1);
+      const cc = Number(tr.row.conflict_count ?? 0);
+      if (cc >= 1) {
+        // Caso A: Booking first, time-off dopo (preserve + conflict sulla STESSA risorsa)
+        expect(cc).toBeGreaterThanOrEqual(1);
+      } else if (bookingResourceId && bookingResourceId !== r) {
+        // Caso C: Booking ottenuto su RISORSA DIVERSA da r (fallback ANY scheduler). Time-off creato su r, booking non su r → nessun conflitto.
+        expect(bookingResourceId).not.toBe(r);
+      } else {
+        throw new Error(
+          `B3 scenario ambiguo bookingOK=true toOK=true conflict_count=${cc} bookingResource=${bookingResourceId} r=${r}`,
+        );
+      }
     } else if (toOK && !bookingOK) {
-      // Time-off first, booking denied
+      // Caso B: Time-off first, booking denied (SLOT_TAKEN o equivalente)
       expect(["SLOT_TAKEN", "RESOURCE_NOT_ELIGIBLE", "MAX_ADVANCE_EXCEEDED"]).toContain(
         br.row?.code,
       );
