@@ -65,7 +65,7 @@ describe("FASE4 · Unit · normalizeHostname / Slug Security (T5-T6 / T21)", () 
   it("normalizeHostname normalizza lowercase, rimuove porta e trailing dot, rifiuta invalid", () => {
     expect(normalizeHostname("Example.COM:3000")).toBe("example.com");
     expect(normalizeHostname("Sub.Example.COM.")).toBe("sub.example.com");
-    expect(normalizeHostname("  localHost  ")).toBe("localhost");
+    expect(normalizeHostname("  localHost  ")).toBeNull();
     expect(normalizeHostname(null)).toBeNull();
     expect(normalizeHostname("")).toBeNull();
     expect(normalizeHostname("space in host.com")).toBeNull();
@@ -74,6 +74,9 @@ describe("FASE4 · Unit · normalizeHostname / Slug Security (T5-T6 / T21)", () 
     expect(normalizeHostname("a".repeat(254) + ".com")).toBeNull();
     expect(normalizeHostname("<script>")).toBeNull();
     expect(normalizeHostname("host<script>")).toBeNull();
+    expect(normalizeHostname("127.0.0.1")).toBeNull();
+    expect(normalizeHostname("192.168.1.1")).toBeNull();
+    expect(normalizeHostname("single-label")).toBeNull();
   });
 });
 

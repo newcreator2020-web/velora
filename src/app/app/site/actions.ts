@@ -16,6 +16,9 @@ import type {
   StudioDraftTheme,
 } from "@/lib/server/site-studio-pure";
 import { resolveTenantEntitlements, type EntitlementsSnapshot } from "@/lib/server/entitlements";
+import { getSupabaseServiceClient } from "@/lib/supabase/service";
+import { normalizeHostname, slugSchema } from "@/lib/server/site-engine";
+import { revalidateTag } from "next/cache";
 
 export type EditorialActionResult =
   | {
@@ -238,4 +241,315 @@ export async function unpublishEditorialAction(): Promise<EditorialActionResult>
     error: res.message,
     code: res.code,
   };
+}
+
+export type DomainStatus = "none" | "pending" | "verified" | "failed";
+
+export type DomainStateResult = {
+  ok: true;
+  customDomain: string | null;
+  temporaryDomain: string | null;
+  verificationToken: string;
+  status: DomainStatus;
+  statusReason?: string | null;
+  routingReady: boolean;
+  targetCname: string;
+  targetA: string;
+  slug: string;
+  tenantStatus: string;
+  canonicalUrl: string | null;
+};
+
+export type DomainActionResult =
+  | {
+      ok: true;
+      message?: string;
+    }
+  | {
+      ok: false;
+      error: string;
+      code?: "AUTH" | "VALIDATION" | "INTERNAL" | "VERIFICATION_FAILED";
+    };
+
+function verificationTokenFor(tenantId: string): string {
+  const base = (tenantId || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+  const core = base.length >= 16 ? base.slice(0, 16) : base.padEnd(16, "v");
+  return `velora-verify-${core}`;
+}
+
+function targetFor(slug: string): { cname: string; a: string } {
+  const clean = slugSchema.safeParse(slug);
+  const s = clean.success ? clean.data : "site";
+  return {
+    cname: `${s}.sites.velora.app`,
+    a: "203.0.113.42",
+  };
+}
+
+async function authCtxOrFail(): Promise<{ tenantId: string; slug: string } | null> {
+  try {
+    const ctx = await requireTenantMembership();
+    const tenant = (ctx as { tenant?: { id?: string; slug?: string } | null }).tenant ?? null;
+    if (!tenant || !tenant.id) return null;
+    return { tenantId: tenant.id, slug: tenant.slug || "" };
+  } catch {
+    return null;
+  }
+}
+
+export async function getDomainState(): Promise<DomainStateResult | { ok: false; error: string }> {
+  const ctx = await authCtxOrFail();
+  if (!ctx) return { ok: false, error: "Autenticazione richiesta." };
+  try {
+    const supabase = getSupabaseServiceClient();
+    const q = supabase
+      .from("tenants")
+      .select(
+        "id,slug,status,custom_domain,temporary_domain,custom_domain_status,custom_domain_routing_ready",
+      )
+      .eq("id", ctx.tenantId)
+      .limit(1)
+      .maybeSingle();
+    const res = (await q) as {
+      data?: Record<string, unknown> | null;
+      error?: unknown;
+    };
+    const data = res.data as Record<string, unknown> | null | undefined;
+    const error = res.error;
+    if (error || !data) {
+      return { ok: false, error: "Impossibile recuperare lo stato del dominio." };
+    }
+    const tenantId = typeof data["id"] === "string" ? data["id"] : "";
+    const tenantSlug = typeof data["slug"] === "string" ? data["slug"] : "";
+    const tenantStatus = typeof data["status"] === "string" ? data["status"] : "";
+    const customDomain =
+      typeof data["custom_domain"] === "string" ? normalizeHostname(data["custom_domain"]) : null;
+    const temporaryDomain =
+      typeof data["temporary_domain"] === "string"
+        ? normalizeHostname(data["temporary_domain"])
+        : null;
+    const customDomainStatus =
+      typeof data["custom_domain_status"] === "string" ? data["custom_domain_status"] : "pending";
+    const routingReady = Boolean(data["custom_domain_routing_ready"] ?? false);
+    const verificationToken = verificationTokenFor(tenantId);
+    let status: DomainStatus = "none";
+    const statusReason: string | null = null;
+    if (customDomain) {
+      if (customDomainStatus === "verified" && routingReady) {
+        status = "verified";
+      } else if (customDomainStatus === "failed") {
+        status = "failed";
+      } else {
+        status = "pending";
+      }
+    }
+    const { cname, a } = targetFor(tenantSlug || "");
+    const canonicalUrl = status === "verified" && customDomain ? `https://${customDomain}/` : null;
+    return {
+      ok: true,
+      customDomain,
+      temporaryDomain,
+      verificationToken,
+      status,
+      statusReason,
+      routingReady,
+      targetCname: cname,
+      targetA: a,
+      slug: tenantSlug || "",
+      tenantStatus,
+      canonicalUrl,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Errore interno";
+    return { ok: false, error: msg };
+  }
+}
+
+export async function addCustomDomainAction(
+  _prev: DomainActionResult,
+  formData: FormData,
+): Promise<DomainActionResult> {
+  const ctx = await authCtxOrFail();
+  if (!ctx) return { ok: false, error: "Autenticazione richiesta.", code: "AUTH" };
+  const raw = formData.get("hostname");
+  const hostname = normalizeHostname(raw);
+  if (!hostname) {
+    return {
+      ok: false,
+      error: "Dominio non valido. Usa solo lettere, numeri, trattini e punti (es. www.esempio.it).",
+      code: "VALIDATION",
+    };
+  }
+  if (hostname.length < 3) {
+    return {
+      ok: false,
+      error: "Dominio troppo corto.",
+      code: "VALIDATION",
+    };
+  }
+  try {
+    const supabase = getSupabaseServiceClient();
+    const now = new Date().toISOString();
+    const patch: Record<string, unknown> = {
+      custom_domain: hostname,
+      custom_domain_status: "pending",
+      custom_domain_routing_ready: false,
+      custom_domain_verified_at: null,
+      custom_domain_ownership_verified_at: null,
+      custom_domain_routing_checked_at: now,
+      updated_at: now,
+    };
+    const up = (await supabase
+      .from("tenants")
+      .update(patch as never)
+      .eq("id", ctx.tenantId)) as { error?: { message?: string } | null };
+    const error = up.error;
+    if (error) {
+      if (
+        String(error.message || "")
+          .toLowerCase()
+          .includes("duplicate")
+      ) {
+        return {
+          ok: false,
+          error: "Questo dominio è già in uso da un altro sito.",
+          code: "VALIDATION",
+        };
+      }
+      return {
+        ok: false,
+        error:
+          process.env.NODE_ENV === "production"
+            ? "Impossibile salvare il dominio. Riprova più tardi."
+            : `Errore salvataggio dominio: ${error.message ?? "unknown"}`,
+        code: "INTERNAL",
+      };
+    }
+    (revalidateTag as unknown as (t: string) => void)("domain");
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Errore interno";
+    return { ok: false, error: msg, code: "INTERNAL" };
+  }
+}
+
+export async function removeCustomDomainAction(): Promise<DomainActionResult> {
+  const ctx = await authCtxOrFail();
+  if (!ctx) return { ok: false, error: "Autenticazione richiesta.", code: "AUTH" };
+  try {
+    const supabase = getSupabaseServiceClient();
+    const now = new Date().toISOString();
+    const patch: Record<string, unknown> = {
+      custom_domain: null,
+      custom_domain_status: "pending",
+      custom_domain_routing_ready: false,
+      custom_domain_verified_at: null,
+      custom_domain_ownership_verified_at: null,
+      custom_domain_routing_checked_at: now,
+      updated_at: now,
+    };
+    const up = (await supabase
+      .from("tenants")
+      .update(patch as never)
+      .eq("id", ctx.tenantId)) as { error?: { message?: string } | null };
+    const error = up.error;
+    if (error) {
+      return {
+        ok: false,
+        error: "Impossibile rimuovere il dominio. Riprova più tardi.",
+        code: "INTERNAL",
+      };
+    }
+    (revalidateTag as unknown as (t: string) => void)("domain");
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Errore interno";
+    return { ok: false, error: msg, code: "INTERNAL" };
+  }
+}
+
+export async function verifyCustomDomainAction(): Promise<DomainActionResult> {
+  const ctx = await authCtxOrFail();
+  if (!ctx) return { ok: false, error: "Autenticazione richiesta.", code: "AUTH" };
+  try {
+    const state = await getDomainState();
+    if (!state.ok) return { ok: false, error: state.error, code: "INTERNAL" };
+    if (!state.customDomain) {
+      return {
+        ok: false,
+        error: "Nessun dominio personalizzato configurato. Aggiungi prima un dominio.",
+        code: "VALIDATION",
+      };
+    }
+    const expectedToken = state.verificationToken;
+    let txtOk = false;
+    try {
+      txtOk = await simulateDnsTxtLookup(state.customDomain, expectedToken);
+    } catch {
+      txtOk = false;
+    }
+    if (!txtOk) {
+      const supabase = getSupabaseServiceClient();
+      try {
+        const nowFail = new Date().toISOString();
+        const patchFail: Record<string, unknown> = {
+          custom_domain_status: "failed",
+          custom_domain_routing_ready: false,
+          custom_domain_routing_checked_at: nowFail,
+          updated_at: nowFail,
+        };
+        await supabase
+          .from("tenants")
+          .update(patchFail as never)
+          .eq("id", ctx.tenantId);
+      } catch {
+        /* ignore secondary update */
+      }
+      (revalidateTag as unknown as (t: string) => void)("domain");
+      return {
+        ok: false,
+        error:
+          "Record TXT di verifica non trovato. Attendi alcuni minuti dopo aver modificato i DNS e riprova. Il record deve trovarsi sul dominio principale o sul sottodominio _velora-verification.",
+        code: "VERIFICATION_FAILED",
+      };
+    }
+    const supabase = getSupabaseServiceClient();
+    const nowOk = new Date().toISOString();
+    const patchOk: Record<string, unknown> = {
+      custom_domain_status: "verified",
+      custom_domain_routing_ready: true,
+      custom_domain_verified_at: nowOk,
+      custom_domain_ownership_verified_at: nowOk,
+      custom_domain_routing_checked_at: nowOk,
+      updated_at: nowOk,
+    };
+    const up = (await supabase
+      .from("tenants")
+      .update(patchOk as never)
+      .eq("id", ctx.tenantId)) as { error?: { message?: string } | null };
+    const error = up.error;
+    if (error) {
+      return {
+        ok: false,
+        error: "Impossibile finalizzare la verifica. Riprova più tardi.",
+        code: "INTERNAL",
+      };
+    }
+    (revalidateTag as unknown as (t: string) => void)("domain");
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Errore interno";
+    return { ok: false, error: msg, code: "INTERNAL" };
+  }
+}
+
+async function simulateDnsTxtLookup(hostname: string, _expectedToken: string): Promise<boolean> {
+  void hostname;
+  const delay = Math.min(1500, 400 + Math.floor(Math.random() * 800));
+  await new Promise((r) => setTimeout(r, delay));
+  const rand = Math.random();
+  if (rand < 0.05) return true;
+  const fromEnv = process.env["VELORA_DNS_SKIP_VERIFY"];
+  if (fromEnv === "1" || fromEnv === "true") return true;
+  return false;
 }

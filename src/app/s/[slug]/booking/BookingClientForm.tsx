@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useFormState, useFormStatus } from "react-dom";
+import { useEffect, useActionState, useMemo, useState } from "react";
+import { useFormStatus } from "react-dom";
 import { createBookingAction } from "./actions";
 import type { BusinessAvailabilityRow, PublicResourceOption, Slot } from "@/lib/server/booking";
 
@@ -20,6 +20,7 @@ type PublicBookingFormProps = {
   availability: BusinessAvailabilityRow[];
   timezone: string;
   horizonDays?: number;
+  slotsApiBase?: string;
 };
 
 function isoDateDmy(d: Date): string {
@@ -32,7 +33,8 @@ function isoDateDmy(d: Date): string {
 const WEEKDAYS = ["Dom", "Lun", "Mar", "Mer", "Gio", "Ven", "Sab"] as const;
 
 export default function PublicBookingForm(props: PublicBookingFormProps) {
-  const { slug, services, availability, timezone } = props;
+  const { slug, services, availability, timezone, slotsApiBase } = props;
+  const slotsBase = slotsApiBase ?? `/s/${encodeURIComponent(slug)}/booking/slots`;
   const activeServices = useMemo(
     () => services.filter((s) => s.active && s.duration_minutes && s.duration_minutes > 0),
     [services],
@@ -47,7 +49,7 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
   const [slot, setSlot] = useState<Slot | null>(null);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loading, setLoading] = useState(false);
-  const [formState, formAction] = useFormState(createBookingAction, undefined);
+  const [formState, formAction] = useActionState(createBookingAction, undefined);
 
   const multiMode = resources.length >= 2;
 
@@ -105,7 +107,7 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
       date,
       resource_slug: resourceSlug || "any",
     });
-    const url = `/s/${encodeURIComponent(slug)}/booking/slots?${params.toString()}`;
+    const url = `${slotsBase}?${params.toString()}`;
     const doFetch = (attempt: number) => {
       if (cancelled) return;
       fetch(url)
@@ -129,7 +131,7 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
     return () => {
       cancelled = true;
     };
-  }, [serviceId, date, slug, resourceSlug, activeServices]);
+  }, [serviceId, date, slug, resourceSlug, activeServices, slotsBase]);
 
   const weekdayOfSelected = useMemo(() => {
     const parts = date.split("-");

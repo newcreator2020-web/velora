@@ -63,7 +63,10 @@ export default async function PublicSitePage(props: PublicSitePageProps) {
       <div className="mx-auto max-w-6xl px-4 py-4 sm:px-6">
         <nav aria-label="Azioni rapide" className="flex justify-end">
           <a
-            href={`/s/${encodeURIComponent(site.slug)}/booking`}
+            href={(() => {
+              const base = site.canonicalPath || `/s/${encodeURIComponent(site.slug)}`;
+              return base.endsWith("/") ? `${base}booking` : `${base}/booking`;
+            })()}
             className="inline-flex items-center rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-neutral-900"
           >
             Prenota

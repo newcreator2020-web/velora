@@ -1,13 +1,14 @@
 "use client";
 
-import { useFormState, useFormStatus } from "react-dom";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useFormStatus } from "react-dom";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import {
   saveEditorialAction,
   publishEditorialAction,
   unpublishEditorialAction,
   type EditorialInitialState,
 } from "@/app/app/site/actions";
+import { DomainSection } from "@/app/app/site/components/DomainSection";
 import {
   SECTION_TYPES,
   ALLOWED_VARIANTS,
@@ -246,15 +247,15 @@ export function SiteStudio(props: Props) {
   const initialPublishState: PublishState = initialState as unknown as PublishState;
   const initialUnpublishState: UnpublishState = initialState as unknown as UnpublishState;
 
-  const [saveState, saveAction] = useFormState(
+  const [saveState, saveAction] = useActionState(
     saveEditorialAction as unknown as (p: SaveState, f: FormData) => Promise<SaveState>,
     initialState,
   );
-  const [publishState, publishAction] = useFormState(
+  const [publishState, publishAction] = useActionState(
     publishEditorialAction as unknown as (p: PublishState, f: FormData) => Promise<PublishState>,
     initialPublishState,
   );
-  const [unpublishState, unpublishAction] = useFormState(
+  const [unpublishState, unpublishAction] = useActionState(
     unpublishEditorialAction as unknown as (
       p: UnpublishState,
       f: FormData,
@@ -303,11 +304,11 @@ export function SiteStudio(props: Props) {
 type InnerOuter = {
   props: Props;
   saveState: SaveState;
-  saveAction: ReturnType<typeof useFormState<SaveState, FormData>>[1];
+  saveAction: ReturnType<typeof useActionState<SaveState, FormData>>[1];
   publishState: PublishState;
-  publishAction: ReturnType<typeof useFormState<PublishState, FormData>>[1];
+  publishAction: ReturnType<typeof useActionState<PublishState, FormData>>[1];
   unpublishState: UnpublishState;
-  unpublishAction: ReturnType<typeof useFormState<UnpublishState, FormData>>[1];
+  unpublishAction: ReturnType<typeof useActionState<UnpublishState, FormData>>[1];
   currentValues: {
     sections: StudioDraftSection[];
     services: StudioDraftService[];
@@ -698,6 +699,8 @@ function SiteStudioInner({ outer }: { outer: InnerOuter }) {
           <Card title="Tema">
             <ThemeEditor theme={theme} setTheme={setTheme} fieldErrors={fieldErrors} />
           </Card>
+
+          <DomainSection />
         </div>
 
         <div className="flex flex-wrap gap-3 pt-2">

@@ -22,10 +22,22 @@ export async function generateMetadata(props: PublicBookingPageProps): Promise<M
   if (!parsed.success) return { title: "Prenotazione non disponibile" };
   const result = await resolvePublicTenant({ slug: parsed.data });
   if (result._tag !== "Found") return { title: "Prenotazione non disponibile" };
+  const s = result.site;
+  const base = s.canonicalPath || `/s/${encodeURIComponent(s.slug)}`;
+  const bookingCanonical = base.endsWith("/") ? `${base}booking` : `${base}/booking`;
   return {
-    title: `Prenota — ${result.site.businessName}`,
-    description: `Prenota un appuntamento online da ${result.site.businessName}.`,
+    title: `Prenota — ${s.businessName}`,
+    description: `Prenota un appuntamento online da ${s.businessName}.`,
+    alternates: { canonical: bookingCanonical },
     robots: { index: true, follow: true },
+    openGraph: {
+      type: "website",
+      title: `Prenota — ${s.businessName}`,
+      description: `Prenota un appuntamento online da ${s.businessName}.`,
+      url: bookingCanonical,
+      locale: s.locale,
+      siteName: s.businessName,
+    },
   };
 }
 
@@ -51,7 +63,7 @@ export default async function PublicBookingPage(props: PublicBookingPageProps) {
         <nav className="mb-6 text-sm text-neutral-600">
           <a
             className="underline underline-offset-4 hover:text-neutral-900"
-            href={`/s/${encodeURIComponent(site.slug)}`}
+            href={site.canonicalPath || `/s/${encodeURIComponent(site.slug)}`}
           >
             ← Torna a {site.businessName}
           </a>

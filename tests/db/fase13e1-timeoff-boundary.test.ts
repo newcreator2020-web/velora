@@ -3,7 +3,7 @@
 // @ts-nocheck
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import "dotenv/config";
-import { describe, it, beforeAll, afterAll, expect } from "vitest";
+import { describe, it, beforeAll, afterAll, afterEach, expect } from "vitest";
 import { Client as PgClient } from "pg";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/supabase";
@@ -128,6 +128,20 @@ async function pgClose() {
     _pg = null;
   }
 }
+
+afterEach(async () => {
+  if (!_pg) return;
+  try {
+    await _pg.query("ROLLBACK");
+  } catch {
+    /* no-op */
+  }
+  try {
+    await _pg.query("SET session_replication_role = DEFAULT");
+  } catch {
+    /* no-op */
+  }
+});
 function serviceClient() {
   return createClient<Database>(SUPABASE_URL, SERVICE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
@@ -916,6 +930,7 @@ describe("FASE13E1 — Time-Off Trusted Boundary — F13E1 Failure Injection", (
         `SELECT public.dashboard_resource_time_off_create($1::uuid,'vacation'::text,$2::timestamptz,$3::timestamptz,NULL::text,0::int)`,
         [UUIDS.resA1, DAYS_LATER(FIXED_MONDAY, 4, 8, 0), DAYS_LATER(FIXED_MONDAY, 4, 9, 0)],
       );
+      await db.query("SET LOCAL session_replication_role = DEFAULT");
       await expect(
         db.query(
           `INSERT INTO public.audit_logs (tenant_id, action, entity_type, entity_id, actor_user_id, metadata) VALUES ($1,'FORBIDDEN_ACTION','x',gen_random_uuid(),$2,'{}'::jsonb)`,

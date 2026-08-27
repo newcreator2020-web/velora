@@ -37,11 +37,35 @@ export const slugSchema = z.preprocess(
 export function normalizeHostname(raw: unknown): string | null {
   if (typeof raw !== "string" || raw.length === 0) return null;
   let h = raw.trim().toLowerCase();
+  if (
+    h.includes("://") ||
+    h.startsWith("http:") ||
+    h.startsWith("https:") ||
+    h.startsWith("/") ||
+    h.includes("?") ||
+    h.includes("#")
+  )
+    return null;
   const colonIdx = h.indexOf(":");
   if (colonIdx >= 0) h = h.slice(0, colonIdx);
   if (h.endsWith(".")) h = h.slice(0, -1);
   if (h.length === 0) return null;
   if (h.length > 253) return null;
+  if (
+    h === "localhost" ||
+    h.endsWith(".localhost") ||
+    h.endsWith(".local") ||
+    h === "127.0.0.1" ||
+    /^\d+\.\d+\.\d+\.\d+$/.test(h)
+  )
+    return null;
+  const dots = h.match(/\./g) || [];
+  if (dots.length < 1) return null;
+  const labels = h.split(".");
+  const hasInvalidLabel = labels.some((l) => l.length === 0 || l.length > 63);
+  if (hasInvalidLabel) return null;
+  const tld = labels[labels.length - 1] ?? "";
+  if (!/^[a-z]{2,63}$/.test(tld)) return null;
   const strict = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/;
   if (!strict.test(h)) return null;
   return h;
@@ -87,6 +111,7 @@ export interface PublicSiteData {
   locale: string;
   timezone: string;
   canonicalPath: string;
+  hostnameVerifiedCanonical?: string | null;
 }
 
 export interface PublicTenantNotFound {
@@ -159,6 +184,10 @@ export async function resolvePublicTenant(params: {
        slug,
        status,
        published,
+       custom_domain,
+       temporary_domain,
+       custom_domain_status,
+       custom_domain_routing_ready,
        business_profiles (
          display_name,
          category,
@@ -194,13 +223,44 @@ export async function resolvePublicTenant(params: {
       return buildNotFound("INVALID_SLUG", { slug: slugForLog, host: hostForLog });
     }
 
-    const { data, error } = await query.single();
+    const { data: rawData, error } = await query.maybeSingle();
+    const data = (rawData ?? null) as Record<string, unknown> | null;
     if (error || !data) {
       return buildNotFound("NO_TENANT", { slug: slugForLog, host: hostForLog });
     }
-    if (data.status !== "active" || data.published !== true) {
+    const tStatus = typeof data["status"] === "string" ? data["status"] : "";
+    const tPublished = Boolean(data["published"] ?? false);
+    if (tStatus !== "active" || tPublished !== true) {
       return buildNotFound("NOT_PUBLISHED", { slug: slugForLog, host: hostForLog });
     }
+    const tenantCustomDomainField =
+      typeof data["custom_domain"] === "string" ? normalizeHostname(data["custom_domain"]) : null;
+    const tenantTemporaryDomainField =
+      typeof data["temporary_domain"] === "string"
+        ? normalizeHostname(data["temporary_domain"])
+        : null;
+    const tenantCustomDomainStatusField =
+      typeof data["custom_domain_status"] === "string" ? data["custom_domain_status"] : "pending";
+    const tenantCustomDomainRoutingReadyField = Boolean(
+      data["custom_domain_routing_ready"] ?? false,
+    );
+    if (hostnameNormalized) {
+      const isTemporary =
+        Boolean(tenantTemporaryDomainField) && hostnameNormalized === tenantTemporaryDomainField;
+      const isCustomAndVerified =
+        Boolean(tenantCustomDomainField) &&
+        hostnameNormalized === tenantCustomDomainField &&
+        tenantCustomDomainStatusField === "verified" &&
+        tenantCustomDomainRoutingReadyField === true;
+      if (!isTemporary && !isCustomAndVerified) {
+        return buildNotFound("NOT_PUBLISHED", {
+          slug: slugForLog,
+          host: hostForLog,
+        });
+      }
+    }
+    const tenantIdSafe = typeof data["id"] === "string" ? data["id"] : "";
+    const tenantSlugSafe = typeof data["slug"] === "string" ? data["slug"] : "";
 
     const bpRaw = (data as { business_profiles?: unknown }).business_profiles ?? null;
     type BpFull = ThemeColumnsRaw & {
@@ -244,8 +304,22 @@ export async function resolvePublicTenant(params: {
       theme_body_font_preset: bp?.theme_body_font_preset ?? null,
     };
 
+    const hostnameMatchesCustomDomain =
+      Boolean(hostnameNormalized) &&
+      Boolean(tenantCustomDomainField) &&
+      hostnameNormalized === tenantCustomDomainField;
+    const useCanonicalHostname =
+      hostnameMatchesCustomDomain &&
+      tStatus === "active" &&
+      tenantCustomDomainStatusField === "verified" &&
+      tenantCustomDomainRoutingReadyField === true;
+    const hostnameVerifiedCanonicalVal: string | null = useCanonicalHostname
+      ? `https://${hostnameNormalized}/`
+      : null;
+    const canonicalPathVal: string = hostnameVerifiedCanonicalVal ?? `/s/${tenantSlugSafe}`;
+
     const site: PublicSiteData = {
-      slug: data.slug,
+      slug: tenantSlugSafe,
       businessName,
       category: bp?.category ?? null,
       description: bp?.description ?? null,
@@ -263,10 +337,11 @@ export async function resolvePublicTenant(params: {
         bp?.timezone && typeof bp.timezone === "string" && bp.timezone.length > 0
           ? bp.timezone
           : "Europe/Rome",
-      canonicalPath: `/s/${data.slug}`,
+      canonicalPath: canonicalPathVal,
+      hostnameVerifiedCanonical: hostnameVerifiedCanonicalVal,
     };
 
-    return { _tag: "Found", site, tenantId: data.id, theme };
+    return { _tag: "Found", site, tenantId: tenantIdSafe, theme };
   } catch (err) {
     const msg = err instanceof Error ? truncateForLog(err.message, 80) : "unexpected";
     console.error(`[site-engine] public_resolver_error kind=${msg}`);
