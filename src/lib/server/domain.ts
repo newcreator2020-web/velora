@@ -139,7 +139,7 @@ function buildToken(): string {
 function revalidateDomainTag(): void {
   try {
     const rev = revalidateTag as unknown as (tag: string, opts?: unknown) => void;
-    rev(DOMAIN_CACHE_TAG);
+    rev(DOMAIN_CACHE_TAG, { type: "max" });
   } catch {
     // next/cache revalidateTag può throw in contesti non next runtime; non bloccante
   }

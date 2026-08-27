@@ -425,7 +425,7 @@ export async function addCustomDomainAction(
         code: "INTERNAL",
       };
     }
-    (revalidateTag as unknown as (t: string) => void)("domain");
+    (revalidateTag as unknown as (t: string, o?: unknown) => void)("domain", { type: "max" });
     return { ok: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Errore interno";
@@ -460,7 +460,7 @@ export async function removeCustomDomainAction(): Promise<DomainActionResult> {
         code: "INTERNAL",
       };
     }
-    (revalidateTag as unknown as (t: string) => void)("domain");
+    (revalidateTag as unknown as (t: string, o?: unknown) => void)("domain", { type: "max" });
     return { ok: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Errore interno";
@@ -505,7 +505,7 @@ export async function verifyCustomDomainAction(): Promise<DomainActionResult> {
       } catch {
         /* ignore secondary update */
       }
-      (revalidateTag as unknown as (t: string) => void)("domain");
+      (revalidateTag as unknown as (t: string, o?: unknown) => void)("domain", { type: "max" });
       return {
         ok: false,
         error:
@@ -535,7 +535,7 @@ export async function verifyCustomDomainAction(): Promise<DomainActionResult> {
         code: "INTERNAL",
       };
     }
-    (revalidateTag as unknown as (t: string) => void)("domain");
+    (revalidateTag as unknown as (t: string, o?: unknown) => void)("domain", { type: "max" });
     return { ok: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Errore interno";
