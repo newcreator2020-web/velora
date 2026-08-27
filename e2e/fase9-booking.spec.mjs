@@ -44,6 +44,9 @@ const EMAILS = {
   staffA: `e2e-f9-staff-a-${Math.random().toString(36).slice(2, 8)}@velora.test`,
 };
 const TEST_PW = "VeloraE2E!Pass123";
+const RUN_F9 = Date.now().toString(16) + Math.random().toString(16).slice(2, 12);
+const emailCliF9 = `cliente-f9-${RUN_F9}@velora.test`;
+const phoneCliF9 = "+39" + ((Date.now() % 9000000000) + 1000000000).toString();
 
 const ids = {
   tenantA: null,
@@ -421,12 +424,13 @@ test("E9-7/E9-8 Submit booking valido → conferma + DB persisted A (duration/en
   );
   await c.query(`SET LOCAL session_replication_role = DEFAULT; COMMIT;`);
   await page.goto(`/s/${SLUG_A}/booking`, { waitUntil: "domcontentloaded" });
-  await selectServiceDateSlot(page, "Taglio uomo", NEXT_MON.iso, "15:00");
+  await selectServiceDateSlot(page, "Taglio uomo", NEXT_MON.iso, "09:00");
   await fillCustomer(page, {
-    email: "cliente-f9@velora.test",
-    phone: "+390611223344",
+    email: emailCliF9,
+    phone: phoneCliF9,
   });
   await page.getByRole("button", { name: /conferma prenotazione/i }).click();
+  await expect(page.getByTestId("booking-created")).toBeVisible({ timeout: 20_000 });
   const timeoutMs = 90_000;
   const startAt = Date.now();
   let found = null;
@@ -434,7 +438,7 @@ test("E9-7/E9-8 Submit booking valido → conferma + DB persisted A (duration/en
   while (Date.now() - startAt < timeoutMs) {
     const row = await c.query(
       "SELECT id, tenant_id, service_id, status, starts_at, ends_at, customer_name, customer_email FROM public.bookings WHERE tenant_id=$1 AND customer_email=$2 ORDER BY created_at DESC LIMIT 1",
-      [ids.tenantA, "cliente-f9@velora.test"],
+      [ids.tenantA, emailCliF9],
     );
     const total = await c.query("SELECT COUNT(*)::int n FROM public.bookings WHERE tenant_id=$1", [
       ids.tenantA,
@@ -452,7 +456,7 @@ test("E9-7/E9-8 Submit booking valido → conferma + DB persisted A (duration/en
   expect(found.service_id).toBe(ids.svcA30);
   expect(found.status).toBe("confirmed");
   expect(found.customer_name).toBe("Mario Rossi E2E");
-  expect(found.customer_email).toBe("cliente-f9@velora.test");
+  expect(found.customer_email).toBe(emailCliF9);
   const startMs = new Date(found.starts_at).getTime();
   const endMs = new Date(found.ends_at).getTime();
   expect((endMs - startMs) / 60000).toBe(30);
@@ -467,7 +471,7 @@ test("E9-10 Forged tenant_id=B in form hidden submit ignorato; A prenota, B inva
     [ids.tenantB ?? "00000000-0000-0000-0000-000000000000"],
   );
   await page.goto(`/s/${SLUG_A}/booking`);
-  await selectServiceDateSlot(page, "Taglio uomo", NEXT_MON.iso, "11:00");
+  await selectServiceDateSlot(page, "Taglio uomo", NEXT_MON.iso, "15:00");
   await fillCustomer(page, { email: "forged@velora.test", phone: "+3906998877" });
   await page.evaluate((tenantB) => {
     const f = document.querySelector('form[action*="createBookingAction"]') || document.forms[0];

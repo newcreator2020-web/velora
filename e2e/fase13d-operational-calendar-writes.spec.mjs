@@ -91,7 +91,7 @@ function buildServiceClient() {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 }
-const BASE_CALENDAR_DATE = new Date(Date.now() + 2 * 86_400_000);
+const BASE_CALENDAR_DATE = new Date(Date.now() + 5 * 86_400_000);
 BASE_CALENDAR_DATE.setHours(0, 0, 0, 0);
 while (BASE_CALENDAR_DATE.getDay() === 0) {
   BASE_CALENDAR_DATE.setDate(BASE_CALENDAR_DATE.getDate() + 1);
@@ -545,7 +545,7 @@ test("E13D-14 — RescheduleDrawer shows resource/service/starts fields and subm
 }) => {
   await loginOwner(page);
   await page.goto(`${BASE}/app/calendar?date=${CAL_GOTO_DATE}`, { waitUntil: "domcontentloaded" });
-  const start = plusDaysISO(0, 11, 0);
+  const start = plusDaysISO(0, 14, 0);
   await openNewBooking(page);
   await page.fill("#mb-customer-name", "TC 14");
   await page.fill("#mb-customer-email", "c14-" + RUN + "@velora.test");
