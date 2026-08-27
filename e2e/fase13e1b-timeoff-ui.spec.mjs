@@ -61,12 +61,14 @@ const MARIA = "1e010000-0000-413d-8004-" + HEX12;
 const LUCA = "1e010001-0000-413d-8004-" + HEX12;
 const MARIA_B = "1e020000-0000-413d-8004-" + HEX12;
 
+const __port = Number(process.env.PORT ?? 3000);
 const BASE =
-  process.env.PLAYWRIGHT_USE_PRODUCTION === "1"
+  process.env.PLAYWRIGHT_TEST_BASE_URL ||
+  (process.env.PLAYWRIGHT_USE_PRODUCTION === "1"
     ? process.env.PLAYWRIGHT_BASE_URL_PRODUCTION ||
       process.env.PLAYWRIGHT_BASE_URL ||
-      "http://127.0.0.1:3000"
-    : process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:3000";
+      `http://127.0.0.1:${__port}`
+    : process.env.PLAYWRIGHT_BASE_URL || `http://127.0.0.1:${__port}`);
 
 const SERVICE_DURATION = 60;
 const SERVICE_NAME = "Taglio";

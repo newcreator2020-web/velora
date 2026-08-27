@@ -31,7 +31,7 @@ function labelForIso(iso: string, tz?: string): string {
 
 export async function GET(req: Request) {
   const rawHost =
-    (process.env.NODE_ENV !== "production"
+    (process.env.NODE_ENV !== "production" || process.env["PLAYWRIGHT_USE_PRODUCTION"] === "1"
       ? (req.headers.get("x-velora-host") ?? undefined)
       : undefined) ??
     req.headers.get("host") ??

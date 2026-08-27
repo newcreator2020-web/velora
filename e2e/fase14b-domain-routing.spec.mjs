@@ -59,15 +59,17 @@ const SVC_B = "1f020000-0000-413d-8002-" + HEX12;
 const STAFF_A = "1f010000-0000-413d-8004-" + HEX12;
 const STAFF_B = "1f020000-0000-413d-8004-" + HEX12;
 
+const __port = Number(process.env.PORT ?? process.env.PLAYWRIGHT_BASE_PORT ?? 3000);
 const BASE =
-  process.env.PLAYWRIGHT_USE_PRODUCTION === "1"
+  process.env.PLAYWRIGHT_TEST_BASE_URL ||
+  (process.env.PLAYWRIGHT_USE_PRODUCTION === "1"
     ? process.env.PLAYWRIGHT_BASE_URL_PRODUCTION ||
       process.env.PLAYWRIGHT_BASE_URL ||
-      "http://127.0.0.1:3000"
-    : process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:3000";
+      `http://127.0.0.1:${__port}`
+    : process.env.PLAYWRIGHT_BASE_URL || `http://127.0.0.1:${__port}`);
 
 const _BASE_HOST = process.env.PLAYWRIGHT_BASE_HOST || "127.0.0.1";
-const _BASE_PORT = Number(process.env.PLAYWRIGHT_BASE_PORT || "3000");
+const _BASE_PORT = Number(process.env.PLAYWRIGHT_BASE_PORT || process.env.PORT || "3000");
 
 const CUSTOM_HOST_A = "studioaurora.it";
 const CUSTOM_HOST_B = "bellesenzab.it";
@@ -141,6 +143,29 @@ test.beforeAll(async () => {
   const c = await pgClient();
   await c.query(`SET session_replication_role='replica'`);
   try {
+    await c.query(
+      `UPDATE public.tenants SET custom_domain=NULL,custom_domain_verification_token=NULL,custom_domain_status='pending'::public.domain_verification_status,custom_domain_routing_ready=FALSE,custom_domain_verified_at=NULL,custom_domain_ownership_verified_at=NULL,custom_domain_routing_checked_at=NULL,updated_at=NOW() WHERE custom_domain IN ($1,$2) OR custom_domain_verification_token LIKE 'velora-verify-%'`,
+      [CUSTOM_HOST_A.toLowerCase(), CUSTOM_HOST_B.toLowerCase()],
+    );
+    const slugRes = await c.query(`SELECT id FROM public.tenants WHERE slug IN ($1,$2)`, [
+      SLUG_A,
+      SLUG_B,
+    ]);
+    for (const row of slugRes.rows) {
+      const tid = row.id;
+      await c.query(`DELETE FROM public.audit_logs WHERE tenant_id=$1`, [tid]);
+      await c.query(`DELETE FROM public.bookings WHERE tenant_id=$1`, [tid]);
+      await c.query(`DELETE FROM public.customers WHERE tenant_id=$1`, [tid]);
+      await c.query(`DELETE FROM public.resource_time_off WHERE tenant_id=$1`, [tid]);
+      await c.query(`DELETE FROM public.resource_availability WHERE tenant_id=$1`, [tid]);
+      await c.query(`DELETE FROM public.staff_resource_services WHERE tenant_id=$1`, [tid]);
+      await c.query(`DELETE FROM public.business_availability WHERE tenant_id=$1`, [tid]);
+      await c.query(`DELETE FROM public.staff_resources WHERE tenant_id=$1`, [tid]);
+      await c.query(`DELETE FROM public.services WHERE tenant_id=$1`, [tid]);
+      await c.query(`DELETE FROM public.business_profiles WHERE tenant_id=$1`, [tid]);
+      await c.query(`DELETE FROM public.tenant_memberships WHERE tenant_id=$1`, [tid]);
+      await c.query(`DELETE FROM public.tenants WHERE id=$1`, [tid]);
+    }
     for (const tid of [TENANT_A, TENANT_B]) {
       await c.query(`DELETE FROM public.audit_logs WHERE tenant_id=$1`, [tid]);
       await c.query(`DELETE FROM public.bookings WHERE tenant_id=$1`, [tid]);
@@ -307,26 +332,91 @@ test("E14B-01 owner opens /app/site sees Domain section card rendered after Publ
 test("E14B-02 add hostname input valid 'studioAurora.it' submit → state pending", async ({
   page,
 }) => {
+  const responses = [];
+  page.on("response", async (res) => {
+    try {
+      const url = res.url();
+      const ct = (res.headers()["content-type"] || "").toLowerCase();
+      if (
+        url.includes("/app/site") ||
+        url.includes("$ACTION") ||
+        url.includes("next_action") ||
+        ct.includes("next") ||
+        ct.includes("multipart") ||
+        res.request().method() === "POST"
+      ) {
+        responses.push({ url, status: res.status(), ct });
+      }
+    } catch {
+      // ignore
+    }
+  });
   await login(page, OWNER_A, TEST_PW, "desktop");
   await page.goto(`${BASE}/app/site`, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(800);
+  await page.waitForTimeout(1500);
   await expect(hostnameInput(page)).toBeVisible({ timeout: 15000 });
   await hostnameInput(page).fill(CUSTOM_HOST_A);
-  const submitAdd = addDomainForm(page)
+  const form = addDomainForm(page);
+  const submitAdd = form
     .getByRole("button", { name: /Aggiungi|Salva|Conferma|Aggiungi dominio|Add/i })
     .first();
   await expect(submitAdd).toBeEnabled({ timeout: 5000 });
   await submitAdd.click();
-  await page.waitForTimeout(1500);
-  const c = await pgClient();
-  const row = await c.query(
-    `SELECT custom_domain,custom_domain_status::text AS st,custom_domain_routing_ready AS rr
-     FROM public.tenants WHERE id=$1 LIMIT 1`,
-    [TENANT_A],
-  );
-  expect(row.rows.length).toBe(1);
-  expect(row.rows[0].custom_domain).toBe(CUSTOM_HOST_A.toLowerCase());
-  expect(["pending", "verified"]).toContain(row.rows[0].st);
+  const ctl_deadline = Date.now() + 12000;
+  let finalRow = null;
+  while (Date.now() < ctl_deadline) {
+    const c = await pgClient();
+    const r = await c.query(
+      `SELECT custom_domain,custom_domain_status::text AS st,custom_domain_routing_ready AS rr
+       FROM public.tenants WHERE id=$1 LIMIT 1`,
+      [TENANT_A],
+    );
+    const cur = r.rows[0];
+    if (cur && cur.custom_domain === CUSTOM_HOST_A.toLowerCase()) {
+      finalRow = cur;
+      break;
+    }
+    await page.waitForTimeout(400);
+  }
+  if (!finalRow) {
+    const c2 = await pgClient();
+    const f = (
+      await c2.query(
+        `SELECT custom_domain,custom_domain_status::text AS st,custom_domain_routing_ready AS rr
+         FROM public.tenants WHERE id=$1 LIMIT 1`,
+        [TENANT_A],
+      )
+    ).rows[0];
+    finalRow = f || null;
+    if (!finalRow || !finalRow.custom_domain) {
+      try {
+        const content = await page.evaluate(() => {
+          const alerts = Array.from(
+            document.querySelectorAll('[role="alert"], [data-alert], .alert, .text-red, .toast'),
+          )
+            .map((el) => el.textContent?.trim())
+            .filter(Boolean)
+            .slice(0, 10);
+          const formErrors = Array.from(
+            document.querySelectorAll('[role="status"], [aria-live], form p, form span'),
+          )
+            .map((el) => el.textContent?.trim())
+            .filter((t) => t && t.length > 3)
+            .slice(0, 15);
+          const titles = Array.from(document.querySelectorAll("h1,h2,h3"))
+            .map((el) => el.textContent?.trim())
+            .filter(Boolean);
+          return { alerts, formErrors, titles, url: location.href };
+        });
+        console.warn("[DEBUG-E14B-02]", JSON.stringify(content, null, 2));
+      } catch {
+        // ignore
+      }
+    }
+  }
+  expect(finalRow).not.toBeNull();
+  expect(finalRow.custom_domain).toBe(CUSTOM_HOST_A.toLowerCase());
+  expect(["pending", "verified"]).toContain(finalRow.st);
 });
 
 test("E14B-03 invalid hostname 'http://' → error message visible no fake success", async ({

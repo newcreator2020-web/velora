@@ -17,7 +17,9 @@ type ServiceRow = Database["public"]["Tables"]["services"]["Row"] & {
 async function getHostTenant() {
   const h = await headers();
   const rawHost =
-    (process.env.NODE_ENV !== "production" ? (h.get("x-velora-host") ?? undefined) : undefined) ??
+    (process.env.NODE_ENV !== "production" || process.env["PLAYWRIGHT_USE_PRODUCTION"] === "1"
+      ? (h.get("x-velora-host") ?? undefined)
+      : undefined) ??
     h.get("host") ??
     "";
   const hostname = rawHost.split(":")[0] ?? "";

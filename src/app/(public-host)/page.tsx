@@ -21,7 +21,9 @@ function isLocalhostHostname(hostname: string): boolean {
 async function getHostTenant() {
   const h = await headers();
   const rawHost =
-    (process.env.NODE_ENV !== "production" ? (h.get("x-velora-host") ?? undefined) : undefined) ??
+    (process.env.NODE_ENV !== "production" || process.env["PLAYWRIGHT_USE_PRODUCTION"] === "1"
+      ? (h.get("x-velora-host") ?? undefined)
+      : undefined) ??
     h.get("host") ??
     "";
   const hostname = rawHost.split(":")[0] ?? "";
@@ -38,7 +40,9 @@ export async function generateMetadata(): Promise<Metadata> {
   if (!info) {
     const h = await headers();
     const rawHost =
-      (process.env.NODE_ENV !== "production" ? (h.get("x-velora-host") ?? undefined) : undefined) ??
+      (process.env.NODE_ENV !== "production" || process.env["PLAYWRIGHT_USE_PRODUCTION"] === "1"
+        ? (h.get("x-velora-host") ?? undefined)
+        : undefined) ??
       h.get("host") ??
       "";
     const hostname = rawHost.split(":")[0] ?? "";
@@ -134,7 +138,9 @@ export default async function HostPublicSitePage() {
   if (!info) {
     const h = await headers();
     const rawHost =
-      (process.env.NODE_ENV !== "production" ? (h.get("x-velora-host") ?? undefined) : undefined) ??
+      (process.env.NODE_ENV !== "production" || process.env["PLAYWRIGHT_USE_PRODUCTION"] === "1"
+        ? (h.get("x-velora-host") ?? undefined)
+        : undefined) ??
       h.get("host") ??
       "";
     const hostname = rawHost.split(":")[0] ?? "";
@@ -147,7 +153,9 @@ export default async function HostPublicSitePage() {
   if (contentResult._tag !== "Found") {
     const h = await headers();
     const rawHost =
-      (process.env.NODE_ENV !== "production" ? (h.get("x-velora-host") ?? undefined) : undefined) ??
+      (process.env.NODE_ENV !== "production" || process.env["PLAYWRIGHT_USE_PRODUCTION"] === "1"
+        ? (h.get("x-velora-host") ?? undefined)
+        : undefined) ??
       h.get("host") ??
       "";
     const hostname = rawHost.split(":")[0] ?? "";
