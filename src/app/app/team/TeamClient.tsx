@@ -12,6 +12,7 @@ import {
 } from "./actions";
 import type { ResourceActionResult } from "@/lib/server/resources";
 import { ResourceTimeOffDrawer } from "@/app/app/calendar/components/ResourceTimeOffDrawer";
+import { ResourceScheduleDrawer } from "./ResourceScheduleDrawer";
 import { deleteResourceTimeOffAction, listResourceTimeOffAction } from "@/app/app/timeoff.actions";
 import { TIME_OFF_TYPE_LABELS, type ResourceTimeOffVM } from "@/lib/timeoff-shared";
 
@@ -158,6 +159,7 @@ function ResourceRow({
   const [servicesState, setServicesState] = useState<EligibilityState>(() => ({}));
   const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [scheduleDrawerOpen, setScheduleDrawerOpen] = useState(false);
   const [timeOffs, setTimeOffs] = useState<ResourceTimeOffVM[]>([]);
   const [timeOffsLoading, setTimeOffsLoading] = useState(false);
   const [tofMsg, setTofMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -265,6 +267,15 @@ function ResourceRow({
               aria-label={`Assenze di ${r.display_name}`}
             >
               <span aria-hidden>🗓</span> Assenze
+            </button>
+            <button
+              type="button"
+              onClick={() => setScheduleDrawerOpen(true)}
+              disabled={!canWrite}
+              className={btnSecondary + " gap-2"}
+              aria-label={`Orari settimanali di ${r.display_name}`}
+            >
+              <span aria-hidden>🕓</span> Orari
             </button>
             <button
               type="button"
@@ -510,6 +521,13 @@ function ResourceRow({
           onChanged={() => {
             setTimeout(loadTimeOffs, 50);
           }}
+        />
+
+        <ResourceScheduleDrawer
+          open={scheduleDrawerOpen}
+          onOpenChange={setScheduleDrawerOpen}
+          resource={{ id: r.id, display_name: r.display_name, slug: r.slug }}
+          canWrite={canWrite}
         />
       </div>
     </li>

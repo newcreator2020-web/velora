@@ -9,6 +9,13 @@ import {
   setResourceServiceEligibility,
   type ResourceActionResult,
 } from "@/lib/server/resources";
+import {
+  getResourceWeeklySchedule,
+  saveResourceWeeklySchedule,
+  type ResourceWeeklyScheduleGetResult,
+  type ResourceWeeklyScheduleSaveResult,
+  type ResourceWeeklyIntervalVM,
+} from "@/lib/server/resource-schedule";
 
 export type TeamResource = {
   id: string;
@@ -94,4 +101,25 @@ export async function listResourceServicesAction(resource_id: unknown): Promise<
   }>
 > {
   return listResourceServiceEligibility(resource_id);
+}
+
+export async function getResourceWeeklyScheduleAction(
+  resource_id: unknown,
+): Promise<ResourceWeeklyScheduleGetResult> {
+  return getResourceWeeklySchedule(resource_id);
+}
+
+export async function saveResourceWeeklyScheduleAction(
+  _: unknown,
+  payload: {
+    resource_id: unknown;
+    expected_version: unknown;
+    intervals: Array<ResourceWeeklyIntervalVM>;
+  },
+): Promise<ResourceWeeklyScheduleSaveResult> {
+  return saveResourceWeeklySchedule({
+    resource_id: payload.resource_id,
+    expected_version: payload.expected_version,
+    intervals: payload.intervals ?? [],
+  });
 }
