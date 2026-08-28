@@ -343,9 +343,32 @@ describe("S13D Operational Booking Writes — require ALL 32 pass + 2 race 20x",
       const list = await svc.auth.admin.listUsers();
       const existing = list.data?.users.find((u) => u.email === email);
       if (existing) return existing.id;
-      const r = await svc.auth.admin.createUser({ email, password: PASSWORD, email_confirm: true });
-      if (r.error) throw new Error(String(r.error));
-      return r.data.user.id;
+      try {
+        const r = await svc.auth.admin.createUser({
+          email,
+          password: PASSWORD,
+          email_confirm: true,
+        });
+        if (r.error) {
+          // "user already registered" race -> retry read-back
+          const msg = String(r.error);
+          if (/already been registered|already exists|duplicate/i.test(msg)) {
+            const l2 = await svc.auth.admin.listUsers();
+            const ex2 = l2.data?.users.find((u) => u.email === email);
+            if (ex2) return ex2.id;
+          }
+          throw new Error(msg);
+        }
+        return r.data.user.id;
+      } catch (err) {
+        const msg = String(err);
+        if (/already been registered|already exists|duplicate/i.test(msg)) {
+          const l2 = await svc.auth.admin.listUsers();
+          const ex2 = l2.data?.users.find((u) => u.email === email);
+          if (ex2) return ex2.id;
+        }
+        throw err;
+      }
     };
 
     userIds["ownerA"] = await ensureUser(UUIDS.ownerA);

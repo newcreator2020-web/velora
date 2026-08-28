@@ -5,6 +5,14 @@ export function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+export function slugFromBusinessName(raw: string): string {
+  let s = (raw || "").toLowerCase();
+  s = s.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  s = s.slice(0, 40);
+  if (s.length < 3) s = "attivita";
+  return s;
+}
+
 export function formatUptime(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
   const hours = Math.floor(totalSeconds / 3600);

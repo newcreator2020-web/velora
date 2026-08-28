@@ -265,6 +265,32 @@ describe("F13 Performance harness (TEST-ONLY)", () => {
         if (direct.rows?.[0]?.id) perfOwnerUid = direct.rows[0].id;
       }
     }
+    if (!perfOwnerUid) {
+      const PERF_UID = "11111111-1111-1111-1111-0000000000f1";
+      const direct = await pg!.query(`SELECT id FROM auth.users WHERE email = $1::text LIMIT 1`, [
+        PERF_OWNER_EMAIL,
+      ]);
+      if (direct.rows?.[0]?.id) {
+        perfOwnerUid = direct.rows[0].id;
+      } else {
+        await pg!.query(
+          `INSERT INTO auth.users(id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
+              raw_app_meta_data, raw_user_meta_data, is_super_admin, created_at, updated_at,
+              banned_until, deleted_at, is_sso_user, is_anonymous,
+              confirmation_token, recovery_token, email_change_token_new, email_change,
+              phone_change_token, phone_change, reauthentication_token)
+            VALUES ($1::uuid, '00000000-0000-0000-0000-000000000000'::uuid,
+              'authenticated','authenticated', $2::text,
+              public.crypt($3::text, public.gen_salt('bf')), NOW(),
+              '{"provider":"email","providers":["email"]}'::jsonb, '{"display_name":"Perf Owner F13C"}'::jsonb,
+              NULL, NOW(), NOW(), NULL, NULL, false, false,
+              '','','','','','','')
+            ON CONFLICT (id) DO NOTHING`,
+          [PERF_UID, PERF_OWNER_EMAIL, PERF_PASSWORD],
+        );
+        perfOwnerUid = PERF_UID;
+      }
+    }
     if (!perfOwnerUid) throw new Error("perfOwnerUid not resolved (create/find/query failed)");
     await pg!.query(
       `INSERT INTO public.profiles(id, display_name, created_at, updated_at)

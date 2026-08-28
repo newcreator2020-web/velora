@@ -1,4 +1,5 @@
 import "server-only";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { MembershipRole } from "@/modules/auth/core/roles";
@@ -34,17 +35,132 @@ export type {
 
 type Tables<T extends keyof Database["public"]["Tables"]> = Database["public"]["Tables"][T]["Row"];
 
+function b64urlDecodeSafe(str: string): string | null {
+  try {
+    const s = (str || "").trim();
+    if (!s) return null;
+    const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
+    return Buffer.from((s + pad).replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
+  } catch {
+    return null;
+  }
+}
+function extractAccessToken(raw: string): string | null {
+  if (!raw) return null;
+  try {
+    let s = raw;
+    try {
+      if (s.includes("%")) s = decodeURIComponent(s);
+    } catch {
+      /* keep */
+    }
+    if (s.startsWith("ey")) return s;
+    const parsed = JSON.parse(s);
+    const at = parsed?.access_token ?? parsed?.accessToken ?? null;
+    if (typeof at === "string" && at.startsWith("ey")) return at;
+  } catch {
+    /* */
+  }
+  return null;
+}
+export async function extractServerSession() {
+  const ck = await cookies();
+  let at = "";
+  try {
+    const hdrs = await import("next/headers").then(({ headers: h }) => h());
+    const cookieHeader = hdrs.get("cookie") ?? "";
+    if (cookieHeader) {
+      const envUrl = process.env["NEXT_PUBLIC_SUPABASE_URL"] as string | undefined;
+      const URL = envUrl ?? "http://127.0.0.1:54321";
+      const urlB64 = Buffer.from(URL).toString("base64url").replace(/=/g, "");
+      const structuredName = `sb-${urlB64}-auth-token`;
+      const safe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      let m1 = cookieHeader.match(new RegExp(`(?:^|;\\s*)${safe(structuredName)}=([^;]+)`));
+      if (!m1) {
+        const allStruct = cookieHeader.match(/(?:^|;\s*)sb-([A-Za-z0-9_-]+)-auth-token=([^;]+)/);
+        if (allStruct && allStruct[2]) m1 = ["", allStruct[2]];
+      }
+      const structVal = m1?.[1] ? decodeURIComponentSafe(m1[1]) : "";
+      const m2 = cookieHeader.match(/(?:^|;\s*)sb-access-token=([^;]+)/);
+      const flatVal = m2?.[1] ? decodeURIComponentSafe(m2[1]) : "";
+      at = extractAccessToken(structVal) || extractAccessToken(flatVal) || "";
+    }
+  } catch {
+    /* headers() non disponibile */
+  }
+  if (!at) {
+    const envUrl = process.env["NEXT_PUBLIC_SUPABASE_URL"] as string | undefined;
+    const URL = envUrl ?? "http://127.0.0.1:54321";
+    const urlB64 = Buffer.from(URL).toString("base64url").replace(/=/g, "");
+    const structName = `sb-${urlB64}-auth-token`;
+    let struct = ck.get(structName)?.value ?? "";
+    if (!struct) {
+      for (const c of ck.getAll()) {
+        if (
+          c.name.startsWith("sb-") &&
+          c.name.endsWith("-auth-token") &&
+          c.value &&
+          c.value.length > 8
+        ) {
+          struct = c.value;
+          break;
+        }
+      }
+    }
+    at =
+      extractAccessToken(struct) ||
+      extractAccessToken(ck.get("sb-access-token")?.value ?? "") ||
+      "";
+  }
+  if (!at) return null;
+  const parts = at.split(".");
+  if (parts.length < 2) return null;
+  const payloadRaw = b64urlDecodeSafe(parts[1] || "");
+  if (!payloadRaw) return null;
+  const payload = JSON.parse(payloadRaw) as Record<string, unknown>;
+  const sub = payload["sub"];
+  const email = payload["email"];
+  const userId = typeof sub === "string" ? sub : null;
+  if (!userId) return null;
+  return {
+    user: {
+      id: userId,
+      email: typeof email === "string" ? email : undefined,
+      created_at: (payload["iat"]
+        ? new Date((payload["iat"] as number) * 1000).toISOString()
+        : new Date().toISOString()) as string,
+      updated_at: (payload["iat"]
+        ? new Date((payload["iat"] as number) * 1000).toISOString()
+        : new Date().toISOString()) as string,
+    },
+    session: {
+      access_token: at,
+      refresh_token: ck.get("sb-refresh-token")?.value ?? null,
+      expires_at: Number(ck.get("sb-expires-at")?.value ?? 0) || null,
+      token_type: ck.get("sb-token-type")?.value ?? "bearer",
+      user: {
+        id: userId,
+        email: typeof email === "string" ? email : undefined,
+      },
+    } as unknown as Awaited<
+      ReturnType<Awaited<ReturnType<typeof createSupabaseServerClient>>["auth"]["getSession"]>
+    >["data"]["session"],
+  };
+}
+function decodeURIComponentSafe(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
 export async function requireAuthenticatedUser() {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-  if (error || !user) {
+  const sess = await extractServerSession();
+  if (!sess) {
     redirect("/login");
   }
-  const { data: claims } = await supabase.auth.getSession();
-  return { user, session: claims.session };
+  return { user: sess.user, session: sess.session };
 }
 
 export type TenantContext = {
@@ -86,11 +202,46 @@ export async function getCurrentTenantContext(): Promise<TenantContext> {
     .limit(1)
     .maybeSingle();
 
-  const mRow = membership.data as TenantContext["membership"] | null;
+  let mRow = membership.data as TenantContext["membership"] | null;
   let tenant: Tables<"tenants"> | null = null;
   let bp: Tables<"business_profiles"> | null = null;
 
-  if (mRow) {
+  if (!mRow) {
+    const { data: isAdmin, error: paErr } = await supabase.rpc("is_platform_admin" as never);
+    if (!paErr && isAdmin === true) {
+      const c = await cookies();
+      const adminSlug = (c.get("velora_admin_tenant")?.value || "").trim().slice(0, 80);
+      if (adminSlug.length > 0) {
+        const tOverride = await supabase
+          .from("tenants")
+          .select("id,name,slug,status,plan_id,created_at,updated_at")
+          .eq("slug", adminSlug)
+          .limit(1)
+          .maybeSingle();
+        const tOver = tOverride.data as Tables<"tenants"> | null;
+        if (tOver) {
+          tenant = tOver;
+          mRow = {
+            id: "admin-override-" + tOver.id,
+            tenant_id: tOver.id,
+            role: "owner" as MembershipRole,
+            status: "active",
+          };
+          const b = await supabase
+            .from("business_profiles")
+            .select(
+              "tenant_id,display_name,description,category,city,province,address_line1,address_line2,phone,website_url,email,timezone,locale,created_at,updated_at",
+            )
+            .eq("tenant_id", tOver.id)
+            .limit(1)
+            .maybeSingle();
+          bp = (b.data as Tables<"business_profiles"> | null) ?? null;
+        }
+      }
+    }
+  }
+
+  if (mRow && !tenant) {
     const t = await supabase
       .from("tenants")
       .select("id,name,slug,status,plan_id,created_at,updated_at")
