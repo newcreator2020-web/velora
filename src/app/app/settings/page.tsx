@@ -1,9 +1,11 @@
 import { initialSettingsResult, type SettingsActionResult } from "./actions";
 import { SettingsForm } from "./SettingsForm";
+import { requireTenantRole } from "@/lib/server/auth";
 
 export const metadata = { title: "Impostazioni attività — VELORA" };
 
 export default async function SettingsPage() {
+  await requireTenantRole("manager");
   const initial = await initialSettingsResult();
   return (
     <main

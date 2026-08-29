@@ -1,9 +1,11 @@
 import { initialBillingResult } from "./actions";
 import { BillingPage } from "./BillingPage";
+import { requireTenantRole } from "@/lib/server/auth";
 
 export const metadata = { title: "Abbonamento — VELORA" };
 
 export default async function Page() {
+  await requireTenantRole("owner");
   const initial = await initialBillingResult();
   return (
     <main
