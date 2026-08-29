@@ -49,13 +49,19 @@ function ResultBanner({ result }: { result: ResourceWeeklyScheduleSaveResult | u
   const cls = result.ok
     ? "text-xs text-emerald-700 dark:text-emerald-400"
     : "text-xs text-rose-700 dark:text-rose-400";
+  const text =
+    result.message && result.message.trim()
+      ? result.message
+      : result.ok
+        ? "Operazione completata."
+        : `Errore non specificato (${result.code ?? "UNKNOWN"}).`;
   return (
     <div
       role={result.ok ? "status" : "alert"}
       aria-live={result.ok ? "polite" : "assertive"}
       className={cls + " mt-2"}
     >
-      {result.message}
+      {text}
       {result.ok && result.data?.conflicting_future_booking_count
         ? ` — Attenzione: ${result.data.conflicting_future_booking_count} prenotazioni future esistenti non rientrano più nel nuovo orario. Non verranno cancellate.`
         : ""}
@@ -174,9 +180,47 @@ export function ResourceScheduleDrawer({
   };
 
   useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    // react-hooks/set-state-in-effect: questi setState azzerano solo lo state locale del drawer
+    // prima del caricamento remoto; non c'è subscribe a sistemi esterni da gestire.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (open) void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setSaveState(undefined);
+
+    setLoadErr(null);
+
+    setByDay({});
+
+    setVersion(0);
+
+    setInheritMask(127);
+
+    setLoading(true);
+    getResourceWeeklyScheduleAction(resource.id)
+      .then((res) => {
+        if (cancelled) return;
+        setLoading(false);
+        if (!res.ok || !res.data) {
+          setLoadErr(res.message);
+          return;
+        }
+        setVersion(res.data.availability_version);
+        setInheritMask(res.data.inherit_weekdays_bitmask);
+        const map: Record<number, DayIntervals> = {};
+        for (const iv of res.data.intervals) {
+          const arr = (map[iv.weekday] = map[iv.weekday] ?? []);
+          arr.push({ start_time: iv.start_time, end_time: iv.end_time });
+        }
+        setByDay(map);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setLoading(false);
+        setLoadErr(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [open, resource.id]);
 
   useEffect(() => {
@@ -358,6 +402,7 @@ export function ResourceScheduleDrawer({
                   </button>
                   <div className="ml-auto flex gap-2">
                     <select
+                      aria-label={`Copia orari nel giorno ${w.label} da un altro giorno della settimana`}
                       disabled={!canWrite}
                       className="rounded-lg border px-2 py-1 text-xs border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950"
                       defaultValue=""

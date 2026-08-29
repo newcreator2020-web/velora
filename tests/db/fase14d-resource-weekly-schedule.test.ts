@@ -120,8 +120,13 @@ async function authenticateAs(c: AnyClient, email: string): Promise<string> {
 
 function nextMondayDate(): string {
   const d = new Date();
-  const diff = (8 - d.getDay()) % 7 || 7;
-  d.setDate(d.getDate() + diff);
+  const utcDow = d.getUTCDay();
+  const diff = (8 - utcDow) % 7 || 7;
+  d.setUTCMilliseconds(0);
+  d.setUTCSeconds(0);
+  d.setUTCMinutes(0);
+  d.setUTCHours(0);
+  d.setUTCDate(d.getUTCDate() + diff);
   return d.toISOString().slice(0, 10);
 }
 function dateOffset(baseISO: string, days: number): string {
@@ -231,12 +236,6 @@ async function callBookingCreateV3(params: {
 async function seedAndGetTenants(): Promise<void> {
   const svc = serviceClient();
   const p = await pg();
-  // DETERMINISTIC CLEANUP: remove cross-run stale state for test tenants A and B
-  for (const tid of [FIXED.tenantA, FIXED.tenantB]) {
-    await p.query(`UPDATE public.bookings SET status='cancelled' WHERE tenant_id = $1`, [tid]);
-    await p.query(`DELETE FROM public.resource_time_off WHERE tenant_id = $1`, [tid]);
-    await p.query(`DELETE FROM public.resource_availability WHERE tenant_id = $1`, [tid]);
-  }
   const emails = [
     { k: "ownerA", email: "f14d-owner-a@test.local" },
     { k: "managerA", email: "f14d-manager-a@test.local" },
@@ -280,6 +279,12 @@ async function seedAndGetTenants(): Promise<void> {
        ON CONFLICT (tenant_id) DO UPDATE SET display_name=EXCLUDED.display_name, timezone='Europe/Rome', locale='it-IT'`,
       [t.id, t.name],
     );
+  }
+  // DETERMINISTIC CLEANUP: remove cross-run stale state for test tenants A and B (dopo insert tenants per evitare FK audit_logs)
+  for (const tid of [FIXED.tenantA, FIXED.tenantB]) {
+    await p.query(`UPDATE public.bookings SET status='cancelled' WHERE tenant_id = $1`, [tid]);
+    await p.query(`DELETE FROM public.resource_time_off WHERE tenant_id = $1`, [tid]);
+    await p.query(`DELETE FROM public.resource_availability WHERE tenant_id = $1`, [tid]);
   }
   const memberships = [
     { u: userIds["ownerA"], tid: FIXED.tenantA, role: "owner" },
@@ -713,6 +718,205 @@ describe("FASE14D - Resource Weekly Schedule (RWA 01..24, races, failures)", () 
     }
   });
 
+  it("RWA-15b DINAMIC boundary proof 1: business 08-17 / resource 07-20 → effective strictly 08-17", async () => {
+    const c = anonClient();
+    const p = await pg();
+    await authenticateAs(c, "f14d-owner-a@test.local");
+    const targetWD = 4 as Wd;
+    const originalBA = await p.query(
+      `SELECT weekday, enabled, start_time::text st, end_time::text en FROM public.business_availability WHERE tenant_id = $1 AND weekday = $2 LIMIT 1`,
+      [FIXED.tenantA, targetWD],
+    );
+    try {
+      // Override BA weekday=4 → 08:00-17:00  (clipping upper bound)
+      if ((originalBA.rowCount ?? 0) > 0) {
+        await p.query(
+          `UPDATE public.business_availability SET start_time='08:00'::time, end_time='17:00'::time WHERE tenant_id=$1 AND weekday=$2`,
+          [FIXED.tenantA, targetWD],
+        );
+      } else {
+        await p.query(
+          `INSERT INTO public.business_availability(tenant_id, weekday, enabled, start_time, end_time) VALUES ($1,$2,true,'08:00','17:00')`,
+          [FIXED.tenantA, targetWD],
+        );
+      }
+      const mon = nextMondayDate();
+      const thu = dateOffset(mon, 3); // Thursday
+      const sv = await saveWeekly(c, {
+        resource_id: FIXED.resA1,
+        expected_version: await versionOf(FIXED.resA1),
+        intervals: [{ weekday: targetWD, start_time: "07:00", end_time: "20:00" }],
+      });
+      expect(sv.error).toBeNull();
+      const slot = await callSlot(c, {
+        tenant_slug: TENANT_A_SLUG,
+        service_id: FIXED.svcA1,
+        from_date: thu,
+        to_date: thu,
+        resource_slug: "maria-f14d",
+      });
+      expect(slot.error).toBeNull();
+      const arr = (Array.isArray(slot.data) ? slot.data : []) as Array<{
+        starts_at: string;
+        resource_id: string;
+      }>;
+      const maria = arr.filter((s) => s.resource_id === FIXED.resA1);
+      expect(maria.length).toBeGreaterThan(0);
+      for (const s of maria) {
+        const localHh = new Date(new Date(s.starts_at).getTime() + 2 * 3600 * 1000).getUTCHours();
+        expect(localHh).toBeGreaterThanOrEqual(8);
+        expect(localHh).toBeLessThan(17);
+      }
+      const slotAt17 = maria.filter((s) => {
+        const t = new Date(new Date(s.starts_at).getTime() + 2 * 3600 * 1000);
+        return t.getUTCHours() === 17 && t.getUTCMinutes() === 0;
+      });
+      expect(slotAt17.length).toBe(0);
+      const slotAt07 = maria.filter((s) => {
+        const t = new Date(new Date(s.starts_at).getTime() + 2 * 3600 * 1000);
+        return t.getUTCHours() < 8;
+      });
+      expect(slotAt07.length).toBe(0);
+    } finally {
+      if ((originalBA.rowCount ?? 0) > 0) {
+        const r = originalBA.rows[0]!;
+        await p.query(
+          `UPDATE public.business_availability SET start_time=$3::time, end_time=$4::time, enabled=$5 WHERE tenant_id=$1 AND weekday=$2`,
+          [FIXED.tenantA, targetWD, r.st, r.en, r.enabled],
+        );
+      } else {
+        await p.query(
+          `DELETE FROM public.business_availability WHERE tenant_id=$1 AND weekday=$2`,
+          [FIXED.tenantA, targetWD],
+        );
+      }
+    }
+  });
+
+  it("RWA-15c DINAMIC boundary proof 2: business 11-21 / resource 09-18 → effective strictly 11-18", async () => {
+    const c = anonClient();
+    const p = await pg();
+    await authenticateAs(c, "f14d-owner-a@test.local");
+    const targetWD = 5 as Wd;
+    const originalBA = await p.query(
+      `SELECT weekday, enabled, start_time::text st, end_time::text en FROM public.business_availability WHERE tenant_id = $1 AND weekday = $2 LIMIT 1`,
+      [FIXED.tenantA, targetWD],
+    );
+    try {
+      if ((originalBA.rowCount ?? 0) > 0) {
+        await p.query(
+          `UPDATE public.business_availability SET start_time='11:00'::time, end_time='21:00'::time WHERE tenant_id=$1 AND weekday=$2`,
+          [FIXED.tenantA, targetWD],
+        );
+      } else {
+        await p.query(
+          `INSERT INTO public.business_availability(tenant_id, weekday, enabled, start_time, end_time) VALUES ($1,$2,true,'11:00','21:00')`,
+          [FIXED.tenantA, targetWD],
+        );
+      }
+      const mon = nextMondayDate();
+      const fri = dateOffset(mon, 4); // Friday
+      const sv = await saveWeekly(c, {
+        resource_id: FIXED.resA1,
+        expected_version: await versionOf(FIXED.resA1),
+        intervals: [{ weekday: targetWD, start_time: "09:00", end_time: "18:00" }],
+      });
+      expect(sv.error).toBeNull();
+      const slot = await callSlot(c, {
+        tenant_slug: TENANT_A_SLUG,
+        service_id: FIXED.svcA1,
+        from_date: fri,
+        to_date: fri,
+        resource_slug: "maria-f14d",
+      });
+      expect(slot.error).toBeNull();
+      const arr = (Array.isArray(slot.data) ? slot.data : []) as Array<{
+        starts_at: string;
+        resource_id: string;
+      }>;
+      const maria = arr.filter((s) => s.resource_id === FIXED.resA1);
+      expect(maria.length).toBeGreaterThan(0);
+      for (const s of maria) {
+        const local = new Date(new Date(s.starts_at).getTime() + 2 * 3600 * 1000);
+        const hh = local.getUTCHours();
+        expect(hh).toBeGreaterThanOrEqual(11);
+        expect(hh).toBeLessThan(18);
+      }
+      const pre11 = maria.filter((s) => {
+        const h = new Date(new Date(s.starts_at).getTime() + 2 * 3600 * 1000).getUTCHours();
+        return h < 11;
+      });
+      expect(pre11.length).toBe(0);
+      const after18 = maria.filter((s) => {
+        const h = new Date(new Date(s.starts_at).getTime() + 2 * 3600 * 1000).getUTCHours();
+        return h >= 18;
+      });
+      expect(after18.length).toBe(0);
+    } finally {
+      if ((originalBA.rowCount ?? 0) > 0) {
+        const r = originalBA.rows[0]!;
+        await p.query(
+          `UPDATE public.business_availability SET start_time=$3::time, end_time=$4::time, enabled=$5 WHERE tenant_id=$1 AND weekday=$2`,
+          [FIXED.tenantA, targetWD, r.st, r.en, r.enabled],
+        );
+      } else {
+        await p.query(
+          `DELETE FROM public.business_availability WHERE tenant_id=$1 AND weekday=$2`,
+          [FIXED.tenantA, targetWD],
+        );
+      }
+    }
+  });
+
+  it("RWA-15d DINAMIC boundary proof 3: business CLOSED (disabled weekday) / resource with 09-18 → 0 slots (clip to empty)", async () => {
+    const c = anonClient();
+    const p = await pg();
+    await authenticateAs(c, "f14d-owner-a@test.local");
+    const targetWD = 6 as Wd;
+    const originalBA = await p.query(
+      `SELECT weekday, enabled, start_time::text st, end_time::text en FROM public.business_availability WHERE tenant_id = $1 AND weekday = $2 LIMIT 1`,
+      [FIXED.tenantA, targetWD],
+    );
+    try {
+      await p.query(
+        `UPDATE public.business_availability SET enabled=FALSE WHERE tenant_id=$1 AND weekday=$2`,
+        [FIXED.tenantA, targetWD],
+      );
+      const mon = nextMondayDate();
+      const sat = dateOffset(mon, 5); // Saturday
+      const sv = await saveWeekly(c, {
+        resource_id: FIXED.resA1,
+        expected_version: await versionOf(FIXED.resA1),
+        intervals: [{ weekday: targetWD, start_time: "09:00", end_time: "18:00" }],
+      });
+      expect(sv.error).toBeNull();
+      const slot = await callSlot(c, {
+        tenant_slug: TENANT_A_SLUG,
+        service_id: FIXED.svcA1,
+        from_date: sat,
+        to_date: sat,
+        resource_slug: "maria-f14d",
+      });
+      expect(slot.error).toBeNull();
+      const arr = (Array.isArray(slot.data) ? slot.data : []) as Array<{
+        starts_at: string;
+        resource_id: string;
+      }>;
+      const maria = arr.filter((s) => s.resource_id === FIXED.resA1);
+      expect(maria.length).toBe(0);
+      const anySat = arr.length;
+      expect(anySat).toBe(0);
+    } finally {
+      if ((originalBA.rowCount ?? 0) > 0) {
+        const r = originalBA.rows[0]!;
+        await p.query(
+          `UPDATE public.business_availability SET enabled=$5, start_time=$3::time, end_time=$4::time WHERE tenant_id=$1 AND weekday=$2`,
+          [FIXED.tenantA, targetWD, r.st, r.en, r.enabled],
+        );
+      }
+    }
+  });
+
   it("RWA-16 time-off precedence over weekly schedule", async () => {
     const c = anonClient();
     await authenticateAs(c, "f14d-owner-a@test.local");
@@ -726,27 +930,40 @@ describe("FASE14D - Resource Weekly Schedule (RWA 01..24, races, failures)", () 
     const start10 = toRomeUTCISO(mon, 10, 0);
     const end12 = toRomeUTCISO(mon, 12, 0);
     const p = await pg();
-    await p.query(
+    const ins = await p.query(
       `INSERT INTO public.resource_time_off (id, tenant_id, resource_id, time_off_type, title, starts_at, ends_at)
        VALUES (gen_random_uuid(), $1, $2, 'vacation', 'Ferie', $3::timestamptz, $4::timestamptz)
-       ON CONFLICT DO NOTHING`,
+       ON CONFLICT DO NOTHING
+       RETURNING id`,
       [FIXED.tenantA, FIXED.resA1, start10, end12],
     );
-    const slots = await callSlot(c, {
-      tenant_slug: TENANT_A_SLUG,
-      service_id: FIXED.svcA1,
-      from_date: mon,
-      to_date: mon,
-      resource_slug: "maria-f14d",
-    });
-    expect(slots.error).toBeNull();
-    const arr = (Array.isArray(slots.data) ? slots.data : []) as Array<{ starts_at: string }>;
-    // slot nel range 10-12 devono essere 0
-    const inWindow = arr.filter((s) => {
-      const tt = new Date(s.starts_at).getTime();
-      return tt >= new Date(start10).getTime() && tt < new Date(end12).getTime();
-    });
-    expect(inWindow.length).toBe(0);
+    try {
+      const slots = await callSlot(c, {
+        tenant_slug: TENANT_A_SLUG,
+        service_id: FIXED.svcA1,
+        from_date: mon,
+        to_date: mon,
+        resource_slug: "maria-f14d",
+      });
+      expect(slots.error).toBeNull();
+      const arr = (Array.isArray(slots.data) ? slots.data : []) as Array<{ starts_at: string }>;
+      // slot nel range 10-12 devono essere 0
+      const inWindow = arr.filter((s) => {
+        const tt = new Date(s.starts_at).getTime();
+        return tt >= new Date(start10).getTime() && tt < new Date(end12).getTime();
+      });
+      expect(inWindow.length).toBe(0);
+    } finally {
+      const id = ins.rows[0]?.id;
+      if (id) {
+        await p.query(`DELETE FROM public.resource_time_off WHERE id=$1`, [id]);
+      } else {
+        await p.query(
+          `DELETE FROM public.resource_time_off WHERE tenant_id=$1 AND resource_id=$2 AND title='Ferie'`,
+          [FIXED.tenantA, FIXED.resA1],
+        );
+      }
+    }
   });
 
   it("RWA-17 existing booking precedence blocks overlapping slot", async () => {
@@ -755,6 +972,11 @@ describe("FASE14D - Resource Weekly Schedule (RWA 01..24, races, failures)", () 
     const p = await pg();
     // Cleanup residual state from prior tests (time_off + stale RA to ensure deterministic booking)
     await p.query(`DELETE FROM public.resource_time_off WHERE tenant_id=$1`, [FIXED.tenantA]);
+    // Also cancel any confirmed bookings on tenant A to avoid exclusion overlap
+    await p.query(
+      `UPDATE public.bookings SET status='cancelled', updated_at=NOW() WHERE tenant_id=$1 AND status='confirmed'`,
+      [FIXED.tenantA],
+    );
     // Give BOTH resources a Monday schedule covering 15:00 Rome so ANY resolution has a legal target
     const v1 = await versionOf(FIXED.resA1);
     const v2 = await versionOf(FIXED.resA2);
@@ -787,6 +1009,8 @@ describe("FASE14D - Resource Weekly Schedule (RWA 01..24, races, failures)", () 
       p_customer_phone: `+39000${Math.floor(1000000 + Math.random() * 9000000)}`,
       p_notes: null,
     });
+    // eslint-disable-next-line no-console
+    if (bk.error) console.log(`[RWA17-DIAG] bk=`, JSON.stringify(bk, null, 2));
     expect(bk.error).toBeNull();
     // Now get Monday slots filtered for the booked resource.
     const out = Array.isArray(bk.data) ? bk.data : [];
@@ -833,7 +1057,13 @@ describe("FASE14D - Resource Weekly Schedule (RWA 01..24, races, failures)", () 
 
   it("RWA-19 ANY fallback uses other eligible available resources", async () => {
     const c = anonClient();
+    const p = await pg();
     await authenticateAs(c, "f14d-owner-a@test.local");
+    // Prevent residual carryover: cancel all confirmed bookings for A
+    await p.query(
+      `UPDATE public.bookings SET status='cancelled', updated_at=NOW() WHERE tenant_id=$1 AND status='confirmed'`,
+      [FIXED.tenantA],
+    );
     const v1 = await versionOf(FIXED.resA1);
     const v2 = await versionOf(FIXED.resA2);
     const s1 = await saveWeekly(c, {
@@ -891,6 +1121,231 @@ describe("FASE14D - Resource Weekly Schedule (RWA 01..24, races, failures)", () 
     });
     const success = !bk.error && Array.isArray(bk.data) && bk.data.length > 0;
     expect(success).toBe(false);
+  });
+
+  it("§8 DEFENSE-B: direct booking same-day outside resource weekly hours (not OFF, inside BA) → DENY", async () => {
+    const c = anonClient();
+    await authenticateAs(c, "f14d-owner-a@test.local");
+    const p = await pg();
+    // Set Maria Monday 10:00-16:00 (so 08:00 is outside RA but inside BA 09-19).
+    const sv = await saveWeekly(c, {
+      resource_id: FIXED.resA1,
+      expected_version: await versionOf(FIXED.resA1),
+      intervals: [{ weekday: 1, start_time: "10:00", end_time: "16:00" }],
+    });
+    expect(sv.error).toBeNull();
+    const mon = nextMondayDate();
+    // Try booking Monday 09:30 Rome: BA is open (09 start) but RA starts 10 → OUTSIDE RESOURCE HOURS → DENY.
+    const tEarly = toRomeUTCISO(mon, 9, 30);
+    const tLate = toRomeUTCISO(mon, 16, 30);
+    void p;
+    const bkEarly = await callBookingCreateV3({
+      p_tenant_slug: TENANT_A_SLUG,
+      p_service_id: FIXED.svcA1,
+      p_starts_at: tEarly,
+      p_resource_slug: "maria-f14d",
+      p_customer_name: "Def B Early",
+      p_customer_email: `defbearly-${randomUUID().slice(0, 6)}@test.local`,
+      p_customer_phone: "+393330009911",
+      p_notes: null,
+    });
+    const successEarly = !bkEarly.error && Array.isArray(bkEarly.data) && bkEarly.data.length > 0;
+    expect(successEarly).toBe(false);
+    const bkLate = await callBookingCreateV3({
+      p_tenant_slug: TENANT_A_SLUG,
+      p_service_id: FIXED.svcA1,
+      p_starts_at: tLate,
+      p_resource_slug: "maria-f14d",
+      p_customer_name: "Def B Late",
+      p_customer_email: `defblate-${randomUUID().slice(0, 6)}@test.local`,
+      p_customer_phone: "+393330009922",
+      p_notes: null,
+    });
+    const successLate = !bkLate.error && Array.isArray(bkLate.data) && bkLate.data.length > 0;
+    expect(successLate).toBe(false);
+  });
+
+  it("§8 DEFENSE-C: direct booking outside BUSINESS hours (even if resource RA says yes) → DENY", async () => {
+    const c = anonClient();
+    const p = await pg();
+    await authenticateAs(c, "f14d-owner-a@test.local");
+    const targetWD = 1 as Wd; // Monday
+    const orig = await p.query(
+      `SELECT enabled, start_time::text st, end_time::text en FROM public.business_availability WHERE tenant_id=$1 AND weekday=$2 LIMIT 1`,
+      [FIXED.tenantA, targetWD],
+    );
+    try {
+      // Temporarily restrict BA Monday to 11:00-14:00 so 15:00 is outside BA
+      await p.query(
+        `UPDATE public.business_availability SET start_time='11:00'::time, end_time='14:00'::time WHERE tenant_id=$1 AND weekday=$2`,
+        [FIXED.tenantA, targetWD],
+      );
+      // Resource Maria Monday says 09:00-18:00 (broader than BA 11-14)
+      const sv = await saveWeekly(c, {
+        resource_id: FIXED.resA1,
+        expected_version: await versionOf(FIXED.resA1),
+        intervals: [{ weekday: targetWD, start_time: "09:00", end_time: "18:00" }],
+      });
+      expect(sv.error).toBeNull();
+      const mon = nextMondayDate();
+      // Slot at Monday 15:00 Rome: inside RA (09-18) but outside BA (now 11-14) → DENY.
+      const t15 = toRomeUTCISO(mon, 15, 0);
+      const bk = await callBookingCreateV3({
+        p_tenant_slug: TENANT_A_SLUG,
+        p_service_id: FIXED.svcA1,
+        p_starts_at: t15,
+        p_resource_slug: "maria-f14d",
+        p_customer_name: "Def C Outside",
+        p_customer_email: `defcout-${randomUUID().slice(0, 6)}@test.local`,
+        p_customer_phone: "+393330009933",
+        p_notes: null,
+      });
+      const success = !bk.error && Array.isArray(bk.data) && bk.data.length > 0;
+      expect(success).toBe(false);
+    } finally {
+      if ((orig.rowCount ?? 0) > 0) {
+        const r = orig.rows[0]!;
+        await p.query(
+          `UPDATE public.business_availability SET enabled=$4, start_time=$2::time, end_time=$3::time WHERE tenant_id=$1 AND weekday=$5`,
+          [FIXED.tenantA, r.st, r.en, r.enabled, targetWD],
+        );
+      }
+    }
+  });
+
+  it("§8 DEFENSE-D: direct booking during resource time-off → DENY (even if RA legal)", async () => {
+    const c = anonClient();
+    const p = await pg();
+    await authenticateAs(c, "f14d-owner-a@test.local");
+    // Cleanup ANY residual RTO + confirmed bookings for tenant A to avoid carryover
+    await p.query(`DELETE FROM public.resource_time_off WHERE tenant_id=$1`, [FIXED.tenantA]);
+    await p.query(
+      `UPDATE public.bookings SET status='cancelled', updated_at=NOW() WHERE tenant_id=$1 AND status='confirmed'`,
+      [FIXED.tenantA],
+    );
+    await p.query(
+      `UPDATE public.business_availability SET enabled=true, start_time='09:00'::time, end_time='19:00'::time WHERE tenant_id=$1 AND weekday=1`,
+      [FIXED.tenantA],
+    );
+    await p.query(
+      `DELETE FROM public.resource_time_off WHERE tenant_id=$1 AND resource_id=$2 AND title='DEF-D permesso'`,
+      [FIXED.tenantA, FIXED.resA1],
+    );
+    const mon = nextMondayDate();
+    const toStart = toRomeUTCISO(mon, 14, 0);
+    const toEnd = toRomeUTCISO(mon, 16, 0);
+    // Ensure Maria Monday 09-18 wide open (RA legal).
+    const sv = await saveWeekly(c, {
+      resource_id: FIXED.resA1,
+      expected_version: await versionOf(FIXED.resA1),
+      intervals: [{ weekday: 1, start_time: "09:00", end_time: "18:00" }],
+    });
+    expect(sv.error).toBeNull();
+    // Insert time-off Monday 14:00 - 16:00
+    await p.query(
+      `INSERT INTO public.resource_time_off (id, tenant_id, resource_id, time_off_type, title, starts_at, ends_at)
+       VALUES (gen_random_uuid(), $1, $2, 'vacation', 'DEF-D permesso',$3::timestamptz,$4::timestamptz)
+       ON CONFLICT DO NOTHING`,
+      [FIXED.tenantA, FIXED.resA1, toStart, toEnd],
+    );
+    // Try booking Monday 15:00 (inside time-off window)
+    const t15 = toRomeUTCISO(mon, 15, 0);
+    const phoneBad = `+390${Math.floor(100000000 + Math.random() * 900000000)}`;
+    const bkBad = await callBookingCreateV3({
+      p_tenant_slug: TENANT_A_SLUG,
+      p_service_id: FIXED.svcA1,
+      p_starts_at: t15,
+      p_resource_slug: "maria-f14d",
+      p_customer_name: "Def D Bad",
+      p_customer_email: `defdbad-${randomUUID().slice(0, 6)}@test.local`,
+      p_customer_phone: phoneBad,
+      p_notes: null,
+    });
+    const successBad = !bkBad.error && Array.isArray(bkBad.data) && bkBad.data.length > 0;
+    expect(successBad).toBe(false);
+    // Sanity: booking 10:00 outside time-off should work (RA allows it)
+    const t10 = toRomeUTCISO(mon, 10, 0);
+    const phoneGood = `+390${Math.floor(100000000 + Math.random() * 900000000)}`;
+    const bkGood = await callBookingCreateV3({
+      p_tenant_slug: TENANT_A_SLUG,
+      p_service_id: FIXED.svcA1,
+      p_starts_at: t10,
+      p_resource_slug: "maria-f14d",
+      p_customer_name: "Def D OK",
+      p_customer_email: `defdok-${randomUUID().slice(0, 6)}@test.local`,
+      p_customer_phone: phoneGood,
+      p_notes: null,
+    });
+    const successGood = !bkGood.error && Array.isArray(bkGood.data) && bkGood.data.length > 0;
+    // eslint-disable-next-line no-console
+    if (!successGood) console.log(`[DEF-D] bkGood=`, JSON.stringify(bkGood, null, 2));
+    expect(successGood).toBe(true);
+    // Cleanup specific time-off.
+    await p.query(
+      `DELETE FROM public.resource_time_off WHERE tenant_id=$1 AND resource_id=$2 AND title='DEF-D permesso'`,
+      [FIXED.tenantA, FIXED.resA1],
+    );
+  });
+
+  it("§8 DEFENSE-E: direct booking overlapping confirmed booking → DENY", async () => {
+    const c = anonClient();
+    const p = await pg();
+    // Ensure Maria Monday 09-18 so specific booking works.
+    await authenticateAs(c, "f14d-owner-a@test.local");
+    // Cleanup ANY residual RTO + confirmed bookings for tenant A
+    await p.query(`DELETE FROM public.resource_time_off WHERE tenant_id=$1`, [FIXED.tenantA]);
+    await p.query(
+      `UPDATE public.bookings SET status='cancelled', updated_at=NOW() WHERE tenant_id=$1 AND status='confirmed'`,
+      [FIXED.tenantA],
+    );
+    await p.query(
+      `UPDATE public.business_availability SET enabled=true, start_time='09:00'::time, end_time='19:00'::time WHERE tenant_id=$1 AND weekday=1`,
+      [FIXED.tenantA],
+    );
+    const sv1 = await saveWeekly(c, {
+      resource_id: FIXED.resA1,
+      expected_version: await versionOf(FIXED.resA1),
+      intervals: [{ weekday: 1, start_time: "09:00", end_time: "18:00" }],
+    });
+    expect(sv1.error).toBeNull();
+    const mon = nextMondayDate();
+    const t14 = toRomeUTCISO(mon, 14, 0);
+    const emailFirst = `defe1st-${randomUUID().slice(0, 6)}@test.local`;
+    const phoneFirst = `+390${Math.floor(100000000 + Math.random() * 900000000)}`;
+    const first = await callBookingCreateV3({
+      p_tenant_slug: TENANT_A_SLUG,
+      p_service_id: FIXED.svcA1,
+      p_starts_at: t14,
+      p_resource_slug: "maria-f14d",
+      p_customer_name: "DefE First",
+      p_customer_email: emailFirst,
+      p_customer_phone: phoneFirst,
+      p_notes: null,
+    });
+    const firstOK = !first.error && Array.isArray(first.data) && first.data.length > 0;
+    // eslint-disable-next-line no-console
+    if (!firstOK) console.log(`[DEF-E] first=`, JSON.stringify(first, null, 2));
+    expect(firstOK).toBe(true);
+    // Same slot, same service, same explicit resource slug maria-f14d → DENY overlap.
+    const emailSecond = `defe2nd-${randomUUID().slice(0, 6)}@test.local`;
+    const phoneSecond = `+390${Math.floor(100000000 + Math.random() * 900000000)}`;
+    const second = await callBookingCreateV3({
+      p_tenant_slug: TENANT_A_SLUG,
+      p_service_id: FIXED.svcA1,
+      p_starts_at: t14,
+      p_resource_slug: "maria-f14d",
+      p_customer_name: "DefE Second",
+      p_customer_email: emailSecond,
+      p_customer_phone: phoneSecond,
+      p_notes: null,
+    });
+    const secondOK = !second.error && Array.isArray(second.data) && second.data.length > 0;
+    expect(secondOK).toBe(false);
+    // Cleanup both test bookings.
+    await p.query(
+      `UPDATE public.bookings SET status='cancelled' WHERE tenant_id=$1 AND customer_email IN ($2,$3)`,
+      [FIXED.tenantA, emailFirst, emailSecond],
+    );
   });
 
   it("RWA-21 existing booking preserved after schedule change", async () => {
@@ -1026,6 +1481,10 @@ describe("FASE14D - Resource Weekly Schedule (RWA 01..24, races, failures)", () 
     });
     expect(slots.error).toBeNull();
     const arr = Array.isArray(slots.data) ? slots.data : [];
+    // eslint-disable-next-line no-console
+    console.log(
+      `[RWA-24] slots.err=${JSON.stringify(slots.error)} slots.len=${arr.length} arr[0..2]=${JSON.stringify(arr.slice(0, 3))}`,
+    );
     expect(arr.length).toBeGreaterThan(2);
   });
 
@@ -1077,34 +1536,123 @@ describe("FASE14D - Resource Weekly Schedule (RWA 01..24, races, failures)", () 
     expect(r[1].error).toBeNull();
   });
 
-  it("RACE-3 schedule save concurrent booking → safe outcome", async () => {
+  it("RACE-3 schedule save concurrent booking → safe outcome (preserve booking OR deny outside schedule)", async () => {
     const cA = anonClient();
-    const cB = anonClient();
     await authenticateAs(cA, "f14d-owner-a@test.local");
-    await authenticateAs(cB, "f14d-owner-b@test.local"); // not actually used as actor; call RPC as public
+    const p = await pg();
     const mon = nextMondayDate();
     const startsAt = toRomeUTCISO(mon, 11, 0);
-    const v = await versionOf(FIXED.resA1);
-    const bookingPromise = callBookingCreateV3({
-      p_tenant_slug: TENANT_A_SLUG,
-      p_service_id: FIXED.svcA1,
-      p_starts_at: startsAt,
-      p_resource_slug: "maria-f14d",
-      p_customer_name: "Cliente Race3",
-      p_customer_email: `race3-${randomUUID().slice(0, 6)}@test.local`,
-      p_customer_phone: "+393333",
-      p_notes: null,
-    });
-    const schedulePromise = saveWeekly(cA, {
+    // Precondition: resA1 has Monday 09-18 window so booking is legal (baseline).
+    const setup = await saveWeekly(cA, {
       resource_id: FIXED.resA1,
-      expected_version: v,
-      intervals: [{ weekday: 1, start_time: "09:00", end_time: "12:00" }],
+      expected_version: await versionOf(FIXED.resA1),
+      intervals: [{ weekday: 1, start_time: "09:00", end_time: "18:00" }],
     });
+    expect(setup.error).toBeNull();
+    const bookingEmail = `race3bk-${randomUUID().slice(0, 6)}@test.local`;
+    const N = 8;
+    for (let i = 0; i < N; i++) {
+      const v = await versionOf(FIXED.resA1);
+      // Concurrent actions: booking at 11:00 (was legal) vs schedule shrinks Mon to 09-10 (11 now outside)
+      // Reset bookings for this specific email to avoid stale state.
+      await p.query(
+        `UPDATE public.bookings SET status='cancelled' WHERE tenant_id=$1 AND customer_email=$2`,
+        [FIXED.tenantA, bookingEmail],
+      );
+      const bookingPromise = callBookingCreateV3({
+        p_tenant_slug: TENANT_A_SLUG,
+        p_service_id: FIXED.svcA1,
+        p_starts_at: startsAt,
+        p_resource_slug: "maria-f14d",
+        p_customer_name: "Cliente Race3",
+        p_customer_email: bookingEmail,
+        p_customer_phone: "+393333000" + String(i % 10).repeat(2),
+        p_notes: null,
+      });
+      const schedulePromise = saveWeekly(cA, {
+        resource_id: FIXED.resA1,
+        expected_version: v,
+        intervals: [{ weekday: 1, start_time: "09:00", end_time: "10:00" }],
+      });
+      const [bk, sc] = await Promise.all([bookingPromise, schedulePromise]);
+      const bookingSucceeded = !bk.error && Array.isArray(bk.data) && bk.data.length > 0;
+      // Aftermath invariant #1: if booking succeeded, it MUST exist in DB (NO silent deletion).
+      if (bookingSucceeded) {
+        const cnt = await p.query(
+          `SELECT count(*)::int n FROM public.bookings WHERE tenant_id=$1 AND customer_email=$2 AND starts_at=$3::timestamptz AND status!='cancelled'`,
+          [FIXED.tenantA, bookingEmail, startsAt],
+        );
+        expect(Number(cnt.rows[0].n)).toBeGreaterThanOrEqual(1);
+      }
+      // Aftermath invariant #2: schedule either succeeded OR failed with plausible stale/overlap/version error.
+      if (sc.error) {
+        expect(/stale|version|overlap|RWA/i.test(sc.error.message || "")).toBe(true);
+      }
+    }
+    // Final state: restore Monday 09-18 baseline for other tests.
+    const vEnd = await versionOf(FIXED.resA1);
+    await saveWeekly(cA, {
+      resource_id: FIXED.resA1,
+      expected_version: vEnd,
+      intervals: [{ weekday: 1, start_time: "09:00", end_time: "18:00" }],
+    });
+  });
 
-    const [bk, sc] = await Promise.all([bookingPromise, schedulePromise]);
-    // safe outcome: schedule save either succeeds or booking is not-outside-schedule for that window; at least not crash.
-    expect(sc.error ? /stale|overlap/.test(sc.error.message) : true).toBe(true);
-    void bk;
+  it("RACE-4 weekly schedule save concurrent resource time-off creation → time-off always wins in slot availability", async () => {
+    const cA = anonClient();
+    const p = await pg();
+    await authenticateAs(cA, "f14d-owner-a@test.local");
+    const mon = nextMondayDate();
+    const timeoffStart = toRomeUTCISO(mon, 10, 0);
+    const timeoffEnd = toRomeUTCISO(mon, 12, 0);
+    // Cleanup stale state: remove time-off at exact window if present
+    await p.query(
+      `DELETE FROM public.resource_time_off WHERE tenant_id=$1 AND resource_id=$2 AND starts_at=$3::timestamptz AND ends_at=$4::timestamptz`,
+      [FIXED.tenantA, FIXED.resA1, timeoffStart, timeoffEnd],
+    );
+    const N = 6;
+    for (let i = 0; i < N; i++) {
+      const v = await versionOf(FIXED.resA1);
+      // schedule: resA1 Monday 09-18 (whole day), time-off concurrent insert 10-12 Monday.
+      const schedulePromise = saveWeekly(cA, {
+        resource_id: FIXED.resA1,
+        expected_version: v,
+        intervals: [{ weekday: 1, start_time: "09:00", end_time: "18:00" }],
+      });
+      const toffPromise = p.query(
+        `INSERT INTO public.resource_time_off(id, tenant_id, resource_id, time_off_type, title, starts_at, ends_at)
+         VALUES (gen_random_uuid(), $1, $2, 'vacation', 'RACE4 permesso',$3::timestamptz,$4::timestamptz)
+         ON CONFLICT DO NOTHING`,
+        [FIXED.tenantA, FIXED.resA1, timeoffStart, timeoffEnd],
+      );
+      const [sc, to] = await Promise.all([schedulePromise, toffPromise]);
+      void sc;
+      void to;
+      // invariant: after both commit, slots for Monday in 10:00-12:00 for Maria must be ZERO.
+      const slots = await callSlot(cA, {
+        tenant_slug: TENANT_A_SLUG,
+        service_id: FIXED.svcA1,
+        from_date: mon,
+        to_date: mon,
+        resource_slug: "maria-f14d",
+      });
+      expect(slots.error).toBeNull();
+      const arr = (Array.isArray(slots.data) ? slots.data : []) as Array<{
+        starts_at: string;
+        resource_id: string;
+      }>;
+      const maria = arr.filter((s) => s.resource_id === FIXED.resA1);
+      const inBlocked = maria.filter((s) => {
+        const tt = new Date(s.starts_at).getTime();
+        return tt >= new Date(timeoffStart).getTime() && tt < new Date(timeoffEnd).getTime();
+      });
+      expect(inBlocked.length).toBe(0);
+    }
+    // Cleanup: remove test time-off.
+    await p.query(
+      `DELETE FROM public.resource_time_off WHERE tenant_id=$1 AND resource_id=$2 AND title='RACE4 permesso'`,
+      [FIXED.tenantA, FIXED.resA1],
+    );
   });
 
   it("RACE-5 double submit same payload → one write applied, no duplicates rows", async () => {

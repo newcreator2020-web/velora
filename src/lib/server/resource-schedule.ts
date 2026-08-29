@@ -138,13 +138,16 @@ export async function getResourceWeeklySchedule(
       },
     );
     if (error) throw new Error(error.message ?? String(error));
-    const row = ((data as unknown) ?? null) as null | {
-      availability_version: number;
-      resource_exists: boolean;
-      authorized: boolean;
-      intervals: Array<{ weekday: number; start_time: string; end_time: string }>;
-      inherit_weekdays_bitmask: number;
-    };
+    const arr = (data as unknown) ?? null;
+    const row = Array.isArray(arr)
+      ? (arr[0] ?? null)
+      : (arr as null | {
+          availability_version: number;
+          resource_exists: boolean;
+          authorized: boolean;
+          intervals: Array<{ weekday: number; start_time: string; end_time: string }>;
+          inherit_weekdays_bitmask: number;
+        });
     if (!row || !row.resource_exists) {
       return { ok: false, code: "NOT_FOUND", message: "Risorsa non trovata" };
     }
@@ -157,10 +160,25 @@ export async function getResourceWeeklySchedule(
       message: "OK",
       data: {
         availability_version: Number(row.availability_version) | 0,
-        intervals: (row.intervals ?? [])
-          .filter((r) => typeof r.weekday === "number" && r.weekday >= 0 && r.weekday <= 6)
+        intervals: (
+          (row.intervals ?? []) as Array<{
+            weekday?: unknown;
+            start_time?: string;
+            end_time?: string;
+          }>
+        )
+          .filter(
+            (
+              r,
+            ): r is { weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6; start_time: string; end_time: string } =>
+              typeof r.weekday === "number" &&
+              r.weekday >= 0 &&
+              r.weekday <= 6 &&
+              typeof r.start_time === "string" &&
+              typeof r.end_time === "string",
+          )
           .map((r) => ({
-            weekday: r.weekday as 0 | 1 | 2 | 3 | 4 | 5 | 6,
+            weekday: r.weekday,
             start_time: r.start_time,
             end_time: r.end_time,
           })),
