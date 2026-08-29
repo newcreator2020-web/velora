@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import pg from "pg";
 const { Client } = pg;
 function pct(a, p) {

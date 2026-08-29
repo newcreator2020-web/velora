@@ -30,10 +30,6 @@ const IGNORES = [
   "_probe*.mjs",
   "scripts/_*.*",
   "scripts/debug*.*",
-  "scripts/proof*.*",
-  "scripts/perf_explain_bench*.*",
-  "scripts/double_reset_dump.mjs",
-  "scripts/migration_map_exact.mjs",
 ];
 
 export default [

@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import pg from "pg";
 import crypto from "node:crypto";
 import fs from "node:fs";

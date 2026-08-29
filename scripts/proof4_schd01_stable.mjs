@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import pg from "pg";
 const { Pool } = pg;
 const pool = new Pool({
