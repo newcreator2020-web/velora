@@ -3,7 +3,10 @@
 import "dotenv/config";
 import { test, expect } from "@playwright/test";
 import { Client as PgClient } from "pg";
-import { createHmac } from "node:crypto";
+
+async function sharedAuthModule() {
+  return await import("./_shared-auth.mjs");
+}
 
 const ALLOWED_DB_HOSTS = new Set(["127.0.0.1", "localhost"]);
 const SAFE_PROJECT_IDS = new Set(["velora-local"]);
@@ -52,42 +55,8 @@ async function newPg() {
 }
 
 async function createAuthUser(email, role = "authenticated") {
-  const c = await newPg();
-  try {
-    const displayName = `E2E ${email}`;
-    const meta = { full_name: displayName, display_name: displayName, role };
-    const email_lc = email.toLowerCase().trim();
-    const cr = await c.query(`SELECT public.crypt($1::text, public.gen_salt('bf')) AS pw`, [
-      PASSWORD,
-    ]);
-    const enc_pw = cr.rows[0].pw;
-    const inst_row = await c.query(`SELECT id FROM auth.instances ORDER BY created_at ASC LIMIT 1`);
-    const inst = inst_row.rows[0]?.id ?? "00000000-0000-0000-0000-000000000000";
-    // Check existence
-    const e = await c.query(`SELECT id FROM auth.users WHERE lower(email::text)=$1 LIMIT 1`, [
-      email_lc,
-    ]);
-    let uid;
-    if (e.rows.length > 0) {
-      uid = String(e.rows[0].id);
-    } else {
-      const id_row = await c.query(`SELECT public.gen_random_uuid() AS uid`);
-      uid = String(id_row.rows[0].uid);
-      await c.query(
-        `INSERT INTO auth.users (id, instance_id, email, encrypted_password, email_confirmed_at, role, raw_user_meta_data, aud, is_super_admin, created_at, updated_at)
-         VALUES ($1::uuid, $2::uuid, $3::text, $4::text, NOW(), 'authenticated', $5::jsonb, 'authenticated', false, NOW(), NOW())`,
-        [uid, inst, email_lc, enc_pw, meta],
-      );
-    }
-    await c.query(
-      `INSERT INTO public.profiles (id, display_name) VALUES ($1::uuid, $2)
-       ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name`,
-      [uid, displayName],
-    );
-    return uid;
-  } finally {
-    await c.end().catch(() => {});
-  }
+  const mod = await sharedAuthModule();
+  return await mod.ensureAuthUserWithPassword(email, PASSWORD, `E2E ${email} role=${role}`);
 }
 
 async function makePlatformAdmin(userId) {
@@ -104,48 +73,11 @@ async function makePlatformAdmin(userId) {
   }
 }
 
-const JWT_SECRET =
-  process.env.SUPABASE_JWT_SECRET ?? "super-secret-jwt-token-with-at-least-32-characters-long";
-function b64url(obj) {
-  return Buffer.from(JSON.stringify(obj))
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=/g, "");
-}
-function signJwt(payload) {
-  const header = { alg: "HS256", typ: "JWT" };
-  const head = b64url(header);
-  const body = b64url(payload);
-  const signing = `${head}.${body}`;
-  const sig = createHmac("sha256", JWT_SECRET)
-    .update(signing)
-    .digest("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=/g, "");
-  return `${signing}.${sig}`;
-}
-function genUserJwt(userId, email) {
-  const now = Math.floor(Date.now() / 1000);
-  const payload = {
-    sub: userId,
-    email: email,
-    email_verified: true,
-    phone_verified: false,
-    role: "authenticated",
-    aud: "authenticated",
-    iat: now,
-    exp: now + 3600,
-    aal: "aal1",
-    session_id: `sess-${Math.random().toString(36).slice(2, 14)}`,
-  };
-  return signJwt(payload);
-}
-
 async function setSession(page, expectedUserId, email) {
-  const URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "http://127.0.0.1:54321";
-  const userId = await createAuthUser(email);
+  const mod = await sharedAuthModule();
+  const { userId } = await mod.ensureTestSession(page, email, PASSWORD, {
+    displayName: email,
+  });
   if (expectedUserId && String(expectedUserId) !== String(userId)) {
     console.warn(
       `[setSession] expected id mismatch. expected=${expectedUserId} provisioned=${userId} (email=${email})`,
@@ -156,54 +88,8 @@ async function setSession(page, expectedUserId, email) {
       userId,
     ])
   )?.user_id;
-  const AT = genUserJwt(userId, email);
-  const RT = "rt-" + Math.random().toString(36).slice(2, 18);
-  const EXPIRES_AT = String(Math.floor(Date.now() / 1000) + 3500);
-  const EXPIRES_IN = String(3500);
-  const TOK_TYPE = "bearer";
-  const user = JSON.stringify({
-    id: userId,
-    email: email,
-    email_confirmed_at: new Date().toISOString(),
-    aud: "authenticated",
-    role: "authenticated",
-    app_metadata: {},
-    user_metadata: { display_name: email },
-  });
-  const baseOpts = {
-    domain: "127.0.0.1",
-    path: "/",
-    httpOnly: false,
-    secure: false,
-    sameSite: "Lax" as const,
-  };
-  const urlB64 = Buffer.from(URL).toString("base64url").replace(/=/g, "");
-  await page.context().addCookies([
-    { ...baseOpts, name: "sb-access-token", value: AT },
-    { ...baseOpts, name: "sb-refresh-token", value: RT },
-    { ...baseOpts, name: "sb-token-type", value: TOK_TYPE },
-    { ...baseOpts, name: "sb-expires-at", value: EXPIRES_AT },
-    { ...baseOpts, name: "sb-expires-in", value: EXPIRES_IN },
-    {
-      ...baseOpts,
-      name: `sb-${urlB64}-auth-token`,
-      value: JSON.stringify({
-        access_token: AT,
-        refresh_token: RT,
-        expires_at: EXPIRES_AT,
-        expires_in: EXPIRES_IN,
-        token_type: TOK_TYPE,
-        user: JSON.parse(user),
-      }),
-    },
-  ]);
   return {
-    user: JSON.parse(user),
-    access_token: AT,
-    refresh_token: RT,
-    token_type: TOK_TYPE,
-    expires_in: Number(EXPIRES_IN),
-    expires_at: Number(EXPIRES_AT),
+    userId,
     is_admin: Boolean(adminId),
   };
 }
