@@ -311,7 +311,11 @@ async function seedAndGetTenants(): Promise<void> {
       );
     }
   }
-  // Resources (staff_resources)
+  // Resources (staff_resources) — wipe any existing for A/B (different UUID same slug from other suites)
+  await p.query(`DELETE FROM public.staff_resources WHERE tenant_id IN ($1,$2)`, [
+    FIXED.tenantA,
+    FIXED.tenantB,
+  ]);
   const resRows = [
     { id: FIXED.resA1, tid: FIXED.tenantA, slug: "maria-f14d", name: "Maria F14D" },
     { id: FIXED.resA2, tid: FIXED.tenantA, slug: "luca-f14d", name: "Luca F14D" },

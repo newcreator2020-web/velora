@@ -558,6 +558,22 @@ describe("FASE13 — Scheduling Foundation DB Tests (46 tests)", () => {
   // GROUP A: Resource Availability multi-interval + inheritance
   // =========================================================================
   describe("Group A: Resource Availability multi-interval + inheritance", () => {
+    it("S13-2 zero rows resource_availability → inherit business hours", async () => {
+      const resA = await client.query<{ id: string }>(
+        `SELECT id FROM public.staff_resources WHERE tenant_id = $1::uuid AND slug = 'alpha-a' LIMIT 1`,
+        [FIXED.tenantA],
+      );
+      const ridA = resA.rows[0]!.id;
+      const wed = wednesdayISO();
+      const from = wed;
+      const to = wed;
+      const resp = await rpcSlotV3(TENANT_A_SLUG, FIXED.svcA1, from, to, "alpha-a");
+      expect(resp.status).toBe(200);
+      const body = (await resp.json()) as Array<Record<string, unknown>>;
+      expect(body.length).toBeGreaterThan(0);
+      void ridA;
+    });
+
     it("S13-1 resource_availability multi intervals 09-13 + 14-18 → 30 slots 15min (2 resources)", async () => {
       const resA = await client.query<{ id: string }>(
         `SELECT id FROM public.staff_resources WHERE tenant_id = $1::uuid AND slug = 'alpha-a' LIMIT 1`,
@@ -598,22 +614,6 @@ describe("FASE13 — Scheduling Foundation DB Tests (46 tests)", () => {
       expect(alphaACount).toBe(perResource);
       expect(alphaBCount).toBe(perResource);
       expect(body.length).toBe(perResource * 2);
-    });
-
-    it("S13-2 zero rows resource_availability → inherit business hours", async () => {
-      const resA = await client.query<{ id: string }>(
-        `SELECT id FROM public.staff_resources WHERE tenant_id = $1::uuid AND slug = 'alpha-a' LIMIT 1`,
-        [FIXED.tenantA],
-      );
-      const ridA = resA.rows[0]!.id;
-      const wed = wednesdayISO();
-      const from = wed;
-      const to = wed;
-      const resp = await rpcSlotV3(TENANT_A_SLUG, FIXED.svcA1, from, to, "alpha-a");
-      expect(resp.status).toBe(200);
-      const body = (await resp.json()) as Array<Record<string, unknown>>;
-      expect(body.length).toBeGreaterThan(0);
-      void ridA;
     });
 
     it("S13-3 closure specific day → zero slots that day", async () => {

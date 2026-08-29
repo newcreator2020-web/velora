@@ -27,6 +27,9 @@ const DEFAULT_DB = {
   SUPABASE_DB_NAME: "postgres",
   SUPABASE_DB_USER: "postgres",
   SUPABASE_DB_PASSWORD: "postgres",
+  NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321",
+  SUPABASE_SERVICE_ROLE_KEY:
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU",
 };
 const dbEnv = (n) => process.env[n] ?? DEFAULT_DB[n] ?? "";
 const pgOpts = () => ({
@@ -89,6 +92,64 @@ async function ensureAuthUser(email) {
     const displayName = `F14D ${email}`;
     const meta = { full_name: displayName, display_name: displayName };
     const email_lc = email.toLowerCase().trim();
+
+    /* Strategy A: use service role admin.createUser (properly creates identities,
+       validates schema, sets encrypted_password — matches what signInWithPassword expects).
+       Falls back to direct SQL insert if service role unavailable (legacy). */
+    const SUPABASE_URL = dbEnv("NEXT_PUBLIC_SUPABASE_URL");
+    const SRK = dbEnv("SUPABASE_SERVICE_ROLE_KEY");
+    if (SUPABASE_URL && SRK) {
+      const svc = createSupabaseClient(SUPABASE_URL, SRK, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+      const exists = await c.query(
+        `SELECT id FROM auth.users WHERE lower(email::text)=$1 LIMIT 1`,
+        [email_lc],
+      );
+      let uid;
+      if (exists.rows.length > 0) {
+        uid = String(exists.rows[0].id);
+        const resetRes = await svc.auth.admin.updateUserById(uid, {
+          password: PASSWORD,
+          email_confirm: true,
+        });
+        if (resetRes.error) {
+          const cr = await c.query(`SELECT public.crypt($1::text, public.gen_salt('bf')) AS pw`, [
+            PASSWORD,
+          ]);
+          await c.query(
+            `UPDATE auth.users SET encrypted_password=$1::text, email_confirmed_at=COALESCE(email_confirmed_at, NOW()), updated_at=NOW() WHERE id=$2::uuid`,
+            [cr.rows[0].pw, uid],
+          );
+        }
+      } else {
+        const { data, error } = await svc.auth.admin.createUser({
+          email: email_lc,
+          password: PASSWORD,
+          email_confirm: true,
+          user_metadata: meta,
+        });
+        if (error) {
+          const retry = await c.query(
+            `SELECT id FROM auth.users WHERE lower(email::text)=$1 LIMIT 1`,
+            [email_lc],
+          );
+          uid = retry.rows[0]?.id;
+          if (!uid) throw error;
+        } else {
+          uid = data.user?.id;
+        }
+      }
+      if (!uid) throw new Error(`ensureAuthUser failed for ${email_lc}`);
+      await c.query(
+        `INSERT INTO public.profiles (id, display_name) VALUES ($1::uuid, $2)
+         ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name`,
+        [uid, displayName],
+      );
+      return uid;
+    }
+
+    /* Fallback: direct SQL insert (legacy path) */
     const cr = await c.query(`SELECT public.crypt($1::text, public.gen_salt('bf')) AS pw`, [
       PASSWORD,
     ]);
@@ -114,6 +175,14 @@ async function ensureAuthUser(email) {
         [uid, inst, email_lc, enc_pw, meta],
       );
     }
+    const idRes = await c.query(`SELECT public.gen_random_uuid() AS id`);
+    const identId = idRes.rows[0].id;
+    await c.query(
+      `INSERT INTO auth.identities (id, provider_id, user_id, identity_data, provider, email, last_sign_in_at, created_at, updated_at)
+       VALUES ($1::uuid, $2::text, $3::uuid, $4::jsonb, 'email', $5::text, NOW(), NOW(), NOW())
+       ON CONFLICT (provider_id, provider) DO UPDATE SET identity_data=EXCLUDED.identity_data, email=EXCLUDED.email, updated_at=NOW()`,
+      [identId, email_lc, uid, { sub: uid, email: email_lc, email_verified: true }, email_lc],
+    );
     await c.query(
       `INSERT INTO public.profiles (id, display_name) VALUES ($1::uuid, $2)
        ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name`,
@@ -243,13 +312,17 @@ test.beforeAll(async () => {
     ]);
     if (!tA.rows[0]) {
       await c.query(
-        `INSERT INTO public.tenants (id, name, slug, status, created_at, updated_at)
-         VALUES ($1::uuid, 'Studio Aurora F14D A', 'f14d-tenant-alpha', 'active', NOW(), NOW())`,
+        `INSERT INTO public.tenants (id, name, slug, status, published, plan_id, created_at, updated_at)
+         VALUES ($1::uuid, 'Studio Aurora F14D A', 'f14d-tenant-alpha', 'active', true, 'internal_test', NOW(), NOW())`,
         [TENANT_A],
       );
       SLUG_A = "f14d-tenant-alpha";
     } else {
       SLUG_A = String(tA.rows[0].slug);
+      await c.query(
+        `UPDATE public.tenants SET published=true, status='active', plan_id=COALESCE(plan_id,'internal_test') WHERE id=$1::uuid`,
+        [TENANT_A],
+      );
     }
 
     /* --- TENANT_B: per cross-tenant; usa FIXED se disponibile, altrimenti primo esistente, altrimenti CREA --- */
@@ -267,13 +340,19 @@ test.beforeAll(async () => {
         TENANT_B = String(tB_any.rows[0].id);
       } else {
         await c.query(
-          `INSERT INTO public.tenants (id, name, slug, status, created_at, updated_at)
-           VALUES ($1::uuid, 'Studio Aurora F14D B', 'f14d-tenant-beta', 'active', NOW(), NOW())`,
+          `INSERT INTO public.tenants (id, name, slug, status, published, plan_id, created_at, updated_at)
+           VALUES ($1::uuid, 'Studio Aurora F14D B', 'f14d-tenant-beta', 'active', true, 'internal_test', NOW(), NOW())`,
           [FIXED.tenantB],
         );
         TENANT_B = FIXED.tenantB;
       }
     }
+    await c.query(
+      `INSERT INTO public.business_profiles (tenant_id, display_name, category, description, city, timezone, locale)
+       VALUES ($1::uuid, 'Studio Aurora F14D B', 'hair_salon', 'BP Tenant B', 'Roma', 'Europe/Rome', 'it-IT')
+       ON CONFLICT (tenant_id) DO UPDATE SET timezone='Europe/Rome', locale='it-IT'`,
+      [TENANT_B],
+    );
 
     /* --- SERVIZIO SVC_A1: crea se non esiste (eligibility endpoint pubblico) --- */
     const svc = await c.query(`SELECT id FROM public.services WHERE id=$1::uuid LIMIT 1`, [SVC_A1]);

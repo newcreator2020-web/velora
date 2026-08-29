@@ -33,10 +33,28 @@ TRUNCATE TABLE
   public.tenant_memberships,
   public.platform_admins,
   public.business_profiles,
-  public.tenants
+  public.tenants,
+  public.resource_time_off,
+  public.resource_availability,
+  public.staff_resource_services
 RESTART IDENTITY CASCADE;
+DELETE FROM auth.mfa_challenges;
+DELETE FROM auth.mfa_factors;
+DELETE FROM auth.mfa_amr_claims;
+DELETE FROM auth.oauth_authorizations;
+DELETE FROM auth.sessions;
+DELETE FROM auth.refresh_tokens;
+DELETE FROM auth.one_time_tokens;
+DELETE FROM auth.flow_state;
+DELETE FROM auth.saml_relay_states;
+DELETE FROM auth.oauth_client_states;
+DELETE FROM auth.oauth_consents;
+DELETE FROM auth.webauthn_challenges;
+DELETE FROM auth.webauthn_credentials;
+DELETE FROM auth.identities;
 DELETE FROM public.profiles;
-DELETE FROM auth.users WHERE email NOT IN ('postgres@localhost','supabase_admin@local','authenticator@local','service_role@local','anon@local','dashboard_user@local');
+DELETE FROM auth.users
+  WHERE email NOT IN ('postgres@localhost','supabase_admin@local','authenticator@local','service_role@local','anon@local','dashboard_user@local');
 SET LOCAL session_replication_role = DEFAULT;
 ALTER TABLE public.tenant_memberships ENABLE TRIGGER tg_guard_last_active_owner;
 COMMIT;`;
