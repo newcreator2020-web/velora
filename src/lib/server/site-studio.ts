@@ -97,7 +97,14 @@ export type PublishResult =
     }
   | {
       ok: false;
-      code: "AUTH" | "AUTHZ" | "NO_DRAFT" | "CONCURRENT" | "INTERNAL" | "ENTITLEMENT_DENIED";
+      code:
+        | "AUTH"
+        | "AUTHZ"
+        | "NO_DRAFT"
+        | "CONCURRENT"
+        | "INTERNAL"
+        | "ENTITLEMENT_DENIED"
+        | "CROSS_TENANT";
       message: string;
     };
 
@@ -338,7 +345,13 @@ export async function saveEditorialDraft(
   }
 
   const sectionsDb = normalizeSectionsForDb(parsed.data.sections);
-  const servicesDb = normalizeServicesForDb(parsed.data.services);
+  const servicesDbRaw = normalizeServicesForDb(parsed.data.services);
+  const uuidPattern =
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+  const servicesDb = servicesDbRaw.map((s) => {
+    if (typeof s.id === "string" && uuidPattern.test(s.id)) return s;
+    return { ...s, id: crypto.randomUUID() };
+  });
 
   const tid = ctx.tenant.id;
   const actor = ctx.user.id;
@@ -487,6 +500,7 @@ export async function publishSiteDraft(expected_revision?: string | null): Promi
         AUTHZ: "AUTHZ",
         NO_DRAFT: "NO_DRAFT",
         CONCURRENT: "CONCURRENT",
+        CROSS_TENANT: "CROSS_TENANT",
       };
       const rpcCode = String((row as { code?: unknown }).code ?? "");
       return {

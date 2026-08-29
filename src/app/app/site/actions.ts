@@ -48,7 +48,8 @@ export type EditorialActionResult =
         | "AUTHZ"
         | "NO_DRAFT"
         | "ENTITLEMENT_DENIED"
-        | "LIMIT_REACHED";
+        | "LIMIT_REACHED"
+        | "CROSS_TENANT";
       fieldErrors?: Partial<Record<string, string[]>>;
       values?: {
         sections: StudioDraftSection[];
