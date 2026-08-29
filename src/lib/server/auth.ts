@@ -112,6 +112,18 @@ export async function extractServerSession() {
       extractAccessToken(ck.get("sb-access-token")?.value ?? "") ||
       "";
   }
+  if (!at) {
+    try {
+      const supabase = await createSupabaseServerClient();
+      const res = await supabase.auth.getSession();
+      const sess = res?.data?.session;
+      if (sess?.access_token && sess?.user?.id) {
+        at = sess.access_token;
+      }
+    } catch {
+      /* auth storage non disponibile */
+    }
+  }
   if (!at) return null;
   const parts = at.split(".");
   if (parts.length < 2) return null;

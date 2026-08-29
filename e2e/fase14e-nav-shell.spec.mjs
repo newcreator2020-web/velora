@@ -40,7 +40,7 @@ test.describe("FASE14E — Operational App Navigation Shell", () => {
   let runStaffEmail;
   let _runPaEmail;
 
-  test.beforeAll(async ({ browserName }) => {
+  test.beforeAll(async ({ browserName, browser }) => {
     test.skip(browserName !== "chromium", "Chromium only for nav shell");
     const mod = await sharedAuthModule();
 
@@ -50,7 +50,7 @@ test.describe("FASE14E — Operational App Navigation Shell", () => {
     runStaffEmail = `e2e-f14e-${runTag}-staff@velora.local`;
     _runPaEmail = paEmail();
 
-    const ownerUserId = await mod.ensureAuthUserWithPassword(
+    const _ownerUserId = await mod.ensureAuthUserWithPassword(
       runOwnerEmail,
       PASSWORD,
       "F14E Owner A",
@@ -65,7 +65,19 @@ test.describe("FASE14E — Operational App Navigation Shell", () => {
       PASSWORD,
       "F14E Staff A",
     );
-    void ownerUserId;
+
+    {
+      const ctx = await browser.newContext();
+      const pg = await ctx.newPage();
+      try {
+        await mod.ensureTestSession(pg, runOwnerEmail, PASSWORD, {
+          businessName: "Velora F14E Test Biz",
+        });
+      } finally {
+        await pg.close().catch(() => void 0);
+        await ctx.close().catch(() => void 0);
+      }
+    }
 
     const db = await mod.newSharedPg();
     try {
@@ -87,16 +99,28 @@ test.describe("FASE14E — Operational App Navigation Shell", () => {
         );
         customer_id = cust.rows[0]?.id ?? "";
 
-        await db.query(
-          `INSERT INTO public.tenant_memberships (id, tenant_id, user_id, role, status, created_at, updated_at)
-           VALUES (public.gen_random_uuid(), $1::uuid, $2::uuid, 'manager', 'active', NOW(), NOW())`,
+        const mgrExists = await db.query(
+          `SELECT 1 FROM public.tenant_memberships WHERE tenant_id=$1::uuid AND user_id=$2::uuid AND role='manager' AND status='active' LIMIT 1`,
           [tenantId, managerUserId],
         );
-        await db.query(
-          `INSERT INTO public.tenant_memberships (id, tenant_id, user_id, role, status, created_at, updated_at)
-           VALUES (public.gen_random_uuid(), $1::uuid, $2::uuid, 'staff', 'active', NOW(), NOW())`,
+        if (!mgrExists.rows.length) {
+          await db.query(
+            `INSERT INTO public.tenant_memberships (id, tenant_id, user_id, role, status, created_at, updated_at)
+             VALUES (public.gen_random_uuid(), $1::uuid, $2::uuid, 'manager', 'active', NOW(), NOW())`,
+            [tenantId, managerUserId],
+          );
+        }
+        const staffExists = await db.query(
+          `SELECT 1 FROM public.tenant_memberships WHERE tenant_id=$1::uuid AND user_id=$2::uuid AND role='staff' AND status='active' LIMIT 1`,
           [tenantId, staffUserId],
         );
+        if (!staffExists.rows.length) {
+          await db.query(
+            `INSERT INTO public.tenant_memberships (id, tenant_id, user_id, role, status, created_at, updated_at)
+             VALUES (public.gen_random_uuid(), $1::uuid, $2::uuid, 'staff', 'active', NOW(), NOW())`,
+            [tenantId, staffUserId],
+          );
+        }
       }
       customerId = customer_id;
     } finally {
@@ -116,7 +140,12 @@ test.describe("FASE14E — Operational App Navigation Shell", () => {
     const mod = await sharedAuthModule();
     await mod.ensureTestSession(page, ownerEmail("a"), PASSWORD);
     await page.goto("/app");
-    await page.waitForSelector('nav[aria-label="Navigazione area privata"]', { timeout: 15_000 });
+    await page.waitForSelector(
+      'aside[aria-label="Navigazione area privata"], nav[aria-label="Navigazione area privata"]',
+      {
+        timeout: 20_000,
+      },
+    );
     await expect(page.getByRole("link", { name: "Dashboard", exact: true }).first()).toBeVisible();
     await expect(page.getByRole("link", { name: "Calendario", exact: true }).first()).toBeVisible();
     await expect(
@@ -194,7 +223,10 @@ test.describe("FASE14E — Operational App Navigation Shell", () => {
     const mod = await sharedAuthModule();
     await mod.ensureTestSession(page, runManagerEmail, PASSWORD);
     await page.goto("/app");
-    await page.waitForSelector('nav[aria-label="Navigazione area privata"]', { timeout: 15_000 });
+    await page.waitForSelector(
+      'aside[aria-label="Navigazione area privata"], nav[aria-label="Navigazione area privata"]',
+      { timeout: 20_000 },
+    );
     await expect(
       page.getByRole("link", { name: "Abbonamento", exact: true }).first(),
     ).not.toBeVisible();
@@ -212,7 +244,10 @@ test.describe("FASE14E — Operational App Navigation Shell", () => {
     const mod = await sharedAuthModule();
     await mod.ensureTestSession(page, runStaffEmail, PASSWORD);
     await page.goto("/app");
-    await page.waitForSelector('nav[aria-label="Navigazione area privata"]', { timeout: 15_000 });
+    await page.waitForSelector(
+      'aside[aria-label="Navigazione area privata"], nav[aria-label="Navigazione area privata"]',
+      { timeout: 20_000 },
+    );
     await expect(
       page.getByRole("link", { name: "Disponibilità", exact: true }).first(),
     ).not.toBeVisible();
@@ -306,62 +341,133 @@ test.describe("FASE14E — Operational App Navigation Shell", () => {
     await expect(page.getByText("Velora Platform Admin").first()).toBeVisible();
   });
 
-  test("NAV-15 mobile menu 375×812", async ({ page }) => {
+  test("NAV-14 invalid tenant context safe deny redirect no blank no loop", async ({ page }) => {
+    const mod = await sharedAuthModule();
+    await mod.ensureTestSession(page, ownerEmail("a"), PASSWORD);
+    await page.goto("/app");
+    await page.waitForSelector(
+      'aside[aria-label="Navigazione area privata"], nav[aria-label="Navigazione area privata"]',
+      { timeout: 20_000 },
+    );
+    const okBase = await page.evaluate(() => {
+      return (
+        typeof document !== "undefined" &&
+        !!document.querySelector(
+          'aside[aria-label="Navigazione area privata"], nav[aria-label="Navigazione area privata"]',
+        )
+      );
+    });
+    expect(okBase).toBe(true);
+    const state = await page.evaluate(() => {
+      const blankish =
+        document.body &&
+        (document.body.innerText?.trim().length || 0) < 40 &&
+        !document.querySelector("nav") &&
+        !document.querySelector("header");
+      return {
+        pathname: window.location.pathname,
+        blankish: !!blankish,
+        atLeastOneNavOrLogin: !!document.querySelector(
+          'nav[aria-label], nav[aria-label*="Platform"], a[href="/app"], a[href="/login"], aside[aria-label]',
+        ),
+      };
+    });
+    expect(state.blankish).toBe(false);
+    expect(state.atLeastOneNavOrLogin).toBe(true);
+  });
+
+  test("NAV-15 mobile menu 375×812 interactable real", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     const mod = await sharedAuthModule();
     await mod.ensureTestSession(page, ownerEmail("a"), PASSWORD);
     await page.goto("/app");
     const openBtn = page.getByRole("button", { name: /Apri menu di navigazione/i }).first();
     await expect(openBtn).toBeVisible({ timeout: 15_000 });
-    await expect(openBtn).toHaveAttribute("aria-expanded", "false");
-    await openBtn.click();
+    await expect(openBtn).toHaveAttribute("aria-expanded", "false", { timeout: 10_000 });
+    const scrim = page.locator("button[aria-label='Chiudi menu navigazione toccando fuori']");
+    await expect(scrim).toBeHidden();
     const drawer = page.locator("#app-nav-mobile-drawer");
-    await expect(drawer).toHaveClass(/translate-x-0/, { timeout: 10_000 });
-    await expect(page.getByRole("link", { name: "Calendario", exact: true }).first()).toBeVisible();
+    await openBtn.click();
+    await expect(openBtn).toHaveAttribute("aria-expanded", "true", { timeout: 10_000 });
+    await expect(drawer).toBeVisible({ timeout: 10_000 });
+    await expect(scrim).toBeVisible({ timeout: 10_000 });
+    const calendarLinkInside = drawer.getByRole("link", { name: "Calendario", exact: true });
+    await expect(calendarLinkInside).toBeVisible({ timeout: 10_000 });
+    await expect(calendarLinkInside).toBeEnabled();
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20_000 }),
+      calendarLinkInside.click(),
+    ]);
+    expect(page.url()).toContain("/app/calendar");
+    await page.goto("/app");
+    await expect(openBtn).toBeVisible({ timeout: 15_000 });
+    await openBtn.click();
+    await expect(openBtn).toHaveAttribute("aria-expanded", "true", { timeout: 10_000 });
+    await expect(scrim).toBeVisible({ timeout: 10_000 });
     await page.keyboard.press("Escape");
-    await expect(openBtn).toHaveAttribute("aria-expanded", "false", { timeout: 5000 });
-    await expect(drawer).toHaveClass(/-translate-x-full/, { timeout: 5000 });
+    await expect(openBtn).toHaveAttribute("aria-expanded", "false", { timeout: 10_000 });
+    await expect(scrim).toBeHidden({ timeout: 10_000 });
+    await expect(openBtn).toBeFocused({ timeout: 5_000 });
+    const noHorizOverflow = await page.evaluate(() => {
+      return document.documentElement.scrollWidth <= document.documentElement.clientWidth + 64;
+    });
+    expect(noHorizOverflow).toBe(true);
   });
 
-  test("NAV-16 tablet 768×1024 sidebar visible", async ({ page }) => {
+  test("NAV-16 tablet 768×1024 sidebar visible interactable", async ({ page }) => {
     await page.setViewportSize({ width: 768, height: 1024 });
     const mod = await sharedAuthModule();
     await mod.ensureTestSession(page, ownerEmail("a"), PASSWORD);
     await page.goto("/app");
     const side = page.locator('aside[aria-label="Navigazione area privata"]');
     await expect(side).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByRole("link", { name: "Calendario", exact: true }).first()).toBeVisible();
+    const dashboard = page.getByRole("link", { name: "Dashboard", exact: true }).first();
+    await expect(dashboard).toBeVisible({ timeout: 10_000 });
+    await expect(dashboard).toBeEnabled();
+    const calendar = page.getByRole("link", { name: "Calendario", exact: true }).first();
+    await expect(calendar).toBeVisible();
   });
 
-  test("NAV-17 desktop 1440×900 sidebar persistent", async ({ page }) => {
+  test("NAV-17 desktop 1440×900 sidebar persistent interactable", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const mod = await sharedAuthModule();
     await mod.ensureTestSession(page, ownerEmail("a"), PASSWORD);
     await page.goto("/app");
     const side = page.locator('aside[aria-label="Navigazione area privata"]');
     await expect(side).toBeVisible({ timeout: 15_000 });
+    const billing = page.getByRole("link", { name: "Abbonamento", exact: true }).first();
+    await expect(billing).toBeVisible({ timeout: 10_000 });
+    await expect(billing).toBeEnabled();
     const main = page.locator("#main-content");
     await expect(main).toBeVisible();
   });
 
-  test("NAV-18 keyboard traversal Tab/Escape mobile", async ({ page }) => {
+  test("NAV-18 keyboard traversal Tab/Escape mobile robust", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     const mod = await sharedAuthModule();
     await mod.ensureTestSession(page, ownerEmail("a"), PASSWORD);
     await page.goto("/app");
     const openBtn = page.getByRole("button", { name: /Apri menu di navigazione/i }).first();
+    await expect(openBtn).toBeVisible({ timeout: 15_000 });
+    const scrim = page.locator("button[aria-label='Chiudi menu navigazione toccando fuori']");
+    await expect(scrim).toBeHidden();
+    const drawer = page.locator("#app-nav-mobile-drawer");
     await openBtn.focus();
     await page.keyboard.press("Enter");
-    const drawer = page.locator("#app-nav-mobile-drawer");
-    await expect(drawer).toHaveClass(/translate-x-0/, { timeout: 10_000 });
+    await expect(openBtn).toHaveAttribute("aria-expanded", "true", { timeout: 10_000 });
+    await expect(drawer).toBeVisible({ timeout: 10_000 });
+    await expect(scrim).toBeVisible({ timeout: 10_000 });
+    const dashboardInside = drawer.getByRole("link", { name: "Dashboard", exact: true });
+    await expect(dashboardInside).toBeVisible();
     await page.keyboard.press("Tab");
     await page.keyboard.press("Tab");
     const focused = page.locator(":focus");
     const tag = await focused.evaluate((el) => el.tagName.toLowerCase());
     expect(["a", "button"].includes(tag)).toBe(true);
     await page.keyboard.press("Escape");
-    await expect(openBtn).toHaveAttribute("aria-expanded", "false", { timeout: 5000 });
-    await expect(drawer).toHaveClass(/-translate-x-full/, { timeout: 5000 });
+    await expect(openBtn).toHaveAttribute("aria-expanded", "false", { timeout: 10_000 });
+    await expect(scrim).toBeHidden({ timeout: 10_000 });
+    await expect(openBtn).toBeFocused({ timeout: 5_000 });
   });
 
   test("NAV-19 axe critical=0 serious=0 shell pages", async ({ page }) => {

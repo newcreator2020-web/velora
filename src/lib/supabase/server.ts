@@ -28,13 +28,61 @@ export async function createSupabaseServerClient() {
         return cookieStore.getAll();
       },
       async setAll(cookiesToSet) {
+        let lastError: unknown = null;
         try {
           for (const { name, value, options } of cookiesToSet) {
-            cookieStore.set(name, value, options);
+            try {
+              cookieStore.set(name, value, options ?? {});
+            } catch (e) {
+              lastError = e;
+              try {
+                const plainOpts: Partial<{
+                  path?: string;
+                  domain?: string;
+                  secure?: boolean;
+                  httpOnly?: boolean;
+                  sameSite?: "strict" | "lax" | "none";
+                  maxAge?: number;
+                  expires?: Date;
+                  priority?: "low" | "medium" | "high";
+                  partitioned?: boolean;
+                }> = {};
+                if (options && typeof options === "object") {
+                  for (const [k, v] of Object.entries(options)) {
+                    if (k === "domain") continue;
+                    if (k === "priority") continue;
+                    if (k === "sameSite") {
+                      const s = String(v).toLowerCase();
+                      if (s === "strict" || s === "lax" || s === "none") {
+                        plainOpts.sameSite = s;
+                      }
+                      continue;
+                    }
+                    (plainOpts as Record<string, unknown>)[k] = v;
+                  }
+                }
+                cookieStore.set(name, value, plainOpts);
+                lastError = null;
+              } catch (e2) {
+                lastError = e2;
+              }
+            }
           }
-        } catch {
-          // setAll can be called from Server Components/Middleware
-          // cookieStore does not permit `set` in certain contexts; ignore safely.
+        } catch (eOuter) {
+          lastError = eOuter;
+        }
+        if (lastError) {
+          const isRoMsg = (e: unknown) => {
+            const s = e instanceof Error ? e.message : String(e ?? "");
+            return /readonly|read[ -]?only|not.*permit|not.*support|cannot.*set|can.*set|only be modified in a Server Action|only be set in a Server Action|Route Handler|Middleware/i.test(
+              s,
+            );
+          };
+          if (!isRoMsg(lastError)) {
+            throw lastError instanceof Error
+              ? new Error(`[supabase:setAll] ${lastError.message}`, { cause: lastError })
+              : new Error(`[supabase:setAll] ${String(lastError)}`);
+          }
         }
       },
     },

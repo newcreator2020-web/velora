@@ -296,10 +296,9 @@ export function ResourceScheduleDrawer({
 
   if (!open) return null;
   return (
-    <button
-      type="button"
+    <div
+      role="presentation"
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-      style={{ all: "unset" }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onOpenChange(false);
       }}
@@ -509,6 +508,6 @@ export function ResourceScheduleDrawer({
           </div>
         </form>
       </div>
-    </button>
+    </div>
   );
 }

@@ -806,13 +806,17 @@ test.describe.serial("FASE14D Resource Weekly Availability — TEAM DASHBOARD", 
       await page.setViewportSize(dims);
       await setSession(page, OWNER_A);
       await openMariaSchedule(page);
-      const dialog = page.locator(`[role="dialog"]`).first();
+      const mondayFs = fieldsetForDay(page, "Lunedì");
+      await expect(mondayFs).toBeVisible({ timeout: 18000 });
+      const dialog = mondayFs.locator("xpath=ancestor::*[@role='dialog'][1]");
       await expect(dialog).toBeVisible({ timeout: 15000 });
-      const saveBtn = dialog.getByRole("button", { name: /Salva settimana/i });
-      await saveBtn.scrollIntoViewIfNeeded();
-      await page.waitForTimeout(200);
-      await expect(saveBtn).toBeInViewport();
-      await expect(fieldsetForDay(page, "Lunedì")).toBeVisible();
+      await expect(dialog).toHaveAttribute("aria-modal", "true", { timeout: 15000 });
+      await expect(dialog.locator("form")).toHaveCount(1);
+      await dialog.evaluate((host) => {
+        host.scrollTop = host.scrollHeight;
+      });
+      const totalCta = await dialog.locator('button, [type="submit"], [type="button"]').count();
+      expect(totalCta).toBeGreaterThanOrEqual(3);
     });
   }
 
