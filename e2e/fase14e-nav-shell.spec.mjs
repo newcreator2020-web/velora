@@ -98,6 +98,16 @@ test.describe("FASE14E — Operational App Navigation Shell", () => {
           [tenantId],
         );
         customer_id = cust.rows[0]?.id ?? "";
+        if (!customer_id) {
+          const detEmail = `f14e-${runTag}-deterministic-customer@velora.local`;
+          const ins = await db.query(
+            `INSERT INTO public.customers (tenant_id, display_name, email, email_normalized, phone, notes, created_at, updated_at)
+             VALUES ($1::uuid, $2::text, $3::text, lower($3::text), '+390000000001', 'F14E deterministic navigation fixture', NOW(), NOW())
+             RETURNING id`,
+            [tenantId, "F14E Deterministic Customer", detEmail],
+          );
+          customer_id = ins.rows[0]?.id ?? "";
+        }
 
         const mgrExists = await db.query(
           `SELECT 1 FROM public.tenant_memberships WHERE tenant_id=$1::uuid AND user_id=$2::uuid AND role='manager' AND status='active' LIMIT 1`,
@@ -208,7 +218,7 @@ test.describe("FASE14E — Operational App Navigation Shell", () => {
   });
 
   test("NAV-07 nested route active on parent /app/customers/[id]", async ({ page }) => {
-    test.skip(!customerId, "no customer in tenant yet");
+    expect(customerId).toBeTruthy();
     const mod = await sharedAuthModule();
     await mod.ensureTestSession(page, ownerEmail("a"), PASSWORD);
     await page.goto(`/app/customers/${customerId}`);
@@ -219,7 +229,7 @@ test.describe("FASE14E — Operational App Navigation Shell", () => {
   });
 
   test("NAV-08 manager: owner-only links hidden", async ({ page }) => {
-    test.skip(!runManagerEmail, "no manager email generated");
+    expect(runManagerEmail).toBeTruthy();
     const mod = await sharedAuthModule();
     await mod.ensureTestSession(page, runManagerEmail, PASSWORD);
     await page.goto("/app");
@@ -240,7 +250,7 @@ test.describe("FASE14E — Operational App Navigation Shell", () => {
   });
 
   test("NAV-09 staff: manager-only links hidden", async ({ page }) => {
-    test.skip(!runStaffEmail, "no staff email generated");
+    expect(runStaffEmail).toBeTruthy();
     const mod = await sharedAuthModule();
     await mod.ensureTestSession(page, runStaffEmail, PASSWORD);
     await page.goto("/app");
@@ -273,11 +283,34 @@ test.describe("FASE14E — Operational App Navigation Shell", () => {
       );
       void ownerB;
       await mod.ensureTestSession(pageB, ownerEmail("b"), PASSWORD);
-      test.skip(!customerId, "no customer from tenant A");
-      await pageB.goto(`/app/customers/${customerId}`, { waitUntil: "commit" });
-      await pageB.waitForTimeout(2000);
-      const url = new URL(pageB.url());
-      expect(url.pathname).not.toBe(`/app/customers/${customerId}`);
+      expect(customerId).toBeTruthy();
+      const resp = await pageB.goto(`/app/customers/${customerId}`, {
+        waitUntil: "domcontentloaded",
+      });
+      const status = resp ? resp.status() : 0;
+      await expect(
+        pageB
+          .locator(".border-red-200, .bg-red-50, main")
+          .filter({
+            hasText:
+              /Cliente inesistente|non trovato|non valido|non hai.*permesso|non autorizzato/i,
+          })
+          .first(),
+      ).toBeVisible({ timeout: 15_000 });
+      const customersLink = pageB
+        .getByRole("link", { name: /Tutti i clienti|← Tutti i clienti/i })
+        .first();
+      const hasCustomersList =
+        (await customersLink.count()) > 0 ||
+        (await pageB.locator('a[href="/app/customers"]').count()) > 0;
+      expect(hasCustomersList).toBe(true);
+      const leakPII = await pageB.evaluate(() =>
+        /F14E Deterministic Customer|deterministic-customer@velora\.local/.test(
+          (document.body && document.body.innerText) || "",
+        ),
+      );
+      expect(leakPII).toBe(false);
+      void status;
     } finally {
       await ctxB.close();
     }
@@ -287,11 +320,11 @@ test.describe("FASE14E — Operational App Navigation Shell", () => {
     const mod = await sharedAuthModule();
     const pa = await ensurePlatformAdminLocally(paEmail(), PASSWORD);
     expect(pa).toBeTruthy();
+    expect(tenantSlug).toBeTruthy();
     await mod.ensureTestSession(page, paEmail(), PASSWORD, {});
     await page.goto("/app/admin/clients");
     await page.waitForURL("/app/admin/clients", { timeout: 15_000 });
     await page.waitForSelector('h1, [role="heading"]', { timeout: 15_000 });
-    test.skip(!tenantSlug, "no tenantA slug");
     const row = page.locator(`a[href$="/app/admin/clients/${tenantSlug}"]`).first();
     const rowAlt = page.getByRole("link", { name: tenantSlug }).first();
     const link = (await row.count()) > 0 ? row : rowAlt;
@@ -328,8 +361,8 @@ test.describe("FASE14E — Operational App Navigation Shell", () => {
     const mod = await sharedAuthModule();
     const pa = await ensurePlatformAdminLocally(paEmail(), PASSWORD);
     expect(pa).toBeTruthy();
+    expect(tenantSlug).toBeTruthy();
     await mod.ensureTestSession(page, paEmail(), PASSWORD, {});
-    test.skip(!tenantSlug, "no tenant slug");
     await page.goto(`/app/admin/clients/${tenantSlug}`);
     const back = page.getByRole("link", { name: /Tutti i clienti|← Tutti i clienti/i }).first();
     if ((await back.count()) > 0) {
@@ -486,7 +519,7 @@ test.describe("FASE14E — Operational App Navigation Shell", () => {
   });
 
   test("NAV-20 staff direct /app/billing unauthorized denied", async ({ page }) => {
-    test.skip(!runStaffEmail, "no staff email generated");
+    expect(runStaffEmail).toBeTruthy();
     const mod = await sharedAuthModule();
     await mod.ensureTestSession(page, runStaffEmail, PASSWORD);
     const resp = await page.goto("/app/billing", { waitUntil: "commit" });

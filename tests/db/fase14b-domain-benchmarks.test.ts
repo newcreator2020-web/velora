@@ -418,7 +418,7 @@ describe("FASE14B Domain Resolver Benchmarks + EXPLAIN Planner", { timeout: 300_
     const slugS = percentiles(slugSamples);
     const customS = percentiles(customSamples);
     const ratio = customS.p95 / Math.max(0.001, slugS.p95);
-    const within = ratio <= 2.5;
+    const within = ratio <= 1.2;
     console.warn(
       `  [bench-compare] slug p95=${slugS.p95.toFixed(2)}ms vs custom-domain p95=${customS.p95.toFixed(2)}ms ratio=${ratio.toFixed(3)} (≤1.20? ${within})`,
     );
