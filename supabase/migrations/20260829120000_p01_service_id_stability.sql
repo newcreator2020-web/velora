@@ -342,3 +342,10 @@ $$;
 
 REVOKE ALL ON FUNCTION public.publish_site_draft(UUID, UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.publish_site_draft(UUID, UUID) TO authenticated;
+
+--
+-- ===========================================================
+-- #86 FROZEN 2026-08-30  CERTIFIED P0-1 REGRESSION
+-- NON modificare questo file. Cambiamenti futuri: append-only.
+-- ===========================================================
+

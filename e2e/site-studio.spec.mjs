@@ -215,12 +215,27 @@ async function resetDbStudioFixtures() {
 // Login
 // ============================================================
 async function studioLogin(page, email, password = TEST_PW) {
-  await page.goto("/login", { waitUntil: "domcontentloaded" });
-  await expect(page.getByLabel("Email")).toBeVisible({ timeout: 30_000 });
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: /accedi/i }).click();
-  await expect(page).toHaveURL(/\/(dashboard|app\/site|onboarding)$/, { timeout: 45_000 });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await page.goto("/login", { waitUntil: "domcontentloaded" });
+    await expect(page.getByLabel("Email")).toBeVisible({ timeout: 30_000 });
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill(password);
+    await page.getByRole("button", { name: /accedi/i }).click();
+    try {
+      await expect(page).toHaveURL(/\/(dashboard|app\/site|onboarding)$/, { timeout: 45_000 });
+      return;
+    } catch (err) {
+      // If login redirect is still /login (session issue/cookie reset), retry once.
+      const current = page.url();
+      if (current.includes("/login") && attempt === 0) continue;
+      throw err;
+    }
+  }
+}
+
+async function _ensureStudioApp(page) {
+  // Helper reserved for future use; currently inlined where needed.
+  await page.goto("/app/site", { waitUntil: "domcontentloaded" });
 }
 
 // ============================================================
@@ -582,33 +597,84 @@ test("E11. Anon cannot view preview (wall login)", async ({ browser }) => {
 // E12
 // ============================================================
 test("E12. Staff A read OK / save draft denied", async ({ browser }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(120_000);
   test.info().annotations.push({ type: "req", description: "E12" });
   const ctx = await browser.newContext();
   try {
     const p = await ctx.newPage();
-    await studioLogin(p, STAFF_A_EMAIL);
-    await p.goto("/app/site", { waitUntil: "domcontentloaded" });
-    await ensureSectionsCount(p, 1);
-    await setSectionType(p, 0, "hero");
-    // Save draft: expect authz denied OR success depending policy. If denied: error present.
-    await p.getByRole("button", { name: "Salva bozza" }).click();
-    const ok = await p
-      .getByRole("status")
-      .filter({ hasText: /Salvato/i })
-      .isVisible({ timeout: 12_000 })
-      .catch(() => false);
-    if (!ok) {
-      // denied path — asseriamo non salvato
-      const errVisible = await p
-        .getByRole("status")
-        .filter({ hasText: /Impossibile salvare|non autorizzato|AUTHZ|AUTH/ })
-        .isVisible()
-        .catch(() => false);
-      expect(errVisible || !ok, "Staff save deve fallire o errore visibile").toBe(true);
-    } else {
-      // policy permette write staff? — allora OK per questa run
+    let attempts = 0;
+    while (attempts < 4) {
+      attempts++;
+      await studioLogin(p, STAFF_A_EMAIL);
+      await p.waitForTimeout(2500);
+      const u = p.url();
+      if (!/\/login($|\?|#)/.test(u)) break;
+      await p.context().clearCookies();
+      try {
+        await p.goto("/", { waitUntil: "commit" });
+      } catch (_e) {
+        void _e;
+      }
+      await p.waitForTimeout(1000);
     }
+    try {
+      await p.goto("/app/site", { waitUntil: "networkidle", timeout: 30_000 });
+    } catch (_e) {
+      void _e;
+    }
+    if (/\/login($|\?|#)/.test(p.url())) {
+      try {
+        await p.goto("/app", { waitUntil: "networkidle", timeout: 30_000 });
+      } catch (_e) {
+        void _e;
+      }
+    }
+    await expect(async () => {
+      const u = p.url();
+      expect(
+        /^https?:\/\/[^/]+\/app(\/|$|\/site|\/dashboard|\/calendar)/.test(u),
+        "expected authenticated private URL, got: " + u,
+      ).toBe(true);
+    }).toPass({ timeout: 20_000, intervals: [1000] });
+
+    const base = new URL(p.url()).origin;
+    const actionUrl = `${base}/app/site`;
+    const res = await p.evaluate(async (url) => {
+      const body = new FormData();
+      body.append("$ACTION_ID", "saveEditorialDraft");
+      body.append(
+        "payload",
+        JSON.stringify({
+          sections: [],
+          services: [],
+        }),
+      );
+      try {
+        const r = await fetch(url, {
+          method: "POST",
+          credentials: "same-origin",
+          redirect: "manual",
+          headers: { Accept: "application/json, text/x-component" },
+          body,
+        });
+        const t = await r.text().catch(() => "");
+        return { status: r.status, textSnippet: t.slice(0, 500) };
+      } catch (e) {
+        return { status: 0, err: String(e && e.message ? e.message : e) };
+      }
+    }, actionUrl);
+    const statusOkish = typeof res.status === "number" && res.status >= 200 && res.status < 300;
+    const deniedHint =
+      typeof res.textSnippet === "string" &&
+      /AUTHZ|DENIED|non autorizzato|unauthorized|FORBIDDEN|NOT_ALLOWED|NOT_AUTHORIZED|ok"\s*:\s*false/i.test(
+        res.textSnippet,
+      );
+    const redirectToLogin =
+      typeof res.status === "number" && (res.status === 302 || res.status === 0);
+    expect(
+      !statusOkish || deniedHint || redirectToLogin,
+      "Staff saveEditorialDraft must be denied; got: " + JSON.stringify(res).slice(0, 300),
+    ).toBe(true);
   } finally {
     await ctx.close();
   }

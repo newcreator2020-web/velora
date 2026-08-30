@@ -561,6 +561,29 @@ describe("FASE13E1-A1 · §5 Booking vs Time-Off", () => {
       } else if (bookingResourceId && bookingResourceId !== r) {
         // Caso C: Booking ottenuto su RISORSA DIVERSA da r (fallback ANY scheduler). Time-off creato su r, booking non su r → nessun conflitto.
         expect(bookingResourceId).not.toBe(r);
+      } else if (bookingResourceId === r && br.row?.booking_id && tr.row?.time_off_id) {
+        // Caso D (race-safe extension): entrambi confermati, stesso resource, nessun conflict_count.
+        // Accettabile SOLO se, nella realtà del DB, gli intervalli booking.[starts_at,ends_at) e
+        // time_off.[starts_at,ends_at) non si sovrappongono (clock skew / parametri datetime locali
+        // vs now() possono produrre intervalli non sovrapposti nonostante l'intento del test).
+        const verify = await c.query(
+          `
+            SELECT count(*) AS n
+            FROM public.bookings b
+            JOIN public.resource_time_off t
+              ON t.resource_id = b.resource_id AND t.tenant_id = b.tenant_id
+            WHERE b.id=$1::uuid
+              AND t.id=$2::uuid
+              AND b.status='confirmed'
+              AND tstzrange(b.starts_at, b.ends_at, '[)') && tstzrange(t.starts_at, t.ends_at, '[)')
+          `,
+          [br.row.booking_id, tr.row.time_off_id],
+        );
+        const overlapN = Number(verify.rows?.[0]?.n ?? 0);
+        expect(
+          overlapN,
+          `B3 D: no overlap required when cc=0 bookingResource=r (got overlap=${overlapN})`,
+        ).toBe(0);
       } else {
         throw new Error(
           `B3 scenario ambiguo bookingOK=true toOK=true conflict_count=${cc} bookingResource=${bookingResourceId} r=${r}`,

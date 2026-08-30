@@ -281,10 +281,34 @@ async function seedAndGetTenants(): Promise<void> {
     );
   }
   // DETERMINISTIC CLEANUP: remove cross-run stale state for test tenants A and B (dopo insert tenants per evitare FK audit_logs)
+  // bookings DELETE denied by trigger bookings_no_delete (soft cancel only in production).
+  // In fixture cleanup we bypass the trigger temporarily using replica role; as a second
+  // layer we also ALTER TABLE disable/enable the specific trigger for safety.
+  try {
+    await p.query("SET LOCAL session_replication_role = replica");
+  } catch {
+    /* noop */
+  }
+  try {
+    await p.query("ALTER TABLE public.bookings DISABLE TRIGGER bookings_no_delete");
+  } catch {
+    /* noop */
+  }
   for (const tid of [FIXED.tenantA, FIXED.tenantB]) {
-    await p.query(`UPDATE public.bookings SET status='cancelled' WHERE tenant_id = $1`, [tid]);
+    await p.query(`DELETE FROM public.bookings WHERE tenant_id = $1`, [tid]);
     await p.query(`DELETE FROM public.resource_time_off WHERE tenant_id = $1`, [tid]);
     await p.query(`DELETE FROM public.resource_availability WHERE tenant_id = $1`, [tid]);
+    await p.query(`DELETE FROM public.staff_resources WHERE tenant_id = $1`, [tid]);
+  }
+  try {
+    await p.query("ALTER TABLE public.bookings ENABLE TRIGGER bookings_no_delete");
+  } catch {
+    /* noop */
+  }
+  try {
+    await p.query("RESET session_replication_role");
+  } catch {
+    /* noop */
   }
   const memberships = [
     { u: userIds["ownerA"], tid: FIXED.tenantA, role: "owner" },
