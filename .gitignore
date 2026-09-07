@@ -49,6 +49,15 @@ pnpm-debug.log*
 # vitest
 coverage/
 
+# temp scripts & logs (VELORA acceptance)
+.tmp/
+.tmp_*.log
+.tmp_anon_error.log
+supabase/.temp/
+_defects_p0_register.json
+verify-invariants.ps1
+.trae/specs/
+
 # playwright artifacts (ignore browser binaries + output dirs only; keep tracked specs remain tracked)
 /test-results/
 /playwright-report/
@@ -85,3 +94,4 @@ supabase/.home/
 # Local temporary runtime diagnostics / transient log artifacts only.
 # Project evidence lives in docs/*-REPORT-*.md and commits. Do NOT commit tmp.
 /tmp/
+.env*
