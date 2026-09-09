@@ -2,6 +2,87 @@ import "server-only";
 import { z } from "zod";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
+export type BookingErrorCode =
+  | "tenant_not_found"
+  | "service_invalid"
+  | "past_or_lead_time"
+  | "too_far_in_advance"
+  | "resource_not_eligible"
+  | "business_closed"
+  | "timeoff_conflict"
+  | "all_operators_unavailable"
+  | "slot_taken"
+  | "validation_error"
+  | "unknown";
+
+export class BookingError extends Error {
+  readonly code: BookingErrorCode;
+  readonly userMessage: string;
+  constructor(code: BookingErrorCode, message?: string) {
+    super(message ?? code);
+    this.name = "BookingError";
+    this.code = code;
+    this.userMessage = userMessageFor(code);
+  }
+}
+
+function userMessageFor(code: BookingErrorCode): string {
+  switch (code) {
+    case "timeoff_conflict":
+      return "L'operatore selezionato non è disponibile in questa fascia oraria (ferie, permesso o chiusura). Scegli un altro orario o un altro operatore.";
+    case "all_operators_unavailable":
+      return "Nessun operatore è disponibile in questa fascia oraria (chiusura o ferie). Prova un altro giorno.";
+    case "business_closed":
+      return "L'attività è chiusa in questo giorno o fascia oraria.";
+    case "slot_taken":
+      return "Questo orario è stato appena prenotato. Scegli un altro slot disponibile.";
+    case "past_or_lead_time":
+      return "Non è possibile prenotare un orario già passato o troppo ravvicinato.";
+    case "too_far_in_advance":
+      return "Non è possibile prenotare così in anticipo.";
+    case "resource_not_eligible":
+      return "L'operatore selezionato non può eseguire questo servizio.";
+    case "service_invalid":
+      return "Servizio non valido o non più disponibile.";
+    case "tenant_not_found":
+      return "Sito non trovato.";
+    case "validation_error":
+      return "Completa correttamente tutti i campi obbligatori.";
+    default:
+      return "Si è verificato un errore durante la prenotazione. Riprova tra qualche minuto.";
+  }
+}
+
+type RpcErrorShape = {
+  code?: string | number | null;
+  message?: string | null;
+  details?: string | null;
+  hint?: string | null;
+} | null;
+
+function inferBookingCodeFromRpc(err: RpcErrorShape): BookingErrorCode {
+  const pgSqlState =
+    typeof (err as unknown as { code?: string })?.code === "string"
+      ? (err as unknown as { code: string }).code.toUpperCase()
+      : "";
+  if (pgSqlState === "VLTO1") return "timeoff_conflict";
+  if (pgSqlState === "VLTO2") return "all_operators_unavailable";
+  if (pgSqlState === "VLTN1") return "tenant_not_found";
+  if (pgSqlState === "VLTN2") return "service_invalid";
+  if (pgSqlState === "VLTN3") return "past_or_lead_time";
+  if (pgSqlState === "VLTN4") return "too_far_in_advance";
+  if (pgSqlState === "VLTN5") return "resource_not_eligible";
+  if (pgSqlState === "VLTN6") return "business_closed";
+  if (pgSqlState === "VLTN7") return "slot_taken";
+  const msg = (err?.message ?? "").toLowerCase();
+  if (msg.includes("time off") || msg.includes("timeoff") || msg.includes("ferie")) {
+    return "timeoff_conflict";
+  }
+  if (msg.includes("closed") || msg.includes("chius")) return "business_closed";
+  if (msg.includes("slot taken") || msg.includes("unavailable")) return "slot_taken";
+  return "unknown";
+}
+
 // Weekday mapping: Postgres availability weekday 0..6 = Sun..Sat
 // JS Date.getDay(): same 0..6 Sun..Sat
 export const WEEKDAY_JS_TO_PG = (jsDay: number): number => jsDay;
@@ -42,37 +123,39 @@ export type PublicBookingResult = {
 };
 
 export async function createPublicBooking(input: PublicBookingInput): Promise<PublicBookingResult> {
-  const validated = CreatePublicBookingSchema.parse(input);
+  const validated = CreatePublicBookingSchema.safeParse(input);
+  if (!validated.success) {
+    throw new BookingError(
+      "validation_error",
+      validated.error.issues.map((i) => i.message).join("; "),
+    );
+  }
+  const data = validated.data;
   const supabase = await createSupabaseServerClient();
-  const email =
-    validated.customer_email && validated.customer_email.length > 0
-      ? validated.customer_email
-      : null;
-  const phone =
-    validated.customer_phone && validated.customer_phone.length > 0
-      ? validated.customer_phone
-      : null;
-  const notes = validated.notes && validated.notes.length > 0 ? validated.notes : null;
+  const email = data.customer_email && data.customer_email.length > 0 ? data.customer_email : null;
+  const phone = data.customer_phone && data.customer_phone.length > 0 ? data.customer_phone : null;
+  const notes = data.notes && data.notes.length > 0 ? data.notes : null;
   const resource_slug =
-    validated.resource_slug && validated.resource_slug.length > 0 ? validated.resource_slug : "any";
+    data.resource_slug && data.resource_slug.length > 0 ? data.resource_slug : "any";
   const rpcArgs = {
-    p_tenant_slug: validated.slug,
-    p_service_id: validated.service_id,
-    p_starts_at: validated.starts_at.toISOString(),
+    p_tenant_slug: data.slug,
+    p_service_id: data.service_id,
+    p_starts_at: data.starts_at.toISOString(),
     p_resource_slug: resource_slug,
-    p_customer_name: validated.customer_name,
+    p_customer_name: data.customer_name,
     p_customer_email: email,
     p_customer_phone: phone,
     p_notes: notes,
   };
-  const { data, error } = await supabase.rpc("public_booking_create_v3", rpcArgs as never);
+  const { data: rpcData, error } = await supabase.rpc("public_booking_create_v3", rpcArgs as never);
   if (error) {
-    throw new Error(error.message || "BOOKING_ERROR");
+    const code = inferBookingCodeFromRpc(error as unknown as RpcErrorShape);
+    throw new BookingError(code, error.message ?? code);
   }
-  const rows = (data as unknown as PublicBookingResult[] | null) ?? [];
-  if (rows.length === 0) throw new Error("BOOKING_EMPTY");
+  const rows = (rpcData as unknown as PublicBookingResult[] | null) ?? [];
+  if (rows.length === 0) throw new BookingError("slot_taken", "RPC returned empty set");
   const result = rows[0];
-  if (!result) throw new Error("BOOKING_EMPTY");
+  if (!result) throw new BookingError("slot_taken", "RPC returned empty set");
   return result;
 }
 

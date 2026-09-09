@@ -2,5 +2,12 @@
   "framework": "nextjs",
   "buildCommand": "pnpm build || next build",
   "installCommand": "pnpm install --prefer-offline --no-frozen-lockfile --ignore-scripts ; pnpm rebuild esbuild",
-  "outputDirectory": ".next"
+  "outputDirectory": ".next",
+  "crons": [
+    {
+      "path": "/api/cron/booking-reminders",
+      "schedule": "*/15 * * * *",
+      "header": { "x-cron-secret": "${CRON_API_KEY}" }
+    }
+  ]
 }

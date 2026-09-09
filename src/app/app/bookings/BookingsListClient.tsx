@@ -16,6 +16,8 @@ type BookingRow = {
   customer_email: string | null;
   customer_phone: string | null;
   notes: string | null;
+  payment_status?: string | null;
+  deposit_amount?: number | null;
   services: { name: string; duration_minutes: number | null } | null;
   customers?: { id: string; display_name: string } | null;
 };
@@ -95,6 +97,62 @@ function StatusBadge({ status }: { status: string }) {
   return (
     <span
       className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${entry.className}`}
+    >
+      {entry.label}
+    </span>
+  );
+}
+
+function PaymentStatusBadge({
+  payment_status,
+  deposit_amount,
+}: {
+  payment_status?: string | null | undefined;
+  deposit_amount?: number | null | undefined;
+}) {
+  if (!payment_status) return null;
+  type Entry = { label: string; className: string };
+  const map: Record<string, Entry> = {
+    unpaid: {
+      label: "IN ATTESA CAPARRA",
+      className: "bg-yellow-50 text-yellow-800 ring-1 ring-inset ring-yellow-600/20",
+    },
+    deposit_paid: {
+      label: "CAPARRA PAGATA",
+      className: "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20",
+    },
+    paid: {
+      label: "SALDATA",
+      className: "bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-600/20",
+    },
+    failed: {
+      label: "FALLITO",
+      className: "bg-red-50 text-red-700 ring-1 ring-inset ring-red-600/20",
+    },
+    refunded: {
+      label: "RIMBORSATO",
+      className: "bg-neutral-100 text-neutral-600 ring-1 ring-inset ring-neutral-500/20",
+    },
+    partially_refunded: {
+      label: "RIMBORSATO PARZ.",
+      className: "bg-neutral-100 text-neutral-600 ring-1 ring-inset ring-neutral-500/20",
+    },
+    disputed: {
+      label: "CONTESTATO",
+      className: "bg-red-50 text-red-700 ring-1 ring-inset ring-red-600/20",
+    },
+  };
+  const entry = map[payment_status] ?? null;
+  if (!entry) return null;
+  const showAmount =
+    (payment_status === "deposit_paid" || payment_status === "paid") &&
+    deposit_amount != null &&
+    Number.isFinite(deposit_amount) &&
+    deposit_amount > 0;
+  return (
+    <span
+      title={showAmount ? `Caparra: €${Number(deposit_amount).toFixed(2)}` : undefined}
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide uppercase ${entry.className}`}
     >
       {entry.label}
     </span>
@@ -234,7 +292,13 @@ export default function BookingsListClient(props: Props) {
                     {b.services?.duration_minutes ? ` · ${b.services.duration_minutes} min` : ""}
                   </div>
                 </div>
-                <StatusBadge status={b.status} />
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <StatusBadge status={b.status} />
+                  <PaymentStatusBadge
+                    payment_status={b.payment_status}
+                    deposit_amount={b.deposit_amount}
+                  />
+                </div>
               </div>
               <div className="mt-3 space-y-1 text-sm">
                 <div className="font-medium text-neutral-800">
@@ -345,7 +409,13 @@ export default function BookingsListClient(props: Props) {
                       ) : null}
                     </td>
                     <td className="px-4 py-3 align-top">
-                      <StatusBadge status={b.status} />
+                      <div className="flex flex-col items-start gap-1.5">
+                        <StatusBadge status={b.status} />
+                        <PaymentStatusBadge
+                          payment_status={b.payment_status}
+                          deposit_amount={b.deposit_amount}
+                        />
+                      </div>
                     </td>
                     <td className="px-4 py-3 align-top text-right">
                       {props.canOperate && b.status === "confirmed" ? (

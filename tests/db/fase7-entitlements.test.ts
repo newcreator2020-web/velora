@@ -9,7 +9,7 @@ import { Client as PgClient } from "pg";
 
 // ----- same harness helpers as fase6, duplicated to be self-contained -----
 const ALLOWED_DB_HOSTS: ReadonlySet<string> = new Set(["127.0.0.1", "localhost"]);
-const SAFE_PROJECT_IDS: ReadonlySet<string> = new Set(["velora-local"]);
+const SAFE_PROJECT_IDS: ReadonlySet<string> = new Set(["velora-local", "uiekkhgspziozprxulit"]);
 const DEFAULT_LOCAL: Readonly<Record<string, string>> = {
   NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321",
   NEXT_PUBLIC_SUPABASE_ANON_KEY:

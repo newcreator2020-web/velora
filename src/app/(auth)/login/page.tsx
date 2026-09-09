@@ -1,8 +1,29 @@
+import { cookies } from "next/headers";
+import { randomUUID } from "crypto";
+import { redirect } from "next/navigation";
 import { LoginForm } from "./LoginForm";
 
 export const metadata = { title: "Accedi — VELORA" };
 
-export default function LoginPage() {
+const CSRF_COOKIE_NAME = "velora_csrf_token";
+
+function safeToken(v: string | undefined): string {
+  if (v && v.length >= 16) return v;
+  return randomUUID().replace(/-/g, "");
+}
+
+type LoginPageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function LoginPage(props: LoginPageProps) {
+  const ck = await cookies();
+  const token = safeToken(ck.get(CSRF_COOKIE_NAME)?.value);
+  const sp = (await props.searchParams) ?? {};
+  const existing = sp["_csrf"] as string | undefined;
+  if (!existing || existing.length < 16 || existing !== token) {
+    redirect(`/login?_csrf=${encodeURIComponent(token)}`);
+  }
   return (
     <main
       style={{
@@ -40,7 +61,7 @@ export default function LoginPage() {
             Accedi alla tua area riservata
           </h1>
         </header>
-        <LoginForm />
+        <LoginForm csrfToken={token} />
       </section>
     </main>
   );

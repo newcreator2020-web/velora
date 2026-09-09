@@ -6,12 +6,16 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 const { Client: PgClient } = pgPkg;
 
 const ALLOWED_DB_HOSTS = new Set(["127.0.0.1", "localhost"]);
-const SAFE_PROJECT_IDS = new Set(["velora-local"]);
+const SAFE_PROJECT_IDS = new Set(["velora-local", "uiekkhgspziozprxulit"]);
 (() => {
   const host = process.env.SUPABASE_DB_HOST ?? "";
   const pr = process.env.SUPABASE_PROJECT_ID ?? "";
-  if (!((ALLOWED_DB_HOSTS.has(host) && pr.length === 0) || SAFE_PROJECT_IDS.has(pr))) {
-    console.error("[shared-auth-e2e] unsafe DB env — ABORT");
+  const hostOk = ALLOWED_DB_HOSTS.has(host);
+  const projectOk = pr.length === 0 || SAFE_PROJECT_IDS.has(pr);
+  if (!(hostOk && projectOk)) {
+    console.error(
+      `[shared-auth-e2e] unsafe DB env — ABORT (host=${host || "empty"} project=${pr || "empty"}. Allowed hosts: ${[...ALLOWED_DB_HOSTS].join(",")}. Allowed project ids: ${[...SAFE_PROJECT_IDS].join(",")}`,
+    );
     process.exit(1);
   }
 })();

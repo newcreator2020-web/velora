@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { PublicSection } from "@/lib/server/content-engine";
 import { HeroSectionComponent } from "@/components/site/sections/Hero";
 import { AboutSectionComponent } from "@/components/site/sections/About";
@@ -6,6 +7,9 @@ import { GallerySectionComponent } from "@/components/site/sections/Gallery";
 import { StaffSectionComponent } from "@/components/site/sections/Staff";
 import { ReviewsSectionComponent } from "@/components/site/sections/Reviews";
 import { ContactSectionComponent } from "@/components/site/sections/Contact";
+import { PriceListSectionComponent } from "@/components/site/sections/PriceList";
+import { FeaturesCtaSectionComponent } from "@/components/site/sections/FeaturesCTA";
+import { BookingWidgetSectionComponent } from "@/components/site/sections/BookingWidget";
 
 type RenderFn = (section: PublicSection) => React.ReactNode | null;
 
@@ -17,6 +21,12 @@ const GALLERY: RenderFn = (s) => (s.type === "gallery" ? <GallerySectionComponen
 const STAFF: RenderFn = (s) => (s.type === "staff" ? <StaffSectionComponent {...s} /> : null);
 const REVIEWS: RenderFn = (s) => (s.type === "reviews" ? <ReviewsSectionComponent {...s} /> : null);
 const CONTACT: RenderFn = (s) => (s.type === "contact" ? <ContactSectionComponent {...s} /> : null);
+const PRICE_LIST: RenderFn = (s) =>
+  s.type === "price_list" ? <PriceListSectionComponent {...s} /> : null;
+const FEATURES_CTA: RenderFn = (s) =>
+  s.type === "features_cta" ? <FeaturesCtaSectionComponent {...s} /> : null;
+const BOOKING_WIDGET: RenderFn = (s) =>
+  s.type === "booking_widget" ? <BookingWidgetSectionComponent {...s} /> : null;
 
 export const SECTION_RENDERERS: Record<PublicSection["type"], RenderFn> = {
   hero: HERO,
@@ -26,6 +36,9 @@ export const SECTION_RENDERERS: Record<PublicSection["type"], RenderFn> = {
   staff: STAFF,
   reviews: REVIEWS,
   contact: CONTACT,
+  price_list: PRICE_LIST,
+  features_cta: FEATURES_CTA,
+  booking_widget: BOOKING_WIDGET,
 };
 
 export function SiteRenderer({ sections }: { sections: PublicSection[] }) {
@@ -34,12 +47,20 @@ export function SiteRenderer({ sections }: { sections: PublicSection[] }) {
     if (!r) return null;
     const node = r(s);
     if (node == null) return null;
+    const stableKey =
+      ((s as unknown as Record<string, unknown>)["id"] as string | undefined) ||
+      ((s as unknown as Record<string, unknown>)["_key"] as string | undefined) ||
+      `sec-${i}-${String(s.type)}-${randomUUID()}`;
     return (
-      <li key={`sec-${i}-${s.type}`} className="w-full list-none">
+      <div key={stableKey} className="w-full">
         {node}
-      </li>
+      </div>
     );
   });
   const filtered = parts.filter((n): n is React.ReactNode => n != null);
-  return <ol className="flex flex-col w-full list-none p-0 m-0">{filtered}</ol>;
+  return (
+    <div data-sections className="flex flex-col w-full p-0 m-0">
+      {filtered}
+    </div>
+  );
 }

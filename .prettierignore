@@ -7,4 +7,6 @@ playwright-report
 test-results
 .next/types
 supabase/.home
+.tmp
 docs/FREEZE-REPORT-FASE*.md
+artifacts

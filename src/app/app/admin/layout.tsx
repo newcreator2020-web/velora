@@ -29,12 +29,24 @@ export default async function PlatformAdminLayout({ children }: { children: Reac
               <div className="text-xs text-zinc-500">Amministrazione clienti</div>
             </div>
           </div>
-          <nav aria-label="Platform Admin" className="flex items-center gap-1 text-sm">
+          <nav aria-label="Platform Admin" className="flex flex-wrap items-center gap-1 text-sm">
             <Link
               href="/app/admin/clients"
               className="rounded-md px-3 py-1.5 font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
             >
               Clienti
+            </Link>
+            <Link
+              href="/app/admin/prospects"
+              className="rounded-md px-3 py-1.5 font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            >
+              Prospetti
+            </Link>
+            <Link
+              href="/app/admin/media"
+              className="rounded-md px-3 py-1.5 font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            >
+              Media
             </Link>
           </nav>
         </div>

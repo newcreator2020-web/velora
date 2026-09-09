@@ -8,6 +8,7 @@ import {
   getBillingEnvStatus,
 } from "@/lib/server/billing";
 import { getSupabaseServiceClient } from "@/lib/supabase/service";
+import type { Database } from "@/types/supabase";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -278,10 +279,43 @@ export async function POST(req: NextRequest): Promise<Response> {
     "customer.subscription.created",
     "customer.subscription.updated",
     "customer.subscription.deleted",
+    "charge.refunded",
+    "payment_intent.payment_failed",
   ]);
   if (!ALLOWED.has(type)) {
     return NextResponse.json({ ok: true, code: "IGNORED_EVENT", type });
   }
+
+  // ===== HANDLER PRIORITARI: BOOKING PAYMENTS =====
+  // Distinguiamo booking_deposit / refund dal flusso billing subscription.
+  try {
+    if (type === "checkout.session.completed") {
+      const session = event.data.object as Stripe.Checkout.Session;
+      const isBookingFlow =
+        session.metadata?.["flow"] === "booking_deposit" ||
+        (typeof session.metadata?.["booking_id"] === "string" &&
+          session.metadata["booking_id"].length > 0);
+      if (isBookingFlow) {
+        return handleBookingCheckoutCompleted(stripe, session, providerEventId);
+      }
+    } else if (type === "charge.refunded") {
+      const charge = event.data.object as Stripe.Charge;
+      return handleChargeRefunded(charge, providerEventId);
+    } else if (type === "payment_intent.payment_failed") {
+      const pi = event.data.object as Stripe.PaymentIntent;
+      return handlePaymentIntentFailed(pi, providerEventId);
+    }
+  } catch (e) {
+    return NextResponse.json(
+      {
+        ok: false,
+        code: "PAYMENT_EVENT_EXCEPTION",
+        message: e instanceof Error ? e.message : String(e),
+      },
+      { status: 500 },
+    );
+  }
+  // ===== FINE HANDLER PRIORITARI =====
 
   // eslint-disable-next-line no-useless-assignment
   let subscription: Stripe.Subscription | null = null;
@@ -449,5 +483,476 @@ export async function POST(req: NextRequest): Promise<Response> {
     type,
     old_plan: oldPlan,
     new_plan: newPlan,
+  });
+}
+
+type PaymentAuditAction =
+  | "booking.deposit_paid"
+  | "booking.deposit_refunded"
+  | "booking.deposit_partially_refunded"
+  | "booking.payment_failed";
+
+async function appendPaymentAudit(
+  tenantId: string | null,
+  bookingId: string | null,
+  paymentId: string | null,
+  action: PaymentAuditAction,
+  meta: Record<string, unknown>,
+): Promise<void> {
+  if (!tenantId) return;
+  try {
+    const sb = getSupabaseServiceClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { provider_event_id, stripe_session_id, amount, currency, status } = meta as any;
+    const clean: Record<string, unknown> = {};
+    if (typeof provider_event_id === "string")
+      clean["provider_event_id"] = provider_event_id.slice(0, 32);
+    if (typeof stripe_session_id === "string")
+      clean["stripe_session_id"] = stripe_session_id.slice(0, 32);
+    if (typeof amount === "number") clean["amount"] = amount;
+    if (typeof currency === "string") clean["currency"] = currency;
+    if (typeof status === "string") clean["status"] = status;
+    clean["provider"] = PROVIDER;
+    clean["flow"] = "booking_deposit";
+    await sb
+      .from("audit_logs")
+      .insert({
+        tenant_id: tenantId,
+        actor_user_id: null,
+        action,
+        entity_type: "booking_payment",
+        entity_id: paymentId ? paymentId.slice(0, 64) : bookingId ? bookingId.slice(0, 64) : action,
+        metadata: clean as never,
+      })
+      .then(() => {});
+  } catch {
+    // audit append failure: NON-ATOMIC BY DESIGN. We never drop webhook processing.
+  }
+}
+
+type PaymentRow = Database["public"]["Tables"]["payments"]["Row"] & {
+  failure_reason?: string | null;
+  failure_code?: string | null;
+};
+type BookingPaymentStatusExtended =
+  Database["public"]["Tables"]["bookings"]["Row"]["payment_status"] | "failed" | "refunded";
+type BookingRow = Omit<Database["public"]["Tables"]["bookings"]["Row"], "payment_status"> & {
+  payment_status: BookingPaymentStatusExtended;
+};
+
+async function markPaymentEventIdempotency(
+  sb: ReturnType<typeof getSupabaseServiceClient>,
+  paymentId: string,
+  providerEventId: string,
+): Promise<{ idempotent: boolean }> {
+  try {
+    const up = await sb
+      .from("payments")
+      .update({ idempotency_key: providerEventId })
+      .eq("id", paymentId)
+      .is("idempotency_key", null)
+      .select("id")
+      .limit(1)
+      .maybeSingle();
+    if (up.error) {
+      const msg = (up.error?.message ?? "").toLowerCase();
+      if (msg.includes("unique") || msg.includes("duplicate")) {
+        return { idempotent: true };
+      }
+      throw up.error;
+    }
+    if (!up.data) {
+      return { idempotent: true };
+    }
+    return { idempotent: false };
+  } catch (e) {
+    const msg = String(e instanceof Error ? e.message : e).toLowerCase();
+    if (msg.includes("23505") || msg.includes("unique") || msg.includes("duplicate")) {
+      return { idempotent: true };
+    }
+    throw e;
+  }
+}
+
+async function handleBookingCheckoutCompleted(
+  stripe: Stripe,
+  session: Stripe.Checkout.Session,
+  providerEventId: string,
+): Promise<Response> {
+  const sb = getSupabaseServiceClient();
+  const sessionId = session.id;
+  const metaTenant = session.metadata?.["tenant_id"] ?? null;
+  const metaBooking = session.metadata?.["booking_id"] ?? null;
+  const piId =
+    typeof session.payment_intent === "string"
+      ? session.payment_intent
+      : (session.payment_intent?.id ?? null);
+  const customerIdRaw =
+    typeof session.customer === "string" ? session.customer : (session.customer?.id ?? null);
+  const customerId = typeof customerIdRaw === "string" ? customerIdRaw : null;
+
+  const sessionAmountTotal = typeof session.amount_total === "number" ? session.amount_total : null;
+  const amount =
+    sessionAmountTotal != null
+      ? Math.round(sessionAmountTotal) / 100
+      : Number(session.amount_subtotal ?? 0) / 100;
+  const currency = (session.currency ?? "eur").toLowerCase();
+
+  void stripe;
+  const existing = await sb
+    .from("payments")
+    .select("*")
+    .eq("stripe_session_id", sessionId)
+    .limit(1)
+    .maybeSingle();
+  if (existing.error) {
+    return NextResponse.json(
+      { ok: false, code: "PAYMENT_LOOKUP_FAILED", message: existing.error.message },
+      { status: 500 },
+    );
+  }
+  let payment: PaymentRow | null = (existing.data as PaymentRow | null) ?? null;
+
+  if (!payment) {
+    if (!metaTenant) {
+      return NextResponse.json({ ok: true, code: "NO_TENANT_IN_PAYMENT_METADATA" });
+    }
+    const insert = await sb
+      .from("payments")
+      .insert({
+        tenant_id: metaTenant,
+        booking_id: metaBooking,
+        stripe_session_id: sessionId,
+        stripe_payment_intent_id: piId,
+        stripe_customer_id: customerId,
+        amount,
+        currency,
+        status: "paid",
+        idempotency_key: providerEventId,
+      })
+      .select("*")
+      .limit(1)
+      .maybeSingle();
+    if (insert.error) {
+      const msg = String(insert.error.message).toLowerCase();
+      if (msg.includes("23505") || msg.includes("unique") || msg.includes("duplicate")) {
+        return NextResponse.json({
+          ok: true,
+          code: "IDEMPOTENT_DUPLICATE",
+          idempotent: true,
+        });
+      }
+      return NextResponse.json(
+        { ok: false, code: "PAYMENT_INSERT_FAILED", message: insert.error.message },
+        { status: 500 },
+      );
+    }
+    payment = (insert.data as PaymentRow | null) ?? null;
+  }
+
+  if (!payment) {
+    return NextResponse.json(
+      { ok: false, code: "PAYMENT_ROW_MISSING", message: "Unable to resolve payment row" },
+      { status: 500 },
+    );
+  }
+
+  if (payment.status === "paid") {
+    return NextResponse.json({
+      ok: true,
+      code: "ALREADY_PAID_IDEMPOTENT",
+      idempotent: true,
+      payment_id: payment.id,
+    });
+  }
+
+  const idem = await markPaymentEventIdempotency(sb, payment.id, providerEventId);
+  if (idem.idempotent) {
+    return NextResponse.json({
+      ok: true,
+      code: "IDEMPOTENT_DUPLICATE",
+      idempotent: true,
+      payment_id: payment.id,
+    });
+  }
+
+  const update = await sb
+    .from("payments")
+    .update({
+      status: "paid",
+      stripe_payment_intent_id: piId ?? payment.stripe_payment_intent_id,
+      stripe_customer_id: customerId ?? payment.stripe_customer_id,
+    })
+    .eq("id", payment.id);
+  if (update.error) {
+    return NextResponse.json(
+      { ok: false, code: "PAYMENT_UPDATE_FAILED", message: update.error.message },
+      { status: 500 },
+    );
+  }
+
+  const bookingId = payment.booking_id ?? metaBooking;
+  const tenantId = payment.tenant_id;
+  let newBookingStatus: "unpaid" | "deposit_paid" | "paid" = "deposit_paid";
+  if (bookingId) {
+    const bk = await sb
+      .from("bookings")
+      .select("id, deposit_amount, service_id")
+      .eq("id", bookingId)
+      .limit(1)
+      .maybeSingle();
+    if (bk.data) {
+      const booking = bk.data as BookingRow;
+      const svc = booking.service_id
+        ? await sb
+            .from("services")
+            .select("id, deposit_strategy, deposit_value, price_from, currency")
+            .eq("id", booking.service_id)
+            .limit(1)
+            .maybeSingle()
+        : null;
+      const priceFrom = (svc?.data as { price_from: number | null } | null)?.price_from ?? null;
+      const fullAmount = priceFrom != null && Number.isFinite(priceFrom) ? Number(priceFrom) : null;
+      const dep =
+        booking.deposit_amount != null && Number.isFinite(booking.deposit_amount)
+          ? Number(booking.deposit_amount)
+          : amount;
+      if (fullAmount != null && Math.abs(amount - fullAmount) < 0.005) {
+        newBookingStatus = "paid";
+      } else if (dep > 0 && Math.abs(amount - dep) < 0.005) {
+        newBookingStatus = "deposit_paid";
+      } else {
+        newBookingStatus = "deposit_paid";
+      }
+      const depAmtToSave =
+        booking.deposit_amount != null && Number.isFinite(booking.deposit_amount)
+          ? booking.deposit_amount
+          : amount;
+      await sb
+        .from("bookings")
+        .update({
+          payment_status: newBookingStatus,
+          deposit_amount: depAmtToSave,
+        })
+        .eq("id", bookingId)
+        .throwOnError();
+    } else {
+      await sb
+        .from("bookings")
+        .update({
+          payment_status: newBookingStatus,
+          deposit_amount: amount,
+        })
+        .eq("id", bookingId)
+        .throwOnError();
+    }
+  }
+
+  void appendPaymentAudit(tenantId, bookingId, payment.id, "booking.deposit_paid", {
+    provider_event_id: providerEventId,
+    stripe_session_id: sessionId,
+    amount,
+    currency,
+    status: newBookingStatus,
+  });
+
+  return NextResponse.json({
+    ok: true,
+    code: "BOOKING_DEPOSIT_PAID",
+    idempotent: false,
+    payment_id: payment.id,
+    booking_id: bookingId,
+    booking_payment_status: newBookingStatus,
+  });
+}
+
+async function handleChargeRefunded(
+  charge: Stripe.Charge,
+  providerEventId: string,
+): Promise<Response> {
+  const sb = getSupabaseServiceClient();
+  const piId =
+    typeof charge.payment_intent === "string"
+      ? charge.payment_intent
+      : (charge.payment_intent?.id ?? null);
+  if (!piId) {
+    return NextResponse.json({ ok: true, code: "NO_PAYMENT_INTENT_IN_CHARGE" });
+  }
+  const q = await sb
+    .from("payments")
+    .select("*")
+    .eq("stripe_payment_intent_id", piId)
+    .limit(1)
+    .maybeSingle();
+  if (q.error) {
+    return NextResponse.json(
+      { ok: false, code: "PAYMENT_LOOKUP_FAILED", message: q.error.message },
+      { status: 500 },
+    );
+  }
+  const payment: PaymentRow | null = (q.data as PaymentRow | null) ?? null;
+  if (!payment) {
+    return NextResponse.json({ ok: true, code: "PAYMENT_NOT_FOUND_BY_PI" });
+  }
+  if (payment.status === "refunded" || payment.status === "partially_refunded") {
+    const idemCheck = await markPaymentEventIdempotency(sb, payment.id, providerEventId);
+    if (idemCheck.idempotent) {
+      return NextResponse.json({
+        ok: true,
+        code: "IDEMPOTENT_DUPLICATE",
+        idempotent: true,
+        payment_id: payment.id,
+      });
+    }
+  }
+  const idem = await markPaymentEventIdempotency(sb, payment.id, providerEventId);
+  if (idem.idempotent) {
+    return NextResponse.json({
+      ok: true,
+      code: "IDEMPOTENT_DUPLICATE",
+      idempotent: true,
+      payment_id: payment.id,
+    });
+  }
+  const refundedCents = typeof charge.amount_refunded === "number" ? charge.amount_refunded : 0;
+  const totalCents = typeof charge.amount === "number" ? charge.amount : 0;
+  const refundedAmount = Math.round(refundedCents) / 100;
+  const fullyRefunded = totalCents > 0 && refundedCents >= totalCents && charge.refunded === true;
+  const newStatus: "refunded" | "partially_refunded" = fullyRefunded
+    ? "refunded"
+    : "partially_refunded";
+  const up = await sb.from("payments").update({ status: newStatus }).eq("id", payment.id);
+  if (up.error) {
+    return NextResponse.json(
+      { ok: false, code: "PAYMENT_UPDATE_FAILED", message: up.error.message },
+      { status: 500 },
+    );
+  }
+  const bookingId = payment.booking_id;
+  const tenantId = payment.tenant_id;
+  if (bookingId) {
+    await sb
+      .from("bookings")
+      .update({ payment_status: "unpaid" })
+      .eq("id", bookingId)
+      .throwOnError();
+  }
+  const action: "booking.deposit_refunded" | "booking.deposit_partially_refunded" = fullyRefunded
+    ? "booking.deposit_refunded"
+    : "booking.deposit_partially_refunded";
+  void appendPaymentAudit(tenantId, bookingId, payment.id, action, {
+    provider_event_id: providerEventId,
+    stripe_session_id: payment.stripe_session_id,
+    amount: refundedAmount,
+    currency: payment.currency,
+    status: newStatus,
+    fully_refunded: fullyRefunded,
+  });
+  return NextResponse.json({
+    ok: true,
+    code: fullyRefunded ? "BOOKING_DEPOSIT_REFUNDED" : "BOOKING_DEPOSIT_PARTIALLY_REFUNDED",
+    idempotent: false,
+    payment_id: payment.id,
+    booking_id: bookingId,
+    refund_status: newStatus,
+  });
+}
+
+async function handlePaymentIntentFailed(
+  pi: Stripe.PaymentIntent,
+  providerEventId: string,
+): Promise<Response> {
+  const sb = getSupabaseServiceClient();
+  const piId =
+    typeof pi === "string" || pi == null ? null : typeof pi.id === "string" ? pi.id : null;
+  if (!piId) {
+    return NextResponse.json({ ok: true, code: "NO_PAYMENT_INTENT_ID" });
+  }
+  const q = await sb
+    .from("payments")
+    .select("*")
+    .eq("stripe_payment_intent_id", piId)
+    .limit(1)
+    .maybeSingle();
+  if (q.error) {
+    return NextResponse.json(
+      { ok: false, code: "PAYMENT_LOOKUP_FAILED", message: q.error.message },
+      { status: 500 },
+    );
+  }
+  const payment: PaymentRow | null = (q.data as PaymentRow | null) ?? null;
+  if (!payment) {
+    return NextResponse.json({ ok: true, code: "PAYMENT_NOT_FOUND_BY_PI" });
+  }
+  if (payment.status === "failed" || payment.status === "disputed") {
+    const idemCheck = await markPaymentEventIdempotency(sb, payment.id, providerEventId);
+    if (idemCheck.idempotent) {
+      return NextResponse.json({
+        ok: true,
+        code: "IDEMPOTENT_DUPLICATE",
+        idempotent: true,
+        payment_id: payment.id,
+      });
+    }
+  }
+  const idem = await markPaymentEventIdempotency(sb, payment.id, providerEventId);
+  if (idem.idempotent) {
+    return NextResponse.json({
+      ok: true,
+      code: "IDEMPOTENT_DUPLICATE",
+      idempotent: true,
+      payment_id: payment.id,
+    });
+  }
+  const lastPiError =
+    typeof pi.last_payment_error?.message === "string" && pi.last_payment_error.message.length > 0
+      ? pi.last_payment_error.message.slice(0, 240)
+      : null;
+  const failureCode =
+    typeof pi.last_payment_error?.code === "string"
+      ? pi.last_payment_error.code.slice(0, 64)
+      : null;
+  const paymentUpdate = {
+    status: "failed" as const,
+    failure_reason: lastPiError,
+    failure_code: failureCode,
+  };
+  const up = await sb
+    .from("payments")
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- tipi Supabase non ancora rigenerati dopo migration #93 (failure_reason/failure_code)
+    .update(paymentUpdate as any)
+    .eq("id", payment.id);
+  if (up.error) {
+    return NextResponse.json(
+      { ok: false, code: "PAYMENT_UPDATE_FAILED", message: up.error.message },
+      { status: 500 },
+    );
+  }
+  const bookingId = payment.booking_id;
+  const tenantId = payment.tenant_id;
+  if (bookingId) {
+    const bookingUpdate = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- tipi Supabase non ancora rigenerati dopo migration #93 (enum 'failed' aggiunto)
+      payment_status: "failed" as any,
+    };
+    await sb.from("bookings").update(bookingUpdate).eq("id", bookingId).throwOnError();
+  }
+  void appendPaymentAudit(tenantId, bookingId, payment.id, "booking.payment_failed", {
+    provider_event_id: providerEventId,
+    stripe_session_id: payment.stripe_session_id,
+    stripe_payment_intent_id: piId,
+    amount: payment.amount,
+    currency: payment.currency,
+    status: "failed",
+    failure_reason: lastPiError,
+    failure_code: failureCode,
+  });
+  return NextResponse.json({
+    ok: true,
+    code: "BOOKING_DEPOSIT_FAILED",
+    idempotent: false,
+    payment_id: payment.id,
+    booking_id: bookingId,
+    booking_payment_status: "failed",
   });
 }

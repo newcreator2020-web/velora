@@ -1,12 +1,19 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { headers } from "next/headers";
+import { notFound, redirect } from "next/navigation";
+import { headers, cookies } from "next/headers";
+import { randomUUID } from "crypto";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { resolvePublicTenant } from "@/lib/server/site-engine";
 import { getBusinessAvailability } from "@/lib/server/booking";
 import BookingClientForm from "@/app/s/[slug]/booking/BookingClientForm";
 import type { Database } from "@/types/supabase";
+
+const CSRF_COOKIE_NAME = "velora_csrf_token";
+function safeToken(v: string | undefined): string {
+  if (v && v.length >= 16) return v;
+  return randomUUID().replace(/-/g, "");
+}
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +46,11 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export default async function HostPublicBookingPage() {
+type HostPublicBookingPageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function HostPublicBookingPage(props: HostPublicBookingPageProps) {
   const info = await getHostTenant();
   if (!info) notFound();
   const { result } = info;
@@ -53,6 +64,13 @@ export default async function HostPublicBookingPage() {
     .order("name");
   if (services.error) notFound();
   const availability = await getBusinessAvailability(tenantId);
+  const ck = await cookies();
+  const csrfToken = safeToken(ck.get(CSRF_COOKIE_NAME)?.value);
+  const sp = (await props.searchParams) ?? {};
+  const existing = sp["_csrf"] as string | undefined;
+  if (!existing || existing.length < 16 || existing !== csrfToken) {
+    redirect(`/booking?_csrf=${encodeURIComponent(csrfToken)}`);
+  }
   return (
     <main id="main-content" className="min-h-screen bg-neutral-50 pb-20 pt-12">
       <div className="mx-auto max-w-3xl px-4">
@@ -64,6 +82,7 @@ export default async function HostPublicBookingPage() {
       </div>
       <BookingClientForm
         slug={site.slug}
+        csrfToken={csrfToken}
         services={(services.data ?? []) as ServiceRow[]}
         availability={availability}
         timezone={site.timezone || "Europe/Rome"}

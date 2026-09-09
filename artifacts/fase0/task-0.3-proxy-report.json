@@ -1,0 +1,112 @@
+﻿{
+    "startedAt":  "2026-09-08T19:25:09.2830951Z",
+    "baseUrl":  "http://localhost:3000",
+    "tests":  [
+                  {
+                      "id":  "A.1",
+                      "label":  "POST booking #1 SENZA CSRF header/cookie",
+                      "expected":  "status=403 error=csrf_mismatch",
+                      "got":  {
+                                  "status":  403,
+                                  "error_code":  "csrf_mismatch",
+                                  "body":  "{\"error\":\"csrf_mismatch\",\"message\":\"Token di sicurezza CSRF mancante o non valido. Ricarica la pagina e riprova.\"}"
+                              },
+                      "pass":  true
+                  },
+                  {
+                      "id":  "A.2",
+                      "label":  "POST booking #2 SENZA CSRF header/cookie",
+                      "expected":  "status=403 error=csrf_mismatch",
+                      "got":  {
+                                  "status":  403,
+                                  "error_code":  "csrf_mismatch",
+                                  "body":  "{\"error\":\"csrf_mismatch\",\"message\":\"Token di sicurezza CSRF mancante o non valido. Ricarica la pagina e riprova.\"}"
+                              },
+                      "pass":  true
+                  },
+                  {
+                      "id":  "A.3",
+                      "label":  "POST booking #3 SENZA CSRF header/cookie",
+                      "expected":  "status=403 error=csrf_mismatch",
+                      "got":  {
+                                  "status":  403,
+                                  "error_code":  "csrf_mismatch",
+                                  "body":  "{\"error\":\"csrf_mismatch\",\"message\":\"Token di sicurezza CSRF mancante o non valido. Ricarica la pagina e riprova.\"}"
+                              },
+                      "pass":  true
+                  },
+                  {
+                      "id":  "B.1",
+                      "label":  "GET booking 12x \u003c 60s: #11/#12 = 429 + retry-after header",
+                      "expected":  "count429 \u003e=2 AND first429 tra 11 e 12",
+                      "got":  {
+                                  "statuses":  [
+                                                   {
+                                                       "n":  1,
+                                                       "status":  200
+                                                   },
+                                                   {
+                                                       "n":  2,
+                                                       "status":  200
+                                                   },
+                                                   {
+                                                       "n":  3,
+                                                       "status":  200
+                                                   },
+                                                   {
+                                                       "n":  4,
+                                                       "status":  200
+                                                   },
+                                                   {
+                                                       "n":  5,
+                                                       "status":  200
+                                                   },
+                                                   {
+                                                       "n":  6,
+                                                       "status":  200
+                                                   },
+                                                   {
+                                                       "n":  7,
+                                                       "status":  200
+                                                   },
+                                                   {
+                                                       "n":  8,
+                                                       "status":  200
+                                                   },
+                                                   {
+                                                       "n":  9,
+                                                       "status":  200
+                                                   },
+                                                   {
+                                                       "n":  10,
+                                                       "status":  200
+                                                   },
+                                                   {
+                                                       "n":  11,
+                                                       "status":  429,
+                                                       "retry_after":  "46",
+                                                       "error_code":  "too_many_requests"
+                                                   },
+                                                   {
+                                                       "n":  12,
+                                                       "status":  429,
+                                                       "retry_after":  "46",
+                                                       "error_code":  "too_many_requests"
+                                                   }
+                                               ],
+                                  "ok_before_limit":  10,
+                                  "first_429_at":  11,
+                                  "count_429":  2,
+                                  "last_ok_at":  10
+                              },
+                      "pass":  true
+                  }
+              ],
+    "summary":  {
+                    "total":  4,
+                    "passed":  4,
+                    "failed":  0,
+                    "allPassed":  true
+                },
+    "endedAt":  "2026-09-08T19:25:26.0176843Z"
+}

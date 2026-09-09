@@ -10,7 +10,11 @@ const ALLOWED_DB_HOSTS: ReadonlySet<string> = new Set([
   "localhost",
   "db.dgekfjkuvnofwdwxflms.supabase.co",
 ]);
-const SAFE_PROJECT_IDS: ReadonlySet<string> = new Set(["dgekfjkuvnofwdwxflms", "velora-local"]);
+const SAFE_PROJECT_IDS: ReadonlySet<string> = new Set([
+  "dgekfjkuvnofwdwxflms",
+  "velora-local",
+  "uiekkhgspziozprxulit",
+]);
 const DEFAULT_LOCAL: Readonly<Record<string, string>> = {
   NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321",
   NEXT_PUBLIC_SUPABASE_ANON_KEY:

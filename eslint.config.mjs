@@ -18,6 +18,7 @@ const compat = new FlatCompat({
 const IGNORES = [
   "node_modules/**",
   ".next/**",
+  ".tmp/**",
   "out/**",
   "build/**",
   "coverage/**",

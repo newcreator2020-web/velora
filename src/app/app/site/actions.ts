@@ -1,5 +1,6 @@
 "use server";
 
+import { createHash, randomBytes } from "node:crypto";
 import {
   loadEditorialDraft,
   saveEditorialDraft,
@@ -9,81 +10,119 @@ import {
   type PublishResult,
 } from "@/lib/server/site-studio";
 import { requireTenantMembership } from "@/lib/server/auth";
-import { editorialDraftInputSchema } from "@/lib/server/site-studio-pure";
-import type {
-  StudioDraftSection,
-  StudioDraftService,
-  StudioDraftTheme,
+import {
+  editorialDraftInputSchema,
+  findImagesMissingAlt,
+  type AltTextIssue,
+  type StudioDraftSection,
+  type StudioDraftService,
+  type StudioDraftTheme,
 } from "@/lib/server/site-studio-pure";
-import { resolveTenantEntitlements, type EntitlementsSnapshot } from "@/lib/server/entitlements";
+import { resolveTenantEntitlements } from "@/lib/server/entitlements";
 import { getSupabaseServiceClient } from "@/lib/supabase/service";
 import { normalizeHostname, slugSchema } from "@/lib/server/site-engine";
 import { getDnsResolver } from "@/lib/server/dns-resolver";
 import { revalidateTag } from "next/cache";
-import { randomBytes } from "node:crypto";
+import {
+  PUBLICATION_ALLOWED_TRANSITIONS,
+  PUBLICATION_STATUS_LABEL,
+  type DomainActionResult,
+  type DomainStateResult,
+  type DomainStatus,
+  type EditorialActionResult,
+  type EditorialInitialState,
+  type PublicationStatus,
+  type PublicationVersionRow,
+  type PublicationWorkflowState,
+  type TransitionPublicationResult,
+} from "./lib";
 
-export type EditorialActionResult =
-  | {
-      ok: true;
-      revision: string;
-      updated_at: string;
-      values?: {
-        sections: StudioDraftSection[];
-        services: StudioDraftService[];
-        theme: StudioDraftTheme;
+function normalizePublicationStatus(raw: string | null | undefined): PublicationStatus {
+  switch (raw) {
+    case "ready_for_qa":
+      return "ready_for_qa";
+    case "validated":
+      return "validated";
+    case "published":
+      return "published";
+    default:
+      return "draft";
+  }
+}
+
+async function loadWorkflowState(ctx: {
+  tenant: { id: string } | null;
+}): Promise<PublicationWorkflowState> {
+  const fallback: PublicationWorkflowState = {
+    status: "draft",
+    version_number: 1,
+    latest_published_at: null,
+    latest_published_version: null,
+  };
+  if (!ctx.tenant?.id) return fallback;
+  try {
+    const svc = getSupabaseServiceClient();
+    const svcAny = svc as unknown as {
+      from: (relation: string) => {
+        select: (cols: string) => {
+          eq: (
+            k: string,
+            v: unknown,
+          ) => {
+            limit: (n: number) => {
+              maybeSingle: () => Promise<{
+                data: Record<string, unknown> | null;
+                error?: { message?: string; code?: string } | null;
+              }>;
+            };
+          };
+        };
       };
-      info?: { kind: "SAVED" | "PUBLISHED" | "UNPUBLISHED"; payload?: unknown };
-      error?: undefined;
-      code?: undefined;
-      fieldErrors?: undefined;
-    }
-  | {
-      ok: false;
-      error: string;
-      code?:
-        | "VALIDATION"
-        | "AUTH"
-        | "INTERNAL"
-        | "CONCURRENT"
-        | "AUTHZ"
-        | "NO_DRAFT"
-        | "ENTITLEMENT_DENIED"
-        | "LIMIT_REACHED"
-        | "CROSS_TENANT";
-      fieldErrors?: Partial<Record<string, string[]>>;
-      values?: {
-        sections: StudioDraftSection[];
-        services: StudioDraftService[];
-        theme: StudioDraftTheme;
-      };
-      info?: undefined;
     };
-
-export type EditorialInitialState = {
-  ok: false;
-  error: string;
-  code?: undefined;
-  values: {
-    sections: StudioDraftSection[];
-    services: StudioDraftService[];
-    theme: StudioDraftTheme;
-  };
-  state: {
-    tenant_id: string;
-    slug: string;
-    published: boolean;
-    published_at: string | null;
-    revision: string | null;
-    updated_at: string | null;
-    business_name: string;
-  };
-  entitlements: EntitlementsSnapshot;
-};
+    const q = await svcAny
+      .from("site_publication_versions")
+      .select(
+        "id,tenant_id,version_number,status,snapshot,hash_sha256,published_at,created_by,note,created_at,updated_at",
+      )
+      .eq("tenant_id", ctx.tenant.id)
+      .limit(1)
+      .maybeSingle();
+    const row = q.data as PublicationVersionRow | null | undefined;
+    if (!row) {
+      const fallbackStatus: PublicationStatus = (
+        (ctx as { tenant?: { published?: unknown } | null }).tenant as
+          { published?: unknown } | undefined
+      )?.published
+        ? "published"
+        : "draft";
+      return {
+        ...fallback,
+        status: fallbackStatus,
+        latest_published_at:
+          ((
+            (ctx as { tenant?: { published_at?: string | null } | null }).tenant as
+              { published_at?: string | null } | undefined
+          )?.published_at as string | null) ?? null,
+        latest_published_version: fallbackStatus === "published" ? 1 : null,
+      };
+    }
+    const status = normalizePublicationStatus(row.status);
+    return {
+      status,
+      version_number: Number(row.version_number) || 1,
+      latest_published_at: status === "published" ? row.published_at : null,
+      latest_published_version: status === "published" ? Number(row.version_number) || 1 : null,
+    };
+  } catch {
+    return fallback;
+  }
+}
 
 export async function initialEditorialState(): Promise<EditorialInitialState> {
   const ctx = await requireTenantMembership();
   const draft = await loadEditorialDraft(ctx as Parameters<typeof loadEditorialDraft>[0]);
   const entitlements = await resolveTenantEntitlements(ctx);
+  const workflow = await loadWorkflowState(ctx as Parameters<typeof loadWorkflowState>[0]);
 
   const rawValues = {
     sections: draft.sections as StudioDraftSection[],
@@ -92,6 +131,13 @@ export async function initialEditorialState(): Promise<EditorialInitialState> {
   };
   void editorialDraftInputSchema.safeParse(rawValues);
 
+  const tenantPublished = Boolean((ctx.tenant as { published?: unknown }).published ?? false);
+  const derivedPublished = workflow.status === "published" ? true : tenantPublished;
+  const derivedPublishedAt =
+    workflow.status === "published"
+      ? workflow.latest_published_at
+      : (((ctx.tenant as { published_at?: string | null }).published_at as string | null) ?? null);
+
   return {
     ok: false,
     error: "",
@@ -99,13 +145,13 @@ export async function initialEditorialState(): Promise<EditorialInitialState> {
     state: {
       tenant_id: ctx.tenant!.id,
       slug: ctx.tenant!.slug,
-      published: Boolean((ctx.tenant as { published?: unknown }).published ?? false),
-      published_at:
-        ((ctx.tenant as { published_at?: string | null }).published_at as string | null) ?? null,
+      published: derivedPublished,
+      published_at: derivedPublishedAt,
       revision: draft.revision,
       updated_at: draft.updated_at,
       business_name:
         (ctx.business_profile?.display_name as string) ?? (ctx.tenant?.name as string) ?? "",
+      workflow,
     },
     entitlements,
   };
@@ -189,9 +235,108 @@ export async function publishEditorialAction(
   formData: FormData,
 ): Promise<EditorialActionResult> {
   const revision = (formData.get("revision") as string | null) ?? null;
+  const ctx = await requireTenantMembership();
+  const draft = await loadEditorialDraft(ctx as Parameters<typeof loadEditorialDraft>[0]);
+
+  const workflow = await loadWorkflowState(ctx as Parameters<typeof loadWorkflowState>[0]);
+
+  const altIssues: AltTextIssue[] = findImagesMissingAlt(
+    draft.sections as Parameters<typeof findImagesMissingAlt>[0],
+  );
+  if (altIssues.length > 0) {
+    const snapshot = snapshotFromInput(formData);
+    const details: string[] = altIssues.map((it) => {
+      const kind = it.issue === "missing_alt" ? "CAMPO ALT MANCANTE" : "ALT VUOTO";
+      return `${kind} — ${it.breadcrumb}`;
+    });
+    const shortMsg =
+      altIssues.length === 1
+        ? `1 immagine ha problemi SEO: aggiungi un testo descrittivo (alt text) prima di pubblicare.`
+        : `${altIssues.length} immagini hanno problemi SEO: aggiungi testi descrittivi (alt text) prima di pubblicare.`;
+    return {
+      ok: false,
+      error: shortMsg,
+      code: "VALIDATION",
+      fieldErrors: {
+        publish: details,
+      },
+      values: snapshot,
+    };
+  }
+
+  if (workflow.status !== "validated" && workflow.status !== "published") {
+    const snapshot = snapshotFromInput(formData);
+    return {
+      ok: false,
+      error: `Per pubblicare devi prima portare lo stato in "Validata" (attuale: ${PUBLICATION_STATUS_LABEL[workflow.status]}).`,
+      code: "VALIDATION",
+      fieldErrors: {
+        publish: [
+          `Workflow: passa per gli stati Bozza → Pronta per QA → Validata prima di Pubblica.`,
+        ],
+      },
+      values: snapshot,
+    };
+  }
+
   const res = (await publishSiteDraft(revision)) as PublishResult;
   if (res.ok) {
-    const ctx = await requireTenantMembership();
+    try {
+      const svc = getSupabaseServiceClient();
+      const svcAny = svc as unknown as {
+        from: (relation: string) => {
+          upsert: (payload: Record<string, unknown>, opts?: { onConflict?: string }) => unknown;
+        };
+      };
+      const nextVersion = (workflow.version_number || 0) + 1;
+      const snapshotJSON = {
+        sections: draft.sections,
+        services: draft.services,
+        theme: draft.theme,
+        revision: draft.revision,
+        generated_at: new Date().toISOString(),
+      };
+      let hash: string | null = null;
+      try {
+        hash = createHash("sha256").update(JSON.stringify(snapshotJSON)).digest("hex");
+      } catch {
+        hash = null;
+      }
+      void svcAny.from("site_publication_versions").upsert(
+        {
+          tenant_id: ctx.tenant!.id,
+          status: "published",
+          version_number: nextVersion,
+          snapshot: snapshotJSON,
+          hash_sha256: hash,
+          published_at: res.published_at,
+          created_by: (ctx.user as { id?: string } | undefined)?.id ?? null,
+          note: "Pubblicazione diretta da SiteStudio",
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "tenant_id" },
+      );
+      void svc.from("audit_logs").insert({
+        tenant_id: ctx.tenant!.id,
+        actor_user_id: (ctx.user as { id?: string } | undefined)?.id ?? null,
+        action: "site.published",
+        entity_type: "site_publication",
+        entity_id: ctx.tenant!.id,
+        metadata: {
+          success: true,
+          from: workflow.status,
+          to: "published",
+          version_number: nextVersion,
+          published_at: res.published_at,
+          sections_applied: res.sections_applied,
+          services_applied: res.services_applied,
+          theme_applied: res.theme_applied,
+          version_hash: hash,
+        } as unknown as import("@/types/supabase").Json,
+      });
+    } catch {
+      // audit non bloccante
+    }
     const fresh = await loadEditorialDraft(ctx as Parameters<typeof loadEditorialDraft>[0]);
     return {
       ok: true,
@@ -213,6 +358,24 @@ export async function publishEditorialAction(
       },
     };
   }
+  try {
+    const s = getSupabaseServiceClient();
+    void s.from("audit_logs").insert({
+      tenant_id: ctx.tenant?.id ?? null,
+      actor_user_id: (ctx.user as { id?: string } | undefined)?.id ?? null,
+      action: "site.publish_attempt",
+      entity_type: "site_publication",
+      entity_id: ctx.tenant?.id ?? null,
+      metadata: {
+        success: false,
+        code: res.code,
+        message: res.message,
+        revision_input: revision,
+      } as unknown as import("@/types/supabase").Json,
+    });
+  } catch {
+    // audit non bloccante
+  }
   const snapshot = snapshotFromInput(formData);
   return {
     ok: false,
@@ -225,6 +388,42 @@ export async function publishEditorialAction(
 export async function unpublishEditorialAction(): Promise<EditorialActionResult> {
   const res = await unpublishSite();
   if (res.ok) {
+    try {
+      const ctx = await requireTenantMembership();
+      const svc = getSupabaseServiceClient();
+      const svcAny = svc as unknown as {
+        from: (relation: string) => {
+          upsert: (payload: Record<string, unknown>, opts?: { onConflict?: string }) => unknown;
+        };
+      };
+      void svcAny.from("site_publication_versions").upsert(
+        {
+          tenant_id: ctx.tenant!.id,
+          status: "draft",
+          version_number: 1,
+          snapshot: {} as Record<string, unknown>,
+          hash_sha256: null,
+          published_at: null,
+          note: "Unpublish manuale da SiteStudio",
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "tenant_id" },
+      );
+      void svc.from("audit_logs").insert({
+        tenant_id: ctx.tenant!.id,
+        actor_user_id: (ctx.user as { id?: string } | undefined)?.id ?? null,
+        action: "site.state_changed",
+        entity_type: "site_publication",
+        entity_id: ctx.tenant!.id,
+        metadata: {
+          from: "published",
+          to: "draft",
+          reason: "unpublish_manual",
+        } as unknown as import("@/types/supabase").Json,
+      });
+    } catch {
+      // audit non bloccante
+    }
     const ctx = await requireTenantMembership();
     const fresh = await loadEditorialDraft(ctx as Parameters<typeof loadEditorialDraft>[0]);
     return {
@@ -246,33 +445,215 @@ export async function unpublishEditorialAction(): Promise<EditorialActionResult>
   };
 }
 
-export type DomainStatus = "none" | "pending" | "verified" | "failed";
-
-export type DomainStateResult = {
-  ok: true;
-  customDomain: string | null;
-  temporaryDomain: string | null;
-  verificationToken: string;
-  status: DomainStatus;
-  statusReason?: string | null;
-  routingReady: boolean;
-  targetCname: string;
-  targetA: string;
-  slug: string;
-  tenantStatus: string;
-  canonicalUrl: string | null;
-};
-
-export type DomainActionResult =
-  | {
-      ok: true;
-      message?: string;
+export async function transitionPublicationAction(
+  _prev: TransitionPublicationResult,
+  formData: FormData,
+): Promise<TransitionPublicationResult> {
+  try {
+    const ctx = await requireTenantMembership();
+    if (!ctx.tenant?.id) {
+      return { ok: false, error: "Autenticazione richiesta.", code: "AUTH" };
     }
-  | {
-      ok: false;
-      error: string;
-      code?: "AUTH" | "VALIDATION" | "INTERNAL" | "VERIFICATION_FAILED" | "ROUTING_NOT_READY";
+    const fromRaw = (formData.get("from_status") as string | null) ?? "";
+    const toRaw = (formData.get("to_status") as string | null) ?? "";
+    const note = (formData.get("note") as string | null) ?? null;
+    const from = normalizePublicationStatus(fromRaw || "draft");
+    const to = normalizePublicationStatus(toRaw || "draft");
+    if (from === to) {
+      return {
+        ok: false,
+        error: "Stato di partenza e destinazione coincidono.",
+        code: "VALIDATION",
+        from,
+        to,
+      };
+    }
+    const allowed = PUBLICATION_ALLOWED_TRANSITIONS[from] ?? [];
+    if (!allowed.includes(to)) {
+      return {
+        ok: false,
+        error: `Transizione non consentita: ${PUBLICATION_STATUS_LABEL[from]} → ${PUBLICATION_STATUS_LABEL[to]}`,
+        code: "INVALID_TRANSITION",
+        from,
+        to,
+      };
+    }
+
+    const snapshotDraft = loadEditorialDraft(ctx as Parameters<typeof loadEditorialDraft>[0]);
+    const svc = getSupabaseServiceClient();
+    const svcAny = svc as unknown as {
+      from: (relation: string) => {
+        select: (cols: string) => {
+          eq: (
+            k: string,
+            v: unknown,
+          ) => {
+            limit: (n: number) => {
+              maybeSingle: () => Promise<{
+                data: Record<string, unknown> | null;
+                error?: { message?: string; code?: string } | null;
+              }>;
+            };
+          };
+        };
+        upsert: (
+          payload: Record<string, unknown>,
+          opts?: { onConflict?: string },
+        ) => {
+          select: (cols: string) => {
+            limit: (n: number) => {
+              maybeSingle: () => Promise<{
+                data: Record<string, unknown> | null;
+                error?: { message?: string; code?: string } | null;
+              }>;
+            };
+          };
+        };
+      };
     };
+
+    const existingQ = await svcAny
+      .from("site_publication_versions")
+      .select(
+        "id,tenant_id,version_number,status,snapshot,hash_sha256,published_at,created_by,note,created_at,updated_at",
+      )
+      .eq("tenant_id", ctx.tenant.id)
+      .limit(1)
+      .maybeSingle();
+    const existing = existingQ.data as PublicationVersionRow | null | undefined;
+    const currentStatus = existing ? normalizePublicationStatus(existing.status) : "draft";
+    if (currentStatus !== from) {
+      return {
+        ok: false,
+        error: `Stato corrente non corrisponde (atteso: ${from}, trovato: ${currentStatus}). Ricarica la pagina.`,
+        code: "INVALID_TRANSITION",
+        from: currentStatus,
+        to,
+      };
+    }
+
+    const draft = await snapshotDraft;
+    const snapshotJSON = {
+      sections: draft.sections,
+      services: draft.services,
+      theme: draft.theme,
+      revision: draft.revision,
+      generated_at: new Date().toISOString(),
+    };
+    const snapshotStr = JSON.stringify(snapshotJSON);
+    let hash: string | null = null;
+    try {
+      hash = createHash("sha256").update(snapshotStr).digest("hex");
+    } catch {
+      hash = null;
+    }
+
+    let nextVersion = existing ? Number(existing.version_number) || 1 : 1;
+    let publishedAt: string | null = existing?.published_at ?? null;
+    let auditAction = "site.state_changed";
+    let auditExtra: Record<string, unknown> = {};
+
+    if (to === "published") {
+      nextVersion = (existing?.version_number || 0) + 1;
+      publishedAt = new Date().toISOString();
+      auditAction = "site.published";
+      auditExtra = {
+        version_number: nextVersion,
+        published_at: publishedAt,
+        version_hash: hash,
+      };
+    } else if (from === "published" && to === "draft") {
+      auditAction = "site.rolled_back";
+      auditExtra = {
+        previous_version_id: existing?.id ?? null,
+        previous_version_number: existing?.version_number ?? null,
+      };
+    }
+
+    const upsertPayload: Record<string, unknown> = {
+      tenant_id: ctx.tenant.id,
+      status: to,
+      version_number: nextVersion,
+      snapshot: snapshotJSON,
+      hash_sha256: hash,
+      published_at: publishedAt,
+      created_by: (ctx.user as { id?: string } | undefined)?.id ?? null,
+      note: note?.slice(0, 500) ?? existing?.note ?? null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const ups = await svcAny
+      .from("site_publication_versions")
+      .upsert(upsertPayload, { onConflict: "tenant_id" })
+      .select("version_number,status,published_at")
+      .limit(1)
+      .maybeSingle();
+    if (ups.error) {
+      return {
+        ok: false,
+        error:
+          process.env.NODE_ENV === "production" ? "Errore interno." : `DB: ${ups.error.message}`,
+        code: "INTERNAL",
+        from,
+        to,
+      };
+    }
+
+    if (to === "published") {
+      const publishRes = await publishSiteDraft(draft.revision);
+      if (!publishRes.ok) {
+        type ErrCode = "AUTH" | "VALIDATION" | "INTERNAL" | "AUTHZ" | "INVALID_TRANSITION";
+        const mapToErr: Record<string, ErrCode> = {
+          AUTH: "AUTH",
+          INTERNAL: "INTERNAL",
+          AUTHZ: "AUTHZ",
+        };
+        const safeCode: ErrCode = mapToErr[publishRes.code as string] ?? "INTERNAL";
+        return {
+          ok: false,
+          error: publishRes.message,
+          code: safeCode,
+          from,
+          to,
+        };
+      }
+    }
+    if (from === "published" && to === "draft") {
+      await unpublishSite();
+    }
+
+    try {
+      void svc.from("audit_logs").insert({
+        tenant_id: ctx.tenant.id,
+        actor_user_id: (ctx.user as { id?: string } | undefined)?.id ?? null,
+        action: auditAction,
+        entity_type: "site_publication",
+        entity_id: ctx.tenant.id,
+        metadata: {
+          from,
+          to,
+          note: note ?? null,
+          ...auditExtra,
+        } as unknown as import("@/types/supabase").Json,
+      });
+    } catch {
+      // audit non bloccante
+    }
+
+    return {
+      ok: true,
+      from,
+      to,
+      version_number: Number(
+        (ups.data as { version_number?: unknown } | null)?.version_number ?? nextVersion,
+      ),
+      info: `Stato aggiornato: ${PUBLICATION_STATUS_LABEL[from]} → ${PUBLICATION_STATUS_LABEL[to]}`,
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Errore interno";
+    return { ok: false, error: msg, code: "INTERNAL" };
+  }
+}
 
 function verificationTokenFor(tenantId: string): string {
   const base = (tenantId || "").replace(/[^a-z0-9]/gi, "").toLowerCase();

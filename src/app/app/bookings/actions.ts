@@ -5,6 +5,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { requireTenantRole } from "@/lib/server/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { notifyBookingStatusChanged } from "@/lib/server/booking-email-hooks";
 import {
   changeBookingStatus,
   updateCustomer,
@@ -29,7 +30,10 @@ export async function cancelBookingAction(_prevState: unknown, form: FormData) {
     booking_id: parsed.data.booking_id,
     to_status: "cancelled",
   });
-  if (res.ok) return { ok: true as const, code: "OK" };
+  if (res.ok) {
+    notifyBookingStatusChanged({ booking_id: parsed.data.booking_id, to_status: "cancelled" });
+    return { ok: true as const, code: "OK" };
+  }
   return { ok: false as const, error: res.message, code: res.code };
 }
 
@@ -299,6 +303,8 @@ export async function rescheduleBookingAction(
     if (code !== "OK") {
       return { ok: false, code: code || "RPC_ERROR", error: message || "Spostamento fallito." };
     }
+    const bookingIdOut = String(row["booking_id_out"] ?? d.booking_id);
+    notifyBookingStatusChanged({ booking_id: bookingIdOut, to_status: "rescheduled" });
     revalidatePath("/app/calendar");
     return {
       ok: true,

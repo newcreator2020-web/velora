@@ -36,7 +36,7 @@ export default async function SitePreviewPage() {
         </div>
       </div>
       <main id="main-content" className="min-h-screen antialiased">
-        <SiteShell theme={publicSite.theme}>
+        <SiteShell theme={publicSite.theme} siteSlug={null}>
           <SiteRenderer sections={publicSite.sections} />
         </SiteShell>
       </main>

@@ -8,9 +8,8 @@ import {
   removeCustomDomainAction,
   verifyCustomDomainAction,
   getDomainState,
-  type DomainActionResult,
-  type DomainStatus,
 } from "../actions";
+import { type DomainActionResult, type DomainStatus } from "../lib";
 
 type LoadedDomainState = Extract<Awaited<ReturnType<typeof getDomainState>>, { ok: true }>;
 
@@ -215,7 +214,7 @@ function StatusBadge({ status }: { status: DomainStatus }) {
     },
   };
   const key: DomainStatus = Object.prototype.hasOwnProperty.call(map, status) ? status : "none";
-  const m = map[key] ?? map["none"];
+  const m = map[key]!;
   return (
     <div
       role="status"

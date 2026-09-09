@@ -1,0 +1,11 @@
+SUPABASE LINK MANUAL CONFIRMED
+Timestamp: 2026-09-08 (APPROVAL SPEC VENDIBILE 38 PUNTI)
+Stato Connessione: Connesso MANUALMENTE tramite Supabase Dashboard Browser (conferma utente: "e gia connesso" 2026-09-08)
+Supabase Project Ref: uiekkhgspziozprxulit
+Supabase Public URL (non-secret): https://uiekkhgspziozprxulit.supabase.co
+MCP Tool get_tables() Stato: FALLISCE code=400002 (project id not found da MCP config)
+WORKAROUND VALIDO PER TUTTA LA SPEC:
+  - Source of Truth per schema DB = 91 file migrations in ./supabase/migrations/ (ultimo #91 20260907201500_fase16_q3_audit_price.sql)
+  - Per test DB reali si usa Supabase Dashboard browser manuale (se necessario)
+  - Per apply nuove migrations (solo #92+) = verifica fatto da script locale, NON push cloud senza approvazione
+Chiavi Secret Location: .env root progetto. MAI stampare valore.

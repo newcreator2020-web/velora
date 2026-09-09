@@ -9,6 +9,9 @@ export const SECTION_TYPES = [
   "staff",
   "reviews",
   "contact",
+  "price_list",
+  "features_cta",
+  "booking_widget",
 ] as const;
 
 export type SectionType = (typeof SECTION_TYPES)[number];
@@ -17,10 +20,45 @@ export const ALLOWED_VARIANTS = [
   "default",
   "centered",
   "split",
+  "split_hero_left",
+  "fullscreen",
   "minimal",
   "cards",
   "carousel",
+  "table",
+  "list",
+  "masonry",
+  "grid",
+  "compact",
+  "full",
+  "premium",
 ] as const;
+
+export type SectionVariant = (typeof ALLOWED_VARIANTS)[number];
+
+export const SECTION_VARIANTS: Record<SectionType, ReadonlyArray<SectionVariant>> = {
+  hero: ["split", "split_hero_left", "fullscreen", "minimal", "centered", "default"],
+  about: ["centered", "split", "default", "minimal"],
+  services: ["cards", "list", "default"],
+  gallery: ["grid", "masonry", "default"],
+  staff: ["cards", "compact", "default"],
+  reviews: ["carousel", "cards", "default"],
+  contact: ["split", "minimal", "default", "centered"],
+  price_list: ["table", "cards", "default"],
+  features_cta: ["split", "minimal", "default", "premium"],
+  booking_widget: ["default", "compact", "full"],
+} as const;
+
+export function getVariantsForSection(t: SectionType): ReadonlyArray<SectionVariant> {
+  return SECTION_VARIANTS[t] ?? ["default"];
+}
+
+export function isVariantAllowedForSection(t: unknown, v: unknown): v is SectionVariant {
+  if (typeof t !== "string" || !SECTION_TYPES.includes(t as SectionType)) return false;
+  if (typeof v !== "string") return false;
+  const list = SECTION_VARIANTS[t as SectionType];
+  return list ? (list as readonly string[]).includes(v) : false;
+}
 
 export const FONT_HEADING_ALLOWED = ["sans", "serif", "mono", "display"] as const;
 export const FONT_BODY_ALLOWED = ["sans", "serif", "mono"] as const;
@@ -40,6 +78,14 @@ export function isSingletonSection(t: unknown): t is "hero" | "about" | "contact
 
 const hexColor = z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, "colore hex invalido");
 
+export const DESIGN_PRESET_ALLOWED = [
+  "elegant",
+  "soft_beauty",
+  "barber_strong",
+  "minimal",
+] as const;
+export type DesignPresetAllowed = (typeof DESIGN_PRESET_ALLOWED)[number];
+
 export const themeTokensSchema = z.object({
   primary: hexColor.nullish(),
   background: hexColor.nullish(),
@@ -48,6 +94,9 @@ export const themeTokensSchema = z.object({
   radius: z.enum(RADIUS_ALLOWED).nullish(),
   headingFont: z.enum(FONT_HEADING_ALLOWED).nullish(),
   bodyFont: z.enum(FONT_BODY_ALLOWED).nullish(),
+  preset: z.enum(DESIGN_PRESET_ALLOWED).nullish(),
+  logo_url: z.string().max(2000).nullish(),
+  logo_alt: z.string().max(200).nullish(),
 });
 
 export type PublicTheme = z.infer<typeof themeTokensSchema>;
@@ -76,12 +125,16 @@ export const heroSettingsSchema = z.object({
   ctaTarget,
   alignment,
   variant: variantAllowed.optional(),
+  hero_cover_url: z.string().max(2000).nullish(),
+  hero_cover_alt: z.string().max(200).nullish(),
 });
 
 export const aboutSettingsSchema = z.object({
   eyebrow,
   variant: variantAllowed.optional(),
   alignment,
+  about_image_url: z.string().max(2000).nullish(),
+  about_image_alt: z.string().max(200).nullish(),
 });
 
 export const servicesSettingsSchema = z.object({
@@ -116,6 +169,30 @@ export const contactSettingsSchema = z.object({
   showForm: z.boolean().nullish(),
 });
 
+export const priceListSettingsSchema = z.object({
+  eyebrow,
+  headline: nonEmptyText(120).nullish(),
+  variant: variantAllowed.optional(),
+});
+
+export const featuresCtaSettingsSchema = z.object({
+  eyebrow,
+  headline: nonEmptyText(160).nullish(),
+  subheadline: nonEmptyText(320).nullish(),
+  ctaPrimaryLabel: nonEmptyText(40).nullish(),
+  ctaPrimaryTarget: ctaTarget,
+  ctaSecondaryLabel: nonEmptyText(40).nullish(),
+  ctaSecondaryTarget: ctaTarget,
+  variant: variantAllowed.optional(),
+});
+
+export const bookingWidgetSettingsSchema = z.object({
+  eyebrow,
+  headline: nonEmptyText(120).nullish(),
+  subheadline: nonEmptyText(320).nullish(),
+  variant: variantAllowed.optional(),
+});
+
 export type SectionSettingsSchemaMap = {
   hero: typeof heroSettingsSchema;
   about: typeof aboutSettingsSchema;
@@ -124,6 +201,9 @@ export type SectionSettingsSchemaMap = {
   staff: typeof staffSettingsSchema;
   reviews: typeof reviewsSettingsSchema;
   contact: typeof contactSettingsSchema;
+  price_list: typeof priceListSettingsSchema;
+  features_cta: typeof featuresCtaSettingsSchema;
+  booking_widget: typeof bookingWidgetSettingsSchema;
 };
 
 export const SECTION_SETTINGS_SCHEMAS: SectionSettingsSchemaMap = {
@@ -134,6 +214,9 @@ export const SECTION_SETTINGS_SCHEMAS: SectionSettingsSchemaMap = {
   staff: staffSettingsSchema,
   reviews: reviewsSettingsSchema,
   contact: contactSettingsSchema,
+  price_list: priceListSettingsSchema,
+  features_cta: featuresCtaSettingsSchema,
+  booking_widget: bookingWidgetSettingsSchema,
 };
 
 export function parseSectionSettings(
@@ -258,6 +341,7 @@ export type AboutSection = {
 export type PublicService = {
   name: string;
   description: string | null;
+  price: number | null;
   priceFrom: number | null;
   currency: string;
   durationMinutes: number | null;
@@ -268,6 +352,56 @@ export type ServicesSection = {
   variant: (typeof ALLOWED_VARIANTS)[number];
   settings: z.infer<typeof servicesSettingsSchema>;
   data: { services: PublicService[] };
+};
+
+export type PriceListSection = {
+  type: "price_list";
+  variant: (typeof ALLOWED_VARIANTS)[number];
+  settings: z.infer<typeof priceListSettingsSchema>;
+  data: { services: PublicService[] };
+};
+
+export type PublicFeatureItem = {
+  icon: string | null;
+  title: string;
+  description: string | null;
+};
+
+export type FeaturesCtaSection = {
+  type: "features_cta";
+  variant: (typeof ALLOWED_VARIANTS)[number];
+  settings: z.infer<typeof featuresCtaSettingsSchema>;
+  data: {
+    features: PublicFeatureItem[] | null;
+  };
+};
+
+export type BookingWidgetServiceOption = {
+  id: string;
+  name: string;
+  duration_minutes: number | null;
+  price_from: number | null;
+  currency: string;
+  active: boolean;
+};
+
+export type BookingAvailabilityRow = {
+  weekday: number;
+  enabled: boolean;
+  start_time: string;
+  end_time: string;
+};
+
+export type BookingWidgetSection = {
+  type: "booking_widget";
+  variant: (typeof ALLOWED_VARIANTS)[number];
+  settings: z.infer<typeof bookingWidgetSettingsSchema>;
+  data: {
+    slug: string | null;
+    services: BookingWidgetServiceOption[] | null;
+    availability: BookingAvailabilityRow[] | null;
+    timezone: string | null;
+  };
 };
 
 export type PublicGalleryAsset = {
@@ -331,7 +465,10 @@ export type PublicSection =
   | GallerySection
   | StaffSection
   | ReviewsSection
-  | ContactSection;
+  | ContactSection
+  | PriceListSection
+  | FeaturesCtaSection
+  | BookingWidgetSection;
 
 export type PublicSite = {
   business: PublicSiteData;

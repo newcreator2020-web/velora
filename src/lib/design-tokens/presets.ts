@@ -1,0 +1,146 @@
+import type { DesignPreset, DesignPresetId } from "./types";
+
+export const DESIGN_PRESETS: Record<DesignPresetId, DesignPreset> = {
+  elegant: {
+    id: "elegant",
+    name: "Elegant",
+    description: "Serif + Orchid + Soft — look sofisticato e raffinato per studi di alta gamma",
+    palette: {
+      primary: "#7C3AED",
+      primaryForeground: "#FAF5FF",
+      secondary: "#F3E8FF",
+      secondaryForeground: "#581C87",
+      background: "#FDFCFB",
+      foreground: "#1F2937",
+      muted: "#F5F3FF",
+      mutedForeground: "#6B7280",
+      border: "#E5E7EB",
+      accent: "#C084FC",
+      accentForeground: "#FFFFFF",
+      card: "#FFFFFF",
+      cardForeground: "#111827",
+    },
+    typography: {
+      headingFont: "serif",
+      bodyFont: "sans",
+      headingScale: 1.3,
+      bodyLineHeight: 1.7,
+    },
+    layout: {
+      radius: "lg",
+      shadow: "soft",
+      spacing: "loose",
+      containerMaxWidth: "max-w-5xl",
+    },
+  },
+  soft_beauty: {
+    id: "soft_beauty",
+    name: "Soft Beauty",
+    description: "Sans + Rose + Rounded — look delicato e femminile per centri estetici",
+    palette: {
+      primary: "#EC4899",
+      primaryForeground: "#FFF1F2",
+      secondary: "#FCE7F3",
+      secondaryForeground: "#9D174D",
+      background: "#FFFAFA",
+      foreground: "#1F2937",
+      muted: "#FFF1F2",
+      mutedForeground: "#6B7280",
+      border: "#FBCFE8",
+      accent: "#F472B6",
+      accentForeground: "#FFFFFF",
+      card: "#FFFFFF",
+      cardForeground: "#111827",
+    },
+    typography: {
+      headingFont: "sans",
+      bodyFont: "sans",
+      headingScale: 1.2,
+      bodyLineHeight: 1.6,
+    },
+    layout: {
+      radius: "xl",
+      shadow: "soft",
+      spacing: "loose",
+      containerMaxWidth: "max-w-4xl",
+    },
+  },
+  barber_strong: {
+    id: "barber_strong",
+    name: "Barber Strong",
+    description: "Display + Black + Gold + Sharp — look deciso e maschile per barbieri",
+    palette: {
+      primary: "#D4AF37",
+      primaryForeground: "#0A0A0A",
+      secondary: "#1F1F1F",
+      secondaryForeground: "#F5F5DC",
+      background: "#0A0A0A",
+      foreground: "#F5F5F5",
+      muted: "#1A1A1A",
+      mutedForeground: "#9CA3AF",
+      border: "#2D2D2D",
+      accent: "#8B7355",
+      accentForeground: "#FFFFFF",
+      card: "#121212",
+      cardForeground: "#F5F5F5",
+    },
+    typography: {
+      headingFont: "display",
+      bodyFont: "sans",
+      headingScale: 1.4,
+      bodyLineHeight: 1.6,
+    },
+    layout: {
+      radius: "none",
+      shadow: "sharp",
+      spacing: "tight",
+      containerMaxWidth: "max-w-6xl",
+    },
+  },
+  minimal: {
+    id: "minimal",
+    name: "Minimal",
+    description: "Sans + Neutral + Flat — pulito, essenziale, contenuto al primo posto",
+    palette: {
+      primary: "#111827",
+      primaryForeground: "#FFFFFF",
+      secondary: "#F3F4F6",
+      secondaryForeground: "#111827",
+      background: "#FFFFFF",
+      foreground: "#111827",
+      muted: "#F9FAFB",
+      mutedForeground: "#6B7280",
+      border: "#E5E7EB",
+      accent: "#374151",
+      accentForeground: "#FFFFFF",
+      card: "#FFFFFF",
+      cardForeground: "#111827",
+    },
+    typography: {
+      headingFont: "sans",
+      bodyFont: "sans",
+      headingScale: 1.1,
+      bodyLineHeight: 1.6,
+    },
+    layout: {
+      radius: "md",
+      shadow: "flat",
+      spacing: "normal",
+      containerMaxWidth: "max-w-5xl",
+    },
+  },
+};
+
+export const DESIGN_PRESET_LIST: DesignPreset[] = [
+  DESIGN_PRESETS.elegant,
+  DESIGN_PRESETS.soft_beauty,
+  DESIGN_PRESETS.barber_strong,
+  DESIGN_PRESETS.minimal,
+];
+
+export function getDesignPreset(id: string | null | undefined): DesignPreset {
+  if (id && id in DESIGN_PRESETS) {
+    return DESIGN_PRESETS[id as DesignPresetId];
+  }
+  return DESIGN_PRESETS.minimal;
+}

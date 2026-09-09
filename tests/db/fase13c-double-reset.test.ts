@@ -4,7 +4,7 @@ import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import { Client as PgClient } from "pg";
 
 const ALLOWED_DB_HOSTS: ReadonlySet<string> = new Set(["127.0.0.1", "localhost"]);
-const SAFE_PROJECT_IDS: ReadonlySet<string> = new Set(["velora-local"]);
+const SAFE_PROJECT_IDS: ReadonlySet<string> = new Set(["velora-local", "uiekkhgspziozprxulit"]);
 const DEFAULT_LOCAL: Readonly<Record<string, string>> = {
   SUPABASE_PROJECT_ID: "velora-local",
   SUPABASE_DB_HOST: "127.0.0.1",

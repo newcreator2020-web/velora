@@ -473,3 +473,182 @@ function toMs(d: unknown): number {
   const t = new Date(d as Date | string).getTime();
   return Number.isFinite(t) ? t : 0;
 }
+
+export type DepositStrategy = "NONE" | "PERCENT" | "FIXED";
+
+export type ServiceDepositRow = {
+  id?: string;
+  deposit_strategy: DepositStrategy;
+  deposit_value: number;
+  currency?: string | null;
+  price_from?: number | null;
+};
+
+export type CalculatedDeposit = {
+  strategy: DepositStrategy;
+  amount: number;
+  currency: string;
+};
+
+export async function calculateDeposit(
+  serviceRef: ServiceDepositRow | string,
+  total: number,
+): Promise<CalculatedDeposit> {
+  let row: ServiceDepositRow;
+  if (typeof serviceRef === "string") {
+    const sb = getSupabaseServiceClient();
+    const r = await sb
+      .from("services")
+      .select("id, deposit_strategy, deposit_value, currency, price_from")
+      .eq("id", serviceRef)
+      .limit(1)
+      .maybeSingle();
+    if (r.error || !r.data) {
+      throw new Error(`calculateDeposit: service ${serviceRef} not found`);
+    }
+    row = r.data as unknown as ServiceDepositRow;
+  } else {
+    row = serviceRef;
+  }
+  const strategy: DepositStrategy = row.deposit_strategy ?? "NONE";
+  const currency = (row.currency as string | null | undefined) ?? "eur";
+  const t = Number.isFinite(total) && total > 0 ? total : 0;
+  let amount = 0;
+  if (strategy === "FIXED") {
+    const v = Number(row.deposit_value);
+    amount = Number.isFinite(v) ? v : 0;
+  } else if (strategy === "PERCENT") {
+    const pct = Number(row.deposit_value);
+    const safePct = Number.isFinite(pct) ? Math.min(Math.max(pct, 0), 100) : 0;
+    amount = (t * safePct) / 100;
+  }
+  amount = Math.round(amount * 100) / 100;
+  if (amount < 0) amount = 0;
+  if (amount < 0.01) amount = 0;
+  return { strategy, amount, currency };
+}
+
+export type CreateStripeDepositCheckoutOptions = {
+  booking_id: string;
+  tenant_id: string;
+  success_url: string;
+  cancel_url: string;
+  deposit_amount: number;
+  currency?: string;
+  customer_email?: string;
+  customer_name?: string;
+  locale?: Stripe.Checkout.SessionCreateParams.Locale;
+  service_name?: string;
+};
+
+export type StripeDepositCheckoutResult = {
+  sessionId: string;
+  sessionUrl: string;
+  paymentId: string;
+};
+
+export async function createStripeDepositCheckout(
+  opts: CreateStripeDepositCheckoutOptions,
+): Promise<StripeDepositCheckoutResult> {
+  if (!opts.booking_id) throw new Error("booking_id required");
+  if (!opts.tenant_id) throw new Error("tenant_id required");
+  if (typeof opts.deposit_amount !== "number" || opts.deposit_amount < 0.5) {
+    throw new Error("deposit_amount must be >= 0.5 eur minimum for Stripe checkout");
+  }
+  const stripe = getStripeOrNull();
+  if (!stripe) throw new Error("Stripe not configured");
+
+  const currency = (opts.currency ?? "eur").toLowerCase();
+  const unitAmountCents = Math.round(Number(opts.deposit_amount) * 100);
+  if (unitAmountCents < 50) throw new Error("deposit_amount minimum 0.50 EUR (50 cents)");
+
+  const locale: Stripe.Checkout.SessionCreateParams.Locale = (opts.locale as never) ?? "it";
+  const productName =
+    opts.service_name && opts.service_name.length > 0
+      ? `Caparra prenotazione: ${opts.service_name}`
+      : "Caparra prenotazione";
+
+  const stripeSessionParams: Stripe.Checkout.SessionCreateParams = {
+    mode: "payment",
+    locale,
+    success_url: opts.success_url,
+    cancel_url: opts.cancel_url,
+    line_items: [
+      {
+        price_data: {
+          currency,
+          product_data: {
+            name: productName,
+          },
+          unit_amount: unitAmountCents,
+        },
+        quantity: 1,
+      },
+    ],
+    metadata: {
+      booking_id: opts.booking_id,
+      tenant_id: opts.tenant_id,
+      flow: "booking_deposit",
+      customer_name: opts.customer_name ? opts.customer_name.slice(0, 120) : "",
+    },
+    payment_intent_data: {
+      metadata: {
+        booking_id: opts.booking_id,
+        tenant_id: opts.tenant_id,
+        flow: "booking_deposit",
+      },
+    },
+  };
+  if (opts.customer_email != null && opts.customer_email.length > 0) {
+    stripeSessionParams.customer_email = opts.customer_email;
+  }
+  const session = await stripe.checkout.sessions.create(stripeSessionParams);
+
+  if (!session.url) {
+    throw new Error("Stripe did not return a checkout session URL");
+  }
+
+  const sb = getSupabaseServiceClient();
+  const ins = await sb
+    .from("payments")
+    .insert({
+      tenant_id: opts.tenant_id,
+      booking_id: opts.booking_id,
+      stripe_session_id: session.id,
+      amount: opts.deposit_amount,
+      currency,
+      status: "pending",
+    })
+    .select("id")
+    .limit(1)
+    .maybeSingle();
+  if (ins.error || !ins.data) {
+    throw new Error(
+      `createStripeDepositCheckout: failed to insert payment row: ${ins.error?.message ?? "unknown"}`,
+    );
+  }
+  const paymentId = (ins.data as { id: string }).id;
+
+  try {
+    const a = getSupabaseServiceClient();
+    await a.from("audit_logs").insert({
+      tenant_id: opts.tenant_id,
+      actor_user_id: null,
+      action: "booking.deposit_checkout_created",
+      entity_type: "booking_payment",
+      entity_id: opts.booking_id.slice(0, 64),
+      metadata: {
+        provider: PROVIDER,
+        mode: "deposit",
+        stripe_session_id: session.id.slice(0, 32),
+        payment_id: paymentId.slice(0, 64),
+        amount: opts.deposit_amount,
+        currency,
+      } as never,
+    });
+  } catch {
+    // audit failure: NON-ATOMIC BY DESIGN. We never break customer flow for audit write.
+  }
+
+  return { sessionId: session.id, sessionUrl: session.url, paymentId };
+}

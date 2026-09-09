@@ -29,7 +29,7 @@ function SubmitButton({ disabled }: { disabled?: boolean }) {
   );
 }
 
-export function LoginForm() {
+export function LoginForm({ csrfToken }: { csrfToken: string }) {
   const [state, action] = useActionState(loginAction, initial);
 
   return (
@@ -38,6 +38,7 @@ export function LoginForm() {
       noValidate
       style={{ display: "flex", flexDirection: "column", gap: 14, width: "100%" }}
     >
+      <input type="hidden" name="_csrf" value={csrfToken} />
       <div>
         <label
           htmlFor="login-email"

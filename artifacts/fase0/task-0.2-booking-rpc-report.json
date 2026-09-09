@@ -1,0 +1,92 @@
+{
+  "startedAt": "2026-09-08T17:12:10.758Z",
+  "tenant": {
+    "slug": "velora-prod-acceptance-studio",
+    "id": "57ba7988-e8e6-46d4-b4ea-3192420d6ab0"
+  },
+  "service": {
+    "id": "2883bcc4-bd56-4fd5-9829-73af5aaf4d00",
+    "name": "Colore"
+  },
+  "resource": {
+    "slug": "lucia-bianchi"
+  },
+  "preBookingCount": 3,
+  "postBookingCount": 4,
+  "tests": [
+    {
+      "id": "N3-FULL-TIMEOFF-VLTO1",
+      "label": "N3 Full Day Timeoff singolo operatore Lucia 16/09 10:00 CEST",
+      "params": {
+        "startsAt": "2026-09-16T08:00:00.000Z",
+        "resourceSlug": "lucia-bianchi"
+      },
+      "expected": "!ok && error.code === VLTO1",
+      "got": {
+        "ok": false,
+        "error": {
+          "code": "VLTO1",
+          "message": "operator unavailable due to time off"
+        }
+      },
+      "pass": true
+    },
+    {
+      "id": "N4-PARTIAL-TIMEOFF-VLTO1",
+      "label": "N4 Partial Timeoff singolo operatore Lucia 22/09 15:00 CEST (blocco 14-19)",
+      "params": {
+        "startsAt": "2026-09-22T13:00:00.000Z",
+        "resourceSlug": "lucia-bianchi"
+      },
+      "expected": "!ok && error.code === VLTO1 (singolo op. timeoff)",
+      "got": {
+        "ok": false,
+        "error": {
+          "code": "VLTO1",
+          "message": "operator unavailable due to time off"
+        }
+      },
+      "pass": true
+    },
+    {
+      "id": "B1-REGRESSION-SLOT-VALIDO",
+      "label": "B1 Regressione — slot 24/09 10:00 CEST senza timeoff (no VLTO)",
+      "params": {
+        "startsAt": "2026-09-24T08:00:00.000Z",
+        "resourceSlug": "lucia-bianchi"
+      },
+      "expected": "code != VLTO1 && code != VLTO2 (può essere ok:true oppure VLTN7 se occupato)",
+      "got": {
+        "ok": true,
+        "rows": 1,
+        "first": {
+          "booking_id": "cb91e74f-bbbd-46e3-900a-cfddf9a512f7",
+          "start_at": "2026-09-24T08:00:00+00:00",
+          "end_at": "2026-09-24T09:30:00+00:00",
+          "status": "confirmed",
+          "resource_id": "f349e3df-4b37-4a6d-8777-db29d2f1cd92",
+          "resource_slug": "lucia-bianchi"
+        }
+      },
+      "pass": true
+    },
+    {
+      "id": "COUNT-INVARIANT-N3-N4-NO-CREATE",
+      "label": "Count bookings: N3/N4 NON devono incrementare; al +1 solo per B1",
+      "expected": "diff ∈ {0, 1}",
+      "got": {
+        "pre": 3,
+        "post": 4,
+        "delta": 1
+      },
+      "pass": true
+    }
+  ],
+  "endedAt": "2026-09-08T17:12:12.734Z",
+  "summary": {
+    "total": 4,
+    "passed": 4,
+    "failed": 0,
+    "allPassed": true
+  }
+}

@@ -6,6 +6,7 @@ import {
   resolvePublicTenant,
   resolvePublicSiteContent,
 } from "@/lib/server/site-engine";
+import type { PublicSection } from "@/lib/server/content-engine";
 import { SiteShell } from "@/components/site/SiteShell";
 import { SiteRenderer } from "@/components/site/SectionRegistry";
 import { publicEnv } from "@/config/env";
@@ -47,9 +48,26 @@ export async function generateMetadata(): Promise<Metadata> {
       "";
     const hostname = rawHost.split(":")[0] ?? "";
     if (isLocalhostHostname(hostname)) {
+      const localBase = `http://${rawHost || "localhost:3000"}`.replace(/\/+$/, "");
+      const ogLocal = `${localBase}/og-default.png`;
       return {
         title: publicEnv.NEXT_PUBLIC_APP_NAME,
         description: "VELORA — Piattaforma SaaS multi-tenant",
+        openGraph: {
+          type: "website",
+          title: publicEnv.NEXT_PUBLIC_APP_NAME,
+          description: "VELORA — Piattaforma SaaS multi-tenant",
+          url: localBase + "/",
+          siteName: publicEnv.NEXT_PUBLIC_APP_NAME,
+          images: [{ url: ogLocal, width: 1200, height: 630, alt: publicEnv.NEXT_PUBLIC_APP_NAME }],
+        },
+        twitter: {
+          card: "summary_large_image",
+          title: publicEnv.NEXT_PUBLIC_APP_NAME,
+          description: "VELORA — Piattaforma SaaS multi-tenant",
+          creator: "@velora",
+          images: [ogLocal],
+        },
       };
     }
     return notFoundMetadata();
@@ -60,6 +78,10 @@ export async function generateMetadata(): Promise<Metadata> {
   const description =
     s.description ?? `${s.businessName}. ${[s.city, s.province].filter(Boolean).join(", ")}`;
   const canonical = `https://${hostname}/`;
+  const defaultBase = `https://${hostname}`;
+  const ogFallback = `${defaultBase}/og-default.png`;
+  const ogImageUrl =
+    ((s as unknown as Record<string, unknown>)["ogImageUrl"] as string | undefined) || ogFallback;
   return {
     title,
     description,
@@ -72,6 +94,21 @@ export async function generateMetadata(): Promise<Metadata> {
       url: canonical,
       locale: s.locale,
       siteName: s.businessName,
+      images: [
+        {
+          url: ogImageUrl,
+          width: 1200,
+          height: 630,
+          alt: s.businessName ?? hostname,
+        },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: s.businessName,
+      description: description,
+      creator: "@velora",
+      images: [ogImageUrl],
     },
   };
 }
@@ -165,6 +202,19 @@ export default async function HostPublicSitePage() {
   const { publicSite } = contentResult;
   return (
     <main id="main-content" className="min-h-screen antialiased">
+      <a
+        href="#main-content"
+        id="skip-to-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[100] focus:px-4 focus:py-2 focus:bg-[var(--accent)] focus:text-white focus:rounded-md focus:shadow-lg focus:text-sm focus:font-medium"
+      >
+        Salta al contenuto principale
+      </a>
+      <div id="site-content-start" aria-hidden="true"></div>
+      {publicSite.sections.every((s: PublicSection) => s.type !== "hero") ? (
+        <h1 id="site-hero-title" className="sr-only">
+          {site.businessName ?? site.slug}
+        </h1>
+      ) : null}
       <div className="mx-auto max-w-6xl px-4 py-4 sm:px-6">
         <nav aria-label="Azioni rapide" className="flex justify-end">
           <a
@@ -175,7 +225,7 @@ export default async function HostPublicSitePage() {
           </a>
         </nav>
       </div>
-      <SiteShell theme={publicSite.theme}>
+      <SiteShell theme={publicSite.theme} siteSlug={site.slug}>
         <SiteRenderer sections={publicSite.sections} />
       </SiteShell>
     </main>

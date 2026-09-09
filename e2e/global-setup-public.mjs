@@ -3,12 +3,20 @@ import { Client as PgClient } from "pg";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
+const LOCAL_DEFAULTS = {
+  SUPABASE_DB_HOST: "127.0.0.1",
+  SUPABASE_DB_PORT: "54322",
+  SUPABASE_DB_NAME: "postgres",
+  SUPABASE_DB_USER: "postgres",
+  SUPABASE_DB_PASSWORD: "postgres",
+};
+const env = (n) => process.env[n] ?? LOCAL_DEFAULTS[n] ?? "";
 const buildPgOpts = () => ({
-  host: process.env.SUPABASE_DB_HOST ?? "127.0.0.1",
-  port: Number(process.env.SUPABASE_DB_PORT ?? 54322),
-  database: process.env.SUPABASE_DB_NAME ?? "postgres",
-  user: process.env.SUPABASE_DB_USER ?? "postgres",
-  password: process.env.SUPABASE_DB_PASSWORD ?? "postgres",
+  host: env("SUPABASE_DB_HOST"),
+  port: Number(env("SUPABASE_DB_PORT") || 54322),
+  database: env("SUPABASE_DB_NAME"),
+  user: env("SUPABASE_DB_USER"),
+  password: env("SUPABASE_DB_PASSWORD"),
 });
 
 const A = {

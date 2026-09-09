@@ -1,21 +1,34 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
+
 import { useFormStatus } from "react-dom";
 import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import {
   saveEditorialAction,
   publishEditorialAction,
   unpublishEditorialAction,
-  type EditorialInitialState,
+  transitionPublicationAction,
 } from "@/app/app/site/actions";
+import {
+  type EditorialInitialState,
+  type PublicationStatus,
+  PUBLICATION_ALLOWED_TRANSITIONS,
+  PUBLICATION_STATUS_LABEL,
+} from "@/app/app/site/lib";
 import { DomainSection } from "@/app/app/site/components/DomainSection";
+import { MediaPicker } from "@/app/app/admin/media/components/MediaPicker";
+import type { MediaLibraryRow } from "@/app/app/admin/media/lib";
+import { DESIGN_PRESET_LIST } from "@/lib/design-tokens/presets";
 import {
   SECTION_TYPES,
   ALLOWED_VARIANTS,
+  SECTION_VARIANTS,
   SINGLETON_TYPES,
   FONT_HEADING_ALLOWED,
   FONT_BODY_ALLOWED,
   RADIUS_ALLOWED,
+  DESIGN_PRESET_ALLOWED,
   validateHexColor,
   type SectionType,
 } from "@/lib/server/content-engine";
@@ -28,11 +41,15 @@ import {
   type StudioDraftTheme,
 } from "@/lib/server/site-studio-pure";
 
+type MediaPickerContext =
+  { kind: "logo" } | { kind: "hero_cover" } | { kind: "about_image" } | null;
+
 type Props = EditorialInitialState;
 
 type SaveState = Awaited<ReturnType<typeof saveEditorialAction>>;
 type PublishState = Awaited<ReturnType<typeof publishEditorialAction>>;
 type UnpublishState = Awaited<ReturnType<typeof unpublishEditorialAction>>;
+type TransitionState = Awaited<ReturnType<typeof transitionPublicationAction>>;
 
 function SubmitButton({
   label,
@@ -121,12 +138,13 @@ type RowProps = {
   htmlFor?: string;
   error?: string | undefined;
   children: React.ReactNode;
+  className?: string;
 };
-function Row({ label, htmlFor, error, children }: RowProps) {
+function Row({ label, htmlFor, error, children, className }: RowProps) {
   const id = htmlFor;
   const errId = error && id ? `${id}-err` : undefined;
   return (
-    <div>
+    <div className={className}>
       <label htmlFor={id} className="block text-sm font-medium text-slate-700 mb-1.5">
         {label}
       </label>
@@ -246,6 +264,10 @@ export function SiteStudio(props: Props) {
 
   const initialPublishState: PublishState = initialState as unknown as PublishState;
   const initialUnpublishState: UnpublishState = initialState as unknown as UnpublishState;
+  const initialTransitionState: TransitionState = {
+    ok: false,
+    error: props.error,
+  };
 
   const [saveState, saveAction] = useActionState(
     saveEditorialAction as unknown as (p: SaveState, f: FormData) => Promise<SaveState>,
@@ -261,6 +283,13 @@ export function SiteStudio(props: Props) {
       f: FormData,
     ) => Promise<UnpublishState>,
     initialUnpublishState,
+  );
+  const [transitionState, transitionAction] = useActionState(
+    transitionPublicationAction as unknown as (
+      p: TransitionState,
+      f: FormData,
+    ) => Promise<TransitionState>,
+    initialTransitionState,
   );
 
   const currentValues: {
@@ -283,6 +312,17 @@ export function SiteStudio(props: Props) {
     return props.state.revision;
   }, [saveState, publishState, unpublishState, props.state.revision]);
 
+  const workflowStatus: PublicationStatus = useMemo<PublicationStatus>(() => {
+    if (transitionState.ok) return transitionState.to;
+    const w = props.state.workflow;
+    if (w && typeof w.status === "string") {
+      if (w.status === "published") return "published";
+      if (w.status === "validated") return "validated";
+      if (w.status === "ready_for_qa") return "ready_for_qa";
+    }
+    return "draft";
+  }, [transitionState, props.state.workflow]);
+
   return (
     <SiteStudioInner
       key={revision ?? "initial-studio-mount"}
@@ -294,8 +334,11 @@ export function SiteStudio(props: Props) {
         publishAction,
         unpublishState,
         unpublishAction,
+        transitionState,
+        transitionAction,
         currentValues,
         revision,
+        workflowStatus,
       }}
     />
   );
@@ -309,12 +352,15 @@ type InnerOuter = {
   publishAction: ReturnType<typeof useActionState<PublishState, FormData>>[1];
   unpublishState: UnpublishState;
   unpublishAction: ReturnType<typeof useActionState<UnpublishState, FormData>>[1];
+  transitionState: TransitionState;
+  transitionAction: ReturnType<typeof useActionState<TransitionState, FormData>>[1];
   currentValues: {
     sections: StudioDraftSection[];
     services: StudioDraftService[];
     theme: StudioDraftTheme;
   };
   revision: string | null;
+  workflowStatus: PublicationStatus;
 };
 
 type FieldErrors = Partial<Record<string, string[]>>;
@@ -387,20 +433,80 @@ function SiteStudioInner({ outer }: { outer: InnerOuter }) {
     publishAction,
     unpublishState,
     unpublishAction,
+    transitionState,
+    transitionAction,
     currentValues,
     revision,
+    workflowStatus,
   } = outer;
   const [sections, setSections] = useState<StudioDraftSection[]>(currentValues.sections);
   const [services, setServices] = useState<StudioDraftService[]>(currentValues.services);
   const [theme, setTheme] = useState<StudioDraftTheme>(currentValues.theme);
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+  const [mediaPickerContext, setMediaPickerContext] = useState<MediaPickerContext>(null);
+  const [mediaPickerSectionIdx, setMediaPickerSectionIdx] = useState<number | null>(null);
   const focusOnceRef = useRef<string | null>(null);
+
+  const openMediaPicker = (ctx: Exclude<MediaPickerContext, null>, sectionIdx?: number) => {
+    setMediaPickerContext(ctx);
+    if (sectionIdx !== undefined) setMediaPickerSectionIdx(sectionIdx);
+    setMediaPickerOpen(true);
+  };
+
+  const closeMediaPicker = () => {
+    setMediaPickerOpen(false);
+    setMediaPickerContext(null);
+    setMediaPickerSectionIdx(null);
+  };
+
+  const confirmMediaPicker = (row: MediaLibraryRow) => {
+    const ctx = mediaPickerContext;
+    if (!ctx) return;
+    const url = (row as unknown as { public_url?: string | null }).public_url ?? "";
+    const alt = (row as unknown as { alt_text?: string | null }).alt_text ?? "";
+    if (ctx.kind === "logo") {
+      setTheme((prev) => ({ ...prev, logo_url: url || null, logo_alt: alt || null }));
+    } else if (ctx.kind === "hero_cover") {
+      if (mediaPickerSectionIdx !== null) {
+        patchSectionSetting(mediaPickerSectionIdx, "hero_cover_url", url || null);
+        patchSectionSetting(mediaPickerSectionIdx, "hero_cover_alt", alt || null);
+      }
+    } else if (ctx.kind === "about_image") {
+      if (mediaPickerSectionIdx !== null) {
+        patchSectionSetting(mediaPickerSectionIdx, "about_image_url", url || null);
+        patchSectionSetting(mediaPickerSectionIdx, "about_image_alt", alt || null);
+      }
+    }
+    closeMediaPicker();
+  };
+
+  const patchSectionSetting = (idx: number, key: string, value: unknown) => {
+    setSections((prev) => {
+      const next = [...prev];
+      const cur = next[idx];
+      if (!cur) return prev;
+      const settingsBase = (cur.settings ?? {}) as Record<string, unknown>;
+      next[idx] = {
+        ...cur,
+        settings: { ...settingsBase, [key]: value },
+      };
+      return next;
+    });
+  };
 
   const publishedNow = publishState.ok && publishState.info?.kind === "PUBLISHED";
   const unpublishedNow = unpublishState.ok && unpublishState.info?.kind === "UNPUBLISHED";
   const savedNow = saveState.ok && saveState.info?.kind === "SAVED";
 
   const { state } = props;
-  const published = publishedNow ? true : unpublishedNow ? false : state.published;
+  const derivedPublished: boolean = publishedNow
+    ? true
+    : unpublishedNow
+      ? false
+      : transitionState.ok
+        ? transitionState.to === "published"
+        : workflowStatus === "published";
+  const published = derivedPublished || state.published;
   const slug = state.slug;
 
   const publicUrl = slug ? `/s/${slug}` : null;
@@ -408,6 +514,9 @@ function SiteStudioInner({ outer }: { outer: InnerOuter }) {
   const saveErr = saveState.ok ? "" : ((saveState as { error?: string }).error ?? "");
   const pubErr = publishState.ok ? "" : ((publishState as { error?: string }).error ?? "");
   const unpubErr = unpublishState.ok ? "" : ((unpublishState as { error?: string }).error ?? "");
+  const transitionErr = transitionState.ok
+    ? ""
+    : ((transitionState as { error?: string }).error ?? "");
 
   const fieldErrors: FieldErrors | undefined =
     (!saveState.ok && (saveState as { fieldErrors?: FieldErrors }).fieldErrors) ||
@@ -417,7 +526,33 @@ function SiteStudioInner({ outer }: { outer: InnerOuter }) {
   const stamp =
     (saveState as { updated_at?: string }).updated_at ||
     (publishState as { updated_at?: string }).updated_at ||
+    (state.workflow?.latest_published_at as string | null | undefined) ||
     "";
+
+  function workflowBadgeClasses(s: PublicationStatus): string {
+    switch (s) {
+      case "published":
+        return "bg-emerald-50 text-emerald-700 border-emerald-200";
+      case "validated":
+        return "bg-sky-50 text-sky-700 border-sky-200";
+      case "ready_for_qa":
+        return "bg-amber-50 text-amber-700 border-amber-200";
+      default:
+        return "bg-slate-50 text-slate-700 border-slate-200";
+    }
+  }
+  function workflowDotClasses(s: PublicationStatus): string {
+    switch (s) {
+      case "published":
+        return "bg-emerald-500";
+      case "validated":
+        return "bg-sky-500";
+      case "ready_for_qa":
+        return "bg-amber-500";
+      default:
+        return "bg-slate-400";
+    }
+  }
   useEffect(() => {
     if (!fieldErrors) return;
     const paths = Object.keys(fieldErrors);
@@ -436,6 +571,9 @@ function SiteStudioInner({ outer }: { outer: InnerOuter }) {
     }
   }, [fieldErrors, stamp]);
 
+  const latestPublishedTs =
+    (state.workflow?.latest_published_at as string | null | undefined) || state.published_at || "";
+
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="border-b border-slate-200 bg-white">
@@ -449,6 +587,14 @@ function SiteStudioInner({ outer }: { outer: InnerOuter }) {
               <code className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">
                 {slug || "(non impostato)"}
               </code>
+              {state.workflow ? (
+                <>
+                  {" · "}Versione:{" "}
+                  <code className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">
+                    v{state.workflow.version_number}
+                  </code>
+                </>
+              ) : null}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -482,25 +628,40 @@ function SiteStudioInner({ outer }: { outer: InnerOuter }) {
           <div
             className={[
               "inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border",
-              published
-                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                : "bg-amber-50 text-amber-700 border-amber-200",
+              workflowBadgeClasses(workflowStatus),
             ].join(" ")}
+            role="status"
           >
             <span
               aria-hidden
               className={[
                 "inline-block h-2 w-2 rounded-full",
-                published ? "bg-emerald-500" : "bg-amber-500",
+                workflowDotClasses(workflowStatus),
               ].join(" ")}
             />
-            {published ? "Pubblicato" : "Bozza (non visibile al pubblico)"}
+            Stato:{" "}
+            <strong className="uppercase tracking-wide">
+              {PUBLICATION_STATUS_LABEL[workflowStatus]}
+            </strong>
           </div>
-          {state.published_at && published ? (
+          {latestPublishedTs && workflowStatus !== "published" ? (
             <span className="text-xs text-slate-600">
               Ultima pubblicazione:{" "}
-              <time dateTime={state.published_at}>
-                {new Date(state.published_at).toLocaleString("it-IT")}
+              <time dateTime={latestPublishedTs}>
+                {new Date(latestPublishedTs).toLocaleString("it-IT")}
+                {state.workflow?.latest_published_version
+                  ? ` · v${state.workflow.latest_published_version}`
+                  : ""}
+              </time>
+            </span>
+          ) : workflowStatus === "published" && latestPublishedTs ? (
+            <span className="text-xs text-slate-600">
+              Pubblicato il:{" "}
+              <time dateTime={latestPublishedTs}>
+                {new Date(latestPublishedTs).toLocaleString("it-IT")}
+                {state.workflow?.latest_published_version
+                  ? ` · v${state.workflow.latest_published_version}`
+                  : ""}
               </time>
             </span>
           ) : null}
@@ -560,24 +721,31 @@ function SiteStudioInner({ outer }: { outer: InnerOuter }) {
               message={publishState.error || "Il tuo piano non include la pubblicazione del sito."}
             />
           ) : null}
-          {savedNow || publishState.ok || unpublishState.ok ? (
+          {savedNow || publishState.ok || unpublishState.ok || transitionState.ok ? (
             <Alert
               kind="success"
               title={
-                publishedNow
-                  ? "Pubblicazione riuscita"
-                  : unpublishedNow
-                    ? "Pubblicazione ritirata"
-                    : "Salvato"
+                transitionState.ok && transitionState.info
+                  ? "Stato aggiornato"
+                  : publishedNow
+                    ? "Pubblicazione riuscita"
+                    : unpublishedNow
+                      ? "Pubblicazione ritirata"
+                      : "Salvato"
               }
               message={
-                publishedNow
-                  ? "La nuova versione del sito è ora disponibile al pubblico."
-                  : unpublishedNow
-                    ? "Il sito pubblico è stato rimosso. La bozza è conservata."
-                    : "Le modifiche sono state salvate come bozza."
+                transitionState.ok && transitionState.info
+                  ? transitionState.info
+                  : publishedNow
+                    ? "La nuova versione del sito è ora disponibile al pubblico."
+                    : unpublishedNow
+                      ? "Il sito pubblico è stato rimosso. La bozza è conservata."
+                      : "Le modifiche sono state salvate come bozza."
               }
             />
+          ) : null}
+          {transitionErr ? (
+            <Alert kind="error" title="Cambio stato fallito" message={transitionErr} />
           ) : null}
           {!saveState.ok && saveErr ? (
             <Alert kind="error" title="Impossibile salvare la bozza" message={saveErr} />
@@ -647,6 +815,7 @@ function SiteStudioInner({ outer }: { outer: InnerOuter }) {
                   sections={sections}
                   setSections={setSections}
                   fieldErrors={fieldErrors}
+                  openMediaPicker={openMediaPicker}
                 />
               ))}
             </div>
@@ -697,39 +866,154 @@ function SiteStudioInner({ outer }: { outer: InnerOuter }) {
           </Card>
 
           <Card title="Tema">
-            <ThemeEditor theme={theme} setTheme={setTheme} fieldErrors={fieldErrors} />
+            <ThemeEditor
+              theme={theme}
+              setTheme={setTheme}
+              fieldErrors={fieldErrors}
+              openMediaPicker={openMediaPicker}
+            />
           </Card>
 
           <DomainSection />
         </div>
 
-        <div className="flex flex-wrap gap-3 pt-2">
-          <form action={saveAction} className="inline-flex items-center">
-            <input type="hidden" name="sections" value={JSON.stringify(sections)} />
-            <input type="hidden" name="services" value={JSON.stringify(services)} />
-            <input type="hidden" name="theme" value={JSON.stringify(theme)} />
-            <SubmitButton label="Salva bozza" loadingLabel="Salvataggio…" variant="primary" />
-          </form>
+        <div className="space-y-4 pt-2">
+          <Card title="Workflow pubblicazione">
+            <p className="text-sm text-slate-600 mb-4">
+              Procedi in ordine: <strong>Bozza</strong> → <strong>Pronta per QA</strong> →{" "}
+              <strong>Validata</strong> → <strong>Pubblicata</strong>. Non puoi saltare gli step.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              {(PUBLICATION_ALLOWED_TRANSITIONS[workflowStatus] ?? []).includes("ready_for_qa") ? (
+                <form action={transitionAction} className="inline-flex items-center">
+                  <input type="hidden" name="from_status" value={workflowStatus} />
+                  <input type="hidden" name="to_status" value="ready_for_qa" />
+                  <input type="hidden" name="note" value="Richiesta QA da SiteStudio" />
+                  <SubmitButton
+                    label="Marca pronta per QA"
+                    loadingLabel="Invio QA…"
+                    variant="secondary"
+                  />
+                </form>
+              ) : null}
 
-          <form action={publishAction} className="inline-flex items-center">
-            <input type="hidden" name="sections" value={JSON.stringify(sections)} />
-            <input type="hidden" name="services" value={JSON.stringify(services)} />
-            <input type="hidden" name="theme" value={JSON.stringify(theme)} />
-            <input type="hidden" name="revision" value={revision ?? ""} />
-            <SubmitButton
-              label={published ? "Ripubblica le modifiche" : "Pubblica"}
-              loadingLabel="Pubblicazione…"
-              variant="secondary"
-            />
-          </form>
+              {(PUBLICATION_ALLOWED_TRANSITIONS[workflowStatus] ?? []).includes("draft") &&
+              workflowStatus !== "published" ? (
+                <form action={transitionAction} className="inline-flex items-center">
+                  <input type="hidden" name="from_status" value={workflowStatus} />
+                  <input type="hidden" name="to_status" value="draft" />
+                  <input
+                    type="hidden"
+                    name="note"
+                    value={`Torna a Bozza da ${PUBLICATION_STATUS_LABEL[workflowStatus]}`}
+                  />
+                  <SubmitButton
+                    label="Torna a Bozza"
+                    loadingLabel="Aggiornamento…"
+                    variant="ghost"
+                  />
+                </form>
+              ) : null}
 
-          {published ? (
-            <form action={unpublishAction} className="inline-flex items-center ml-auto">
-              <SubmitButton label="Ritira pubblicazione" loadingLabel="Ritiro…" variant="danger" />
+              {(PUBLICATION_ALLOWED_TRANSITIONS[workflowStatus] ?? []).includes("validated") ? (
+                <form action={transitionAction} className="inline-flex items-center">
+                  <input type="hidden" name="from_status" value={workflowStatus} />
+                  <input type="hidden" name="to_status" value="validated" />
+                  <input type="hidden" name="note" value="Validazione QA completata" />
+                  <SubmitButton
+                    label="Marca validata"
+                    loadingLabel="Validazione…"
+                    variant="secondary"
+                  />
+                </form>
+              ) : null}
+
+              {(PUBLICATION_ALLOWED_TRANSITIONS[workflowStatus] ?? []).includes("published") ? (
+                <form action={transitionAction} className="inline-flex items-center">
+                  <input type="hidden" name="from_status" value={workflowStatus} />
+                  <input type="hidden" name="to_status" value="published" />
+                  <input type="hidden" name="note" value="Pubblicazione versione live" />
+                  <SubmitButton
+                    label="Pubblica (da Validata)"
+                    loadingLabel="Pubblicazione…"
+                    variant="primary"
+                  />
+                </form>
+              ) : null}
+
+              {workflowStatus === "published" &&
+              (PUBLICATION_ALLOWED_TRANSITIONS.published ?? []).includes("draft") ? (
+                <form action={transitionAction} className="inline-flex items-center ml-auto">
+                  <input type="hidden" name="from_status" value={workflowStatus} />
+                  <input type="hidden" name="to_status" value="draft" />
+                  <input type="hidden" name="note" value="Rollback pubblicazione, torna a Bozza" />
+                  <SubmitButton
+                    label="Ripristina (disattiva sito)"
+                    loadingLabel="Rollback…"
+                    variant="danger"
+                  />
+                </form>
+              ) : null}
+            </div>
+            <p className="text-xs text-slate-500 mt-3">
+              Transizioni possibili da <strong>{PUBLICATION_STATUS_LABEL[workflowStatus]}</strong>:{" "}
+              {(PUBLICATION_ALLOWED_TRANSITIONS[workflowStatus] ?? []).length === 0
+                ? "nessuna"
+                : (PUBLICATION_ALLOWED_TRANSITIONS[workflowStatus] ?? [])
+                    .map((s) => PUBLICATION_STATUS_LABEL[s])
+                    .join(" · ")}
+            </p>
+          </Card>
+
+          <div className="flex flex-wrap gap-3 pt-2">
+            <form action={saveAction} className="inline-flex items-center">
+              <input type="hidden" name="sections" value={JSON.stringify(sections)} />
+              <input type="hidden" name="services" value={JSON.stringify(services)} />
+              <input type="hidden" name="theme" value={JSON.stringify(theme)} />
+              <SubmitButton label="Salva bozza" loadingLabel="Salvataggio…" variant="primary" />
             </form>
-          ) : null}
+
+            <form action={publishAction} className="inline-flex items-center">
+              <input type="hidden" name="sections" value={JSON.stringify(sections)} />
+              <input type="hidden" name="services" value={JSON.stringify(services)} />
+              <input type="hidden" name="theme" value={JSON.stringify(theme)} />
+              <input type="hidden" name="revision" value={revision ?? ""} />
+              <SubmitButton
+                label={
+                  published ? "Ripubblica le modifiche (shortcut)" : "Pubblica (solo se Validata)"
+                }
+                loadingLabel="Pubblicazione…"
+                variant={workflowStatus === "validated" || published ? "secondary" : "ghost"}
+                disabled={workflowStatus !== "validated" && workflowStatus !== "published"}
+              />
+            </form>
+
+            {published ? (
+              <form action={unpublishAction} className="inline-flex items-center ml-auto">
+                <SubmitButton
+                  label="Ritira pubblicazione"
+                  loadingLabel="Ritiro…"
+                  variant="danger"
+                />
+              </form>
+            ) : null}
+          </div>
         </div>
       </main>
+      <MediaPicker
+        open={mediaPickerOpen}
+        onCancel={closeMediaPicker}
+        onConfirm={confirmMediaPicker}
+        initialCategory={
+          mediaPickerContext?.kind === "logo"
+            ? "logo"
+            : mediaPickerContext?.kind === "hero_cover"
+              ? "hero"
+              : mediaPickerContext?.kind === "about_image"
+                ? "gallery"
+                : ""
+        }
+      />
     </div>
   );
 }
@@ -740,12 +1024,14 @@ function SectionsEditorItem({
   sections,
   setSections,
   fieldErrors,
+  openMediaPicker,
 }: {
   index: number;
   section: StudioDraftSection;
   sections: StudioDraftSection[];
   setSections: React.Dispatch<React.SetStateAction<StudioDraftSection[]>>;
   fieldErrors?: FieldErrors | undefined;
+  openMediaPicker: (ctx: Exclude<MediaPickerContext, null>, sectionIdx?: number) => void;
 }) {
   const usedSingletons = useMemo(() => {
     return new Set(
@@ -772,6 +1058,19 @@ function SectionsEditorItem({
         settings: partial.settings ?? cur.settings,
       };
       return rewritePositions(next);
+    });
+  };
+
+  const showSettingsPanel = (
+    ["hero", "services", "features_cta", "booking_widget", "about"] as string[]
+  ).includes(section.section_type);
+  const curSettings = (section.settings ?? {}) as Record<string, unknown>;
+  const patchSetting = (key: string, value: unknown) => {
+    patch({
+      settings: {
+        ...(curSettings as Record<string, unknown>),
+        [key]: value,
+      },
     });
   };
 
@@ -840,11 +1139,13 @@ function SectionsEditorItem({
               onChange={(e) => patch({ variant: e.target.value as SectionVariant })}
               error={fieldErrorFor(fieldErrors, `sections.${index}.variant`)}
             >
-              {ALLOWED_VARIANTS.map((v) => (
-                <option key={v} value={v}>
-                  {v}
-                </option>
-              ))}
+              {(SECTION_VARIANTS[section.section_type as SectionType] ?? ALLOWED_VARIANTS).map(
+                (v) => (
+                  <option key={v} value={v}>
+                    {labelForVariant(v)}
+                  </option>
+                ),
+              )}
             </Select>
           </Row>
 
@@ -886,6 +1187,163 @@ function SectionsEditorItem({
           </button>
         </div>
       </div>
+      {showSettingsPanel ? (
+        <div className="mt-4 pt-4 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Row label="Eyebrow (sottotitolo piccolo)" htmlFor={`sect-${index}-settings-eyebrow`}>
+            <input
+              id={`sect-${index}-settings-eyebrow`}
+              type="text"
+              className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 text-sm"
+              value={String(curSettings["eyebrow"] ?? "")}
+              onChange={(e) => patchSetting("eyebrow", e.target.value)}
+              placeholder="es. Benvenuti"
+            />
+          </Row>
+          <Row label="Headline (titolo principale)" htmlFor={`sect-${index}-settings-headline`}>
+            <input
+              id={`sect-${index}-settings-headline`}
+              type="text"
+              className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 text-sm"
+              value={String(curSettings["headline"] ?? "")}
+              onChange={(e) => patchSetting("headline", e.target.value)}
+              placeholder="es. Il tuo nuovo salone di bellezza"
+            />
+          </Row>
+          <Row
+            label="Subheadline (descrizione breve)"
+            htmlFor={`sect-${index}-settings-subheadline`}
+            className="sm:col-span-2"
+          >
+            <textarea
+              id={`sect-${index}-settings-subheadline`}
+              className="w-full min-h-[60px] rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+              value={String(curSettings["subheadline"] ?? curSettings["description"] ?? "")}
+              onChange={(e) => patchSetting("subheadline", e.target.value)}
+              placeholder="Breve descrizione della sezione"
+            />
+          </Row>
+          <Row label="CTA Label (testo pulsante)" htmlFor={`sect-${index}-settings-cta-label`}>
+            <input
+              id={`sect-${index}-settings-cta-label`}
+              type="text"
+              className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 text-sm"
+              value={String(curSettings["ctaLabel"] ?? "")}
+              onChange={(e) => patchSetting("ctaLabel", e.target.value)}
+              placeholder="es. Prenota ora"
+            />
+          </Row>
+          <Row label="CTA Target (URL del link)" htmlFor={`sect-${index}-settings-cta-target`}>
+            <input
+              id={`sect-${index}-settings-cta-target`}
+              type="text"
+              className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 text-sm"
+              value={String(curSettings["ctaTarget"] ?? "")}
+              onChange={(e) => patchSetting("ctaTarget", e.target.value)}
+              placeholder="es. /booking o #booking"
+            />
+          </Row>
+
+          {section.section_type === "hero" ? (
+            <div className="sm:col-span-2 space-y-2">
+              <div className="block text-sm font-medium text-slate-700">Immagine Hero Cover</div>
+              <div className="flex flex-wrap items-start gap-3">
+                <button
+                  type="button"
+                  onClick={() => openMediaPicker({ kind: "hero_cover" }, index)}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border bg-white text-slate-900 border-slate-300 hover:bg-slate-50"
+                >
+                  Scegli da Media Library
+                </button>
+                {curSettings["hero_cover_url"] ? (
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className="h-16 w-24 shrink-0 rounded-lg border border-slate-200 overflow-hidden bg-slate-100 relative">
+                      <img
+                        src={String(curSettings["hero_cover_url"])}
+                        alt={String(curSettings["hero_cover_alt"] ?? "hero cover")}
+                        className="absolute inset-0 w-full h-full object-cover"
+                      />
+                    </div>
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <input
+                        type="text"
+                        className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 text-sm"
+                        value={String(curSettings["hero_cover_url"] ?? "")}
+                        onChange={(e) => patchSetting("hero_cover_url", e.target.value || null)}
+                        placeholder="URL immagine"
+                      />
+                      <input
+                        type="text"
+                        className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 text-sm"
+                        value={String(curSettings["hero_cover_alt"] ?? "")}
+                        onChange={(e) => patchSetting("hero_cover_alt", e.target.value || null)}
+                        placeholder="Alt text (accessibilità)"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    className="flex-1 min-w-[200px] h-9 rounded-md border border-slate-300 bg-white px-3 text-sm"
+                    value={String(curSettings["hero_cover_url"] ?? "")}
+                    onChange={(e) => patchSetting("hero_cover_url", e.target.value || null)}
+                    placeholder="Oppure incolla URL immagine..."
+                  />
+                )}
+              </div>
+            </div>
+          ) : null}
+
+          {section.section_type === "about" ? (
+            <div className="sm:col-span-2 space-y-2">
+              <div className="block text-sm font-medium text-slate-700">Immagine About</div>
+              <div className="flex flex-wrap items-start gap-3">
+                <button
+                  type="button"
+                  onClick={() => openMediaPicker({ kind: "about_image" }, index)}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border bg-white text-slate-900 border-slate-300 hover:bg-slate-50"
+                >
+                  Scegli da Media Library
+                </button>
+                {curSettings["about_image_url"] ? (
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className="h-16 w-24 shrink-0 rounded-lg border border-slate-200 overflow-hidden bg-slate-100 relative">
+                      <img
+                        src={String(curSettings["about_image_url"])}
+                        alt={String(curSettings["about_image_alt"] ?? "about")}
+                        className="absolute inset-0 w-full h-full object-cover"
+                      />
+                    </div>
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <input
+                        type="text"
+                        className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 text-sm"
+                        value={String(curSettings["about_image_url"] ?? "")}
+                        onChange={(e) => patchSetting("about_image_url", e.target.value || null)}
+                        placeholder="URL immagine"
+                      />
+                      <input
+                        type="text"
+                        className="w-full h-9 rounded-md border border-slate-300 bg-white px-3 text-sm"
+                        value={String(curSettings["about_image_alt"] ?? "")}
+                        onChange={(e) => patchSetting("about_image_alt", e.target.value || null)}
+                        placeholder="Alt text (accessibilità)"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    className="flex-1 min-w-[200px] h-9 rounded-md border border-slate-300 bg-white px-3 text-sm"
+                    value={String(curSettings["about_image_url"] ?? "")}
+                    onChange={(e) => patchSetting("about_image_url", e.target.value || null)}
+                    placeholder="Oppure incolla URL immagine..."
+                  />
+                )}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1109,14 +1567,36 @@ function ThemeEditor({
   theme,
   setTheme,
   fieldErrors,
+  openMediaPicker,
 }: {
   theme: StudioDraftTheme;
   setTheme: React.Dispatch<React.SetStateAction<StudioDraftTheme>>;
   fieldErrors?: FieldErrors | undefined;
+  openMediaPicker: (ctx: Exclude<MediaPickerContext, null>, sectionIdx?: number) => void;
 }) {
   const [hexErrors, setHexErrors] = useState<
     Partial<Record<"primary" | "background" | "foreground" | "muted", string>>
   >({});
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const applyPreset = (presetId: string) => {
+    const preset = DESIGN_PRESET_LIST.find((p) => p.id === presetId);
+    const allowedIds = DESIGN_PRESET_ALLOWED as readonly string[];
+    if (!preset) return;
+    const pal = preset.palette;
+    const validId = allowedIds.includes(presetId) ? presetId : null;
+    setTheme((prev) => ({
+      ...prev,
+      preset: validId as (typeof DESIGN_PRESET_ALLOWED)[number] | null,
+      primary: pal.primary,
+      background: pal.background,
+      foreground: pal.foreground,
+      muted: pal.muted,
+      radius: preset.layout.radius as (typeof RADIUS_ALLOWED)[number],
+      headingFont: preset.typography.headingFont as (typeof FONT_HEADING_ALLOWED)[number],
+      bodyFont: preset.typography.bodyFont as (typeof FONT_BODY_ALLOWED)[number],
+    }));
+  };
 
   const setHex = (k: "primary" | "background" | "foreground" | "muted", v: string) => {
     const ok = v.length === 0 || validateHexColor(v);
@@ -1136,166 +1616,287 @@ function ThemeEditor({
   const bfErr = fieldErrorFor(fieldErrors, "theme.bodyFont") || undefined;
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      <Row label="Colore primario" htmlFor="theme-primary-text" error={pErr}>
-        <div className="flex gap-2">
-          <input
-            id="theme-primary-color"
-            type="color"
-            className="h-10 w-16 rounded border border-slate-300 bg-white"
-            value={
-              theme.primary && validateHexColor(theme.primary)
-                ? normalizeHexForPicker(theme.primary)
-                : "#4f46e5"
-            }
-            onChange={(e) => setHex("primary", e.target.value)}
-            aria-label="Colore primario (picker)"
-          />
-          <Input
-            id="theme-primary-text"
-            type="text"
-            value={theme.primary ?? ""}
-            onChange={(e) => setHex("primary", e.target.value.trim())}
-            placeholder="#RRGGBB"
-            error={pErr}
-          />
+    <div className="space-y-6">
+      <div>
+        <div className="block text-sm font-semibold text-slate-900 mb-3">Preset tema</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {DESIGN_PRESET_LIST.map((preset) => {
+            const active = theme.preset === preset.id;
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => applyPreset(preset.id)}
+                className={[
+                  "group relative rounded-xl border p-3 text-left transition-all",
+                  active
+                    ? "border-indigo-500 ring-2 ring-indigo-200 bg-indigo-50/50"
+                    : "border-slate-200 hover:border-slate-300 bg-white",
+                ].join(" ")}
+              >
+                <div className="flex gap-1.5 mb-2">
+                  <div
+                    className="h-6 w-6 rounded-full border border-slate-200"
+                    style={{ backgroundColor: preset.palette.primary }}
+                    title="Primary"
+                  />
+                  <div
+                    className="h-6 w-6 rounded-full border border-slate-200"
+                    style={{ backgroundColor: preset.palette.background }}
+                    title="Background"
+                  />
+                  <div
+                    className="h-6 w-6 rounded-full border border-slate-200"
+                    style={{ backgroundColor: preset.palette.foreground }}
+                    title="Foreground"
+                  />
+                  <div
+                    className="h-6 w-6 rounded-full border border-slate-200"
+                    style={{ backgroundColor: preset.palette.muted }}
+                    title="Muted"
+                  />
+                </div>
+                <div className="text-sm font-semibold text-slate-900">{preset.name}</div>
+                <div className="text-xs text-slate-500 mt-0.5 line-clamp-2">
+                  {preset.description}
+                </div>
+                {active ? (
+                  <span className="absolute top-2 right-2 inline-flex items-center justify-center h-5 w-5 rounded-full bg-indigo-600 text-white text-[10px] font-bold">
+                    ✓
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
         </div>
-      </Row>
+      </div>
 
-      <Row label="Sfondo" htmlFor="theme-bg-text" error={bErr}>
-        <div className="flex gap-2">
-          <input
-            id="theme-bg-color"
-            type="color"
-            className="h-10 w-16 rounded border border-slate-300 bg-white"
-            value={
-              theme.background && validateHexColor(theme.background)
-                ? normalizeHexForPicker(theme.background)
-                : "#ffffff"
-            }
-            onChange={(e) => setHex("background", e.target.value)}
-            aria-label="Sfondo (picker)"
-          />
-          <Input
-            id="theme-bg-text"
-            type="text"
-            value={theme.background ?? ""}
-            onChange={(e) => setHex("background", e.target.value.trim())}
-            placeholder="#ffffff"
-            error={bErr}
-          />
+      <div className="border-t border-slate-200 pt-5">
+        <div className="block text-sm font-semibold text-slate-900 mb-3">Logo</div>
+        <div className="flex flex-wrap items-start gap-3">
+          <button
+            type="button"
+            onClick={() => openMediaPicker({ kind: "logo" })}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border bg-white text-slate-900 border-slate-300 hover:bg-slate-50"
+          >
+            Seleziona logo da Media Library
+          </button>
+          {theme.logo_url ? (
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <div className="h-16 w-24 shrink-0 rounded-lg border border-slate-200 overflow-hidden bg-slate-50 flex items-center justify-center relative">
+                <img
+                  src={theme.logo_url}
+                  alt={theme.logo_alt ?? "logo"}
+                  className="max-w-full max-h-full object-contain p-2"
+                />
+              </div>
+              <div className="min-w-0 flex-1 space-y-2">
+                <Input
+                  type="text"
+                  value={theme.logo_url ?? ""}
+                  onChange={(e) =>
+                    setTheme((prev) => ({ ...prev, logo_url: e.target.value || null }))
+                  }
+                  placeholder="URL logo"
+                />
+                <Input
+                  type="text"
+                  value={theme.logo_alt ?? ""}
+                  onChange={(e) =>
+                    setTheme((prev) => ({ ...prev, logo_alt: e.target.value || null }))
+                  }
+                  placeholder="Alt text logo (accessibilità)"
+                />
+              </div>
+            </div>
+          ) : (
+            <Input
+              type="text"
+              value={theme.logo_url ?? ""}
+              onChange={(e) => setTheme((prev) => ({ ...prev, logo_url: e.target.value || null }))}
+              placeholder="Oppure incolla URL logo..."
+              className="flex-1 min-w-[200px]"
+            />
+          )}
         </div>
-      </Row>
+      </div>
 
-      <Row label="Testo principale" htmlFor="theme-fg-text" error={fErr}>
-        <div className="flex gap-2">
-          <input
-            id="theme-fg-color"
-            type="color"
-            className="h-10 w-16 rounded border border-slate-300 bg-white"
-            value={
-              theme.foreground && validateHexColor(theme.foreground)
-                ? normalizeHexForPicker(theme.foreground)
-                : "#0f172a"
-            }
-            onChange={(e) => setHex("foreground", e.target.value)}
-            aria-label="Testo principale (picker)"
-          />
-          <Input
-            id="theme-fg-text"
-            type="text"
-            value={theme.foreground ?? ""}
-            onChange={(e) => setHex("foreground", e.target.value.trim())}
-            placeholder="#0f172a"
-            error={fErr}
-          />
-        </div>
-      </Row>
-
-      <Row label="Secondario / Muted" htmlFor="theme-muted-text" error={mErr}>
-        <div className="flex gap-2">
-          <input
-            id="theme-muted-color"
-            type="color"
-            className="h-10 w-16 rounded border border-slate-300 bg-white"
-            value={
-              theme.muted && validateHexColor(theme.muted)
-                ? normalizeHexForPicker(theme.muted)
-                : "#64748b"
-            }
-            onChange={(e) => setHex("muted", e.target.value)}
-            aria-label="Secondario Muted (picker)"
-          />
-          <Input
-            id="theme-muted-text"
-            type="text"
-            value={theme.muted ?? ""}
-            onChange={(e) => setHex("muted", e.target.value.trim())}
-            placeholder="#64748b"
-            error={mErr}
-          />
-        </div>
-      </Row>
-
-      <Row label="Raggio angoli" htmlFor="theme-radius" error={rErr}>
-        <Select
-          id="theme-radius"
-          value={theme.radius ?? "md"}
-          onChange={(e) =>
-            setTheme((prev) => ({
-              ...prev,
-              radius: e.target.value as (typeof RADIUS_ALLOWED)[number],
-            }))
-          }
-          error={rErr}
+      <div className="border-t border-slate-200 pt-5">
+        <button
+          type="button"
+          onClick={() => setShowAdvanced((s) => !s)}
+          className="inline-flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-700"
+          aria-expanded={showAdvanced}
         >
-          {RADIUS_ALLOWED.map((r) => (
-            <option key={r} value={r}>
-              {labelForRadius(r)}
-            </option>
-          ))}
-        </Select>
-      </Row>
+          <span aria-hidden>{showAdvanced ? "▾" : "▸"}</span>
+          {showAdvanced
+            ? "Nascondi personalizzazioni avanzate"
+            : "Mostra personalizzazioni avanzate"}
+        </button>
+        {showAdvanced ? (
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Row label="Colore primario" htmlFor="theme-primary-text" error={pErr}>
+              <div className="flex gap-2">
+                <input
+                  id="theme-primary-color"
+                  type="color"
+                  className="h-10 w-16 rounded border border-slate-300 bg-white"
+                  value={
+                    theme.primary && validateHexColor(theme.primary)
+                      ? normalizeHexForPicker(theme.primary)
+                      : "#4f46e5"
+                  }
+                  onChange={(e) => setHex("primary", e.target.value)}
+                  aria-label="Colore primario (picker)"
+                />
+                <Input
+                  id="theme-primary-text"
+                  type="text"
+                  value={theme.primary ?? ""}
+                  onChange={(e) => setHex("primary", e.target.value.trim())}
+                  placeholder="#RRGGBB"
+                  error={pErr}
+                />
+              </div>
+            </Row>
 
-      <Row label="Font titoli" htmlFor="theme-head" error={hErr}>
-        <Select
-          id="theme-head"
-          value={theme.headingFont ?? "display"}
-          onChange={(e) =>
-            setTheme((prev) => ({
-              ...prev,
-              headingFont: e.target.value as (typeof FONT_HEADING_ALLOWED)[number],
-            }))
-          }
-          error={hErr}
-        >
-          {FONT_HEADING_ALLOWED.map((f) => (
-            <option key={f} value={f}>
-              {labelForFont(f)}
-            </option>
-          ))}
-        </Select>
-      </Row>
+            <Row label="Sfondo" htmlFor="theme-bg-text" error={bErr}>
+              <div className="flex gap-2">
+                <input
+                  id="theme-bg-color"
+                  type="color"
+                  className="h-10 w-16 rounded border border-slate-300 bg-white"
+                  value={
+                    theme.background && validateHexColor(theme.background)
+                      ? normalizeHexForPicker(theme.background)
+                      : "#ffffff"
+                  }
+                  onChange={(e) => setHex("background", e.target.value)}
+                  aria-label="Sfondo (picker)"
+                />
+                <Input
+                  id="theme-bg-text"
+                  type="text"
+                  value={theme.background ?? ""}
+                  onChange={(e) => setHex("background", e.target.value.trim())}
+                  placeholder="#ffffff"
+                  error={bErr}
+                />
+              </div>
+            </Row>
 
-      <Row label="Font testo" htmlFor="theme-body" error={bfErr}>
-        <Select
-          id="theme-body"
-          value={theme.bodyFont ?? "sans"}
-          onChange={(e) =>
-            setTheme((prev) => ({
-              ...prev,
-              bodyFont: e.target.value as (typeof FONT_BODY_ALLOWED)[number],
-            }))
-          }
-          error={bfErr}
-        >
-          {FONT_BODY_ALLOWED.map((f) => (
-            <option key={f} value={f}>
-              {labelForFont(f)}
-            </option>
-          ))}
-        </Select>
-      </Row>
+            <Row label="Testo principale" htmlFor="theme-fg-text" error={fErr}>
+              <div className="flex gap-2">
+                <input
+                  id="theme-fg-color"
+                  type="color"
+                  className="h-10 w-16 rounded border border-slate-300 bg-white"
+                  value={
+                    theme.foreground && validateHexColor(theme.foreground)
+                      ? normalizeHexForPicker(theme.foreground)
+                      : "#0f172a"
+                  }
+                  onChange={(e) => setHex("foreground", e.target.value)}
+                  aria-label="Testo principale (picker)"
+                />
+                <Input
+                  id="theme-fg-text"
+                  type="text"
+                  value={theme.foreground ?? ""}
+                  onChange={(e) => setHex("foreground", e.target.value.trim())}
+                  placeholder="#0f172a"
+                  error={fErr}
+                />
+              </div>
+            </Row>
+
+            <Row label="Secondario / Muted" htmlFor="theme-muted-text" error={mErr}>
+              <div className="flex gap-2">
+                <input
+                  id="theme-muted-color"
+                  type="color"
+                  className="h-10 w-16 rounded border border-slate-300 bg-white"
+                  value={
+                    theme.muted && validateHexColor(theme.muted)
+                      ? normalizeHexForPicker(theme.muted)
+                      : "#64748b"
+                  }
+                  onChange={(e) => setHex("muted", e.target.value)}
+                  aria-label="Secondario Muted (picker)"
+                />
+                <Input
+                  id="theme-muted-text"
+                  type="text"
+                  value={theme.muted ?? ""}
+                  onChange={(e) => setHex("muted", e.target.value.trim())}
+                  placeholder="#64748b"
+                  error={mErr}
+                />
+              </div>
+            </Row>
+
+            <Row label="Raggio angoli" htmlFor="theme-radius" error={rErr}>
+              <Select
+                id="theme-radius"
+                value={theme.radius ?? "md"}
+                onChange={(e) =>
+                  setTheme((prev) => ({
+                    ...prev,
+                    radius: e.target.value as (typeof RADIUS_ALLOWED)[number],
+                  }))
+                }
+                error={rErr}
+              >
+                {RADIUS_ALLOWED.map((r) => (
+                  <option key={r} value={r}>
+                    {labelForRadius(r)}
+                  </option>
+                ))}
+              </Select>
+            </Row>
+
+            <Row label="Font titoli" htmlFor="theme-head" error={hErr}>
+              <Select
+                id="theme-head"
+                value={theme.headingFont ?? "display"}
+                onChange={(e) =>
+                  setTheme((prev) => ({
+                    ...prev,
+                    headingFont: e.target.value as (typeof FONT_HEADING_ALLOWED)[number],
+                  }))
+                }
+                error={hErr}
+              >
+                {FONT_HEADING_ALLOWED.map((f) => (
+                  <option key={f} value={f}>
+                    {labelForFont(f)}
+                  </option>
+                ))}
+              </Select>
+            </Row>
+
+            <Row label="Font testo" htmlFor="theme-body" error={bfErr}>
+              <Select
+                id="theme-body"
+                value={theme.bodyFont ?? "sans"}
+                onChange={(e) =>
+                  setTheme((prev) => ({
+                    ...prev,
+                    bodyFont: e.target.value as (typeof FONT_BODY_ALLOWED)[number],
+                  }))
+                }
+                error={bfErr}
+              >
+                {FONT_BODY_ALLOWED.map((f) => (
+                  <option key={f} value={f}>
+                    {labelForFont(f)}
+                  </option>
+                ))}
+              </Select>
+            </Row>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -1315,6 +1916,12 @@ function labelForSection(t: SectionType): string {
       return "Chi siamo";
     case "services":
       return "Lista servizi";
+    case "price_list":
+      return "Listino Prezzi";
+    case "features_cta":
+      return "Features + CTA";
+    case "booking_widget":
+      return "Widget Prenotazioni";
     case "gallery":
       return "Galleria";
     case "staff":
@@ -1323,6 +1930,8 @@ function labelForSection(t: SectionType): string {
       return "Recensioni";
     case "contact":
       return "Contatti";
+    default:
+      return t;
   }
 }
 
@@ -1346,6 +1955,27 @@ function labelForFont(f: string) {
     display: "Titoli",
   };
   return map[f] ?? f;
+}
+
+function labelForVariant(v: string) {
+  const map: Record<string, string> = {
+    default: "Standard",
+    centered: "Centrato",
+    split: "Split (due colonne)",
+    split_hero_left: "Split con immagine a sinistra",
+    fullscreen: "Fullscreen",
+    minimal: "Minimale",
+    cards: "Card",
+    carousel: "Carosello",
+    table: "Tabella",
+    list: "Lista",
+    masonry: "Masonry",
+    grid: "Griglia",
+    compact: "Compatta",
+    full: "Pieno",
+    premium: "Premium",
+  };
+  return map[v] ?? v;
 }
 
 function normalizeHexForPicker(v: string): string {

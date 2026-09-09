@@ -7,6 +7,7 @@ import {
   FONT_HEADING_ALLOWED,
   FONT_BODY_ALLOWED,
   RADIUS_ALLOWED,
+  DESIGN_PRESET_ALLOWED,
   validateHexColor,
   type SectionType,
   type PublicTheme,
@@ -41,6 +42,14 @@ export const studioServiceSchema = z.object({
   id: z.string().uuid().nullish(),
   name: z.string().trim().min(1, "Nome obbligatorio").max(120),
   description: z.string().trim().max(1000).nullable().optional(),
+  price: z.union([
+    z.preprocess(
+      (v) =>
+        v === null || v === undefined || v === "" ? null : typeof v === "string" ? Number(v) : v,
+      NON_NEG_PRICE.nullable().optional(),
+    ),
+    z.null(),
+  ]),
   price_from: z.union([
     z.preprocess(
       (v) =>
@@ -73,6 +82,9 @@ export const studioThemeSchema = z.object({
   radius: z.enum(RADIUS_ALLOWED).nullish(),
   headingFont: z.enum(FONT_HEADING_ALLOWED).nullish(),
   bodyFont: z.enum(FONT_BODY_ALLOWED).nullish(),
+  preset: z.enum(DESIGN_PRESET_ALLOWED).nullish(),
+  logo_url: z.string().max(2000).nullish(),
+  logo_alt: z.string().max(200).nullish(),
 });
 
 export type StudioDraftTheme = PublicTheme;
@@ -208,6 +220,7 @@ export function normalizeServicesForDb(services: StudioDraftService[]): Array<{
   id?: string | null;
   name: string;
   description: string | null;
+  price: number | null;
   price_from: number | null;
   currency: Currency;
   duration_minutes: number | null;
@@ -219,6 +232,7 @@ export function normalizeServicesForDb(services: StudioDraftService[]): Array<{
     id?: string | null;
     name: string;
     description: string | null;
+    price: number | null;
     price_from: number | null;
     currency: Currency;
     duration_minutes: number | null;
@@ -233,10 +247,15 @@ export function normalizeServicesForDb(services: StudioDraftService[]): Array<{
   for (const s of sorted) {
     const name = s.name?.trim?.() ?? "";
     if (name.length === 0) continue;
-    let price: number | null = null;
+    let priceFixed: number | null = null;
+    if (s.price !== null && s.price !== undefined) {
+      const p = typeof s.price === "number" ? s.price : Number(s.price);
+      if (Number.isFinite(p) && p >= 0) priceFixed = Math.round(p * 100) / 100;
+    }
+    let priceFrom: number | null = null;
     if (s.price_from !== null && s.price_from !== undefined) {
       const p = typeof s.price_from === "number" ? s.price_from : Number(s.price_from);
-      if (Number.isFinite(p) && p >= 0) price = Math.round(p * 100) / 100;
+      if (Number.isFinite(p) && p >= 0) priceFrom = Math.round(p * 100) / 100;
     }
     const currency =
       typeof s.currency === "string" &&
@@ -254,7 +273,8 @@ export function normalizeServicesForDb(services: StudioDraftService[]): Array<{
       id: idVal,
       name: name.slice(0, 120),
       description: s.description ? String(s.description).slice(0, 1000) : null,
-      price_from: price,
+      price: priceFixed,
+      price_from: priceFrom,
       currency,
       duration_minutes: duration,
       position: cursor,
@@ -263,4 +283,111 @@ export function normalizeServicesForDb(services: StudioDraftService[]): Array<{
     cursor += 1;
   }
   return out;
+}
+
+export interface AltTextIssue {
+  breadcrumb: string;
+  imageUrl: string | null;
+  issue: "missing_alt" | "empty_alt";
+}
+
+const IMAGE_KEY_RE =
+  /(image|photo|picture|src|thumb|banner|cover|logo|icon|gallery|media|avatar|portrait)(?:url|uri|src|path|link)?$/i;
+const ALT_KEY_RE = /^(alt|alt_text|altText|caption|description_text|alt_desc|testo_alt)$/i;
+const IMAGE_URL_EXT_RE = /\.(png|jpe?g|gif|webp|avif|svg|bmp|ico)(?:\?|#|$)/i;
+
+function isLikelyImageUrl(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const trimmed = v.trim();
+  if (!trimmed) return null;
+  if (IMAGE_URL_EXT_RE.test(trimmed)) return trimmed;
+  if (
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("/") ||
+    trimmed.startsWith("data:image/") ||
+    trimmed.startsWith("blob:")
+  ) {
+    if (/\/storage\//.test(trimmed) || /velora/.test(trimmed.toLowerCase())) return trimmed;
+    if (trimmed.length < 1200 && IMAGE_URL_EXT_RE.test(trimmed.split("?")[0] ?? "")) return trimmed;
+    if (trimmed.length < 40 && /\/img|\/images|\/media\//.test(trimmed)) return trimmed;
+  }
+  return null;
+}
+
+export function findImagesMissingAlt(sections: StudioDraftSection[]): AltTextIssue[] {
+  const issues: AltTextIssue[] = [];
+  const stack: Array<{ value: unknown; breadcrumb: string }> = sections.map((s, i) => ({
+    value: s,
+    breadcrumb: `sections[${i}]${s.section_type ? `(${String(s.section_type)})` : ""}`,
+  }));
+
+  const seen = new WeakSet<object>();
+
+  while (stack.length > 0) {
+    const frame = stack.pop()!;
+    const v = frame.value;
+
+    if (v == null) continue;
+    if (typeof v !== "object") continue;
+
+    if (seen.has(v as object)) continue;
+    seen.add(v as object);
+
+    if (Array.isArray(v)) {
+      for (let i = 0; i < v.length; i++) {
+        stack.push({ value: v[i], breadcrumb: `${frame.breadcrumb}[${i}]` });
+      }
+      continue;
+    }
+
+    const keys = Object.keys(v as Record<string, unknown>);
+    let imageUrl: string | null = null;
+    let hasImageKey = false;
+    let hasAltKey = false;
+    let altValue: unknown = null;
+
+    for (const k of keys) {
+      const child = (v as Record<string, unknown>)[k];
+      stack.push({ value: child, breadcrumb: `${frame.breadcrumb}.${k}` });
+
+      if (!hasImageKey) {
+        if (IMAGE_KEY_RE.test(k)) {
+          const url = isLikelyImageUrl(child);
+          if (url) {
+            imageUrl = url;
+            hasImageKey = true;
+          }
+        }
+        if (!imageUrl) {
+          const direct = isLikelyImageUrl(child);
+          if (
+            direct &&
+            typeof k === "string" &&
+            (k.toLowerCase().includes("url") ||
+              k.toLowerCase().includes("src") ||
+              k.toLowerCase() === "image" ||
+              k.toLowerCase() === "photo" ||
+              k.toLowerCase() === "picture")
+          ) {
+            imageUrl = direct;
+            hasImageKey = true;
+          }
+        }
+      }
+
+      if (ALT_KEY_RE.test(k)) {
+        hasAltKey = true;
+        altValue = child;
+      }
+    }
+
+    if (hasImageKey && imageUrl) {
+      if (!hasAltKey) issues.push({ breadcrumb: frame.breadcrumb, imageUrl, issue: "missing_alt" });
+      else if (typeof altValue !== "string" || altValue.trim().length === 0)
+        issues.push({ breadcrumb: frame.breadcrumb, imageUrl, issue: "empty_alt" });
+    }
+  }
+
+  return issues;
 }

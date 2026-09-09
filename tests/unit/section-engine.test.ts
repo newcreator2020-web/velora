@@ -23,8 +23,8 @@ import type { PublicSection, SectionType } from "@/lib/server/content-engine";
 
 describe("FASE5 content-engine pure & helpers", () => {
   describe("SECTION_TYPES + SINGLETON invariants (GATE 13)", () => {
-    it("7 tipi sezione supportati (hero, about, services, gallery, staff, reviews, contact)", () => {
-      expect(SECTION_TYPES).toHaveLength(7);
+    it("10 tipi sezione supportati (hero, about, services, gallery, staff, reviews, contact, price_list, features_cta, booking_widget)", () => {
+      expect(SECTION_TYPES).toHaveLength(10);
       expect(SECTION_TYPES).toEqual(
         expect.arrayContaining([
           "hero",
@@ -34,6 +34,9 @@ describe("FASE5 content-engine pure & helpers", () => {
           "staff",
           "reviews",
           "contact",
+          "price_list",
+          "features_cta",
+          "booking_widget",
         ]),
       );
     });

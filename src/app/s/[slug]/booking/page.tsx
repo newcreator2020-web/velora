@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { cookies } from "next/headers";
+import { randomUUID } from "crypto";
+import { notFound, redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { slugSchema, resolvePublicTenant } from "@/lib/server/site-engine";
 import { getBusinessAvailability } from "@/lib/server/booking";
@@ -12,9 +14,17 @@ type ServiceRow = Database["public"]["Tables"]["services"]["Row"] & {
 
 interface PublicBookingPageProps {
   params: Promise<{ slug: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
 export const revalidate = 0;
+
+const CSRF_COOKIE_NAME = "velora_csrf_token";
+
+function safeToken(v: string | undefined): string {
+  if (v && v.length >= 16) return v;
+  return randomUUID().replace(/-/g, "");
+}
 
 export async function generateMetadata(props: PublicBookingPageProps): Promise<Metadata> {
   const { slug } = await props.params;
@@ -57,6 +67,13 @@ export default async function PublicBookingPage(props: PublicBookingPageProps) {
     .order("name");
   if (services.error) notFound();
   const availability = await getBusinessAvailability(tenantId);
+  const ck = await cookies();
+  const csrfToken = safeToken(ck.get(CSRF_COOKIE_NAME)?.value);
+  const sp = (await props.searchParams) ?? {};
+  const existing = sp["_csrf"] as string | undefined;
+  if (!existing || existing.length < 16 || existing !== csrfToken) {
+    redirect(`/s/${encodeURIComponent(site.slug)}/booking?_csrf=${encodeURIComponent(csrfToken)}`);
+  }
   return (
     <main id="main-content" className="min-h-screen bg-neutral-50 pb-20 pt-12">
       <div className="mx-auto max-w-3xl px-4">
@@ -71,6 +88,7 @@ export default async function PublicBookingPage(props: PublicBookingPageProps) {
       </div>
       <BookingClientForm
         slug={site.slug}
+        csrfToken={csrfToken}
         services={(services.data ?? []) as ServiceRow[]}
         availability={availability}
         timezone={site.timezone || "Europe/Rome"}

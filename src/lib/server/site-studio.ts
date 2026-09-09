@@ -30,10 +30,15 @@ import {
   FONT_HEADING_ALLOWED,
   FONT_BODY_ALLOWED,
   RADIUS_ALLOWED,
+  priceListSettingsSchema,
+  featuresCtaSettingsSchema,
+  bookingWidgetSettingsSchema,
   type SectionType,
   type PublicSite,
   type PublicSection,
   type PublicService,
+  type BookingWidgetServiceOption,
+  type BookingAvailabilityRow,
 } from "./content-engine";
 import type { Tables } from "@/types/supabase";
 import type { PublicSiteData } from "./site-engine";
@@ -472,7 +477,7 @@ export async function publishSiteDraft(expected_revision?: string | null): Promi
 
   const supabase = await createSupabaseServerClient();
   try {
-    const args: Record<string, unknown> = { p_tenant_id: tid };
+    const args: Record<string, unknown> = { p_tenant_id: tid, p_actor_id: actor };
     if (typeof expected_revision === "string" && expected_revision.length > 0) {
       args["p_expected_revision"] = expected_revision;
     }
@@ -646,6 +651,13 @@ export async function resolveDraftSiteForPreview(): Promise<
         .trim()
         .slice(0, 120),
       description: typeof r.description === "string" ? r.description.slice(0, 1000) : null,
+      price:
+        (r as { price?: unknown }).price !== null && (r as { price?: unknown }).price !== undefined
+          ? Number.isFinite(Number((r as { price?: unknown }).price)) &&
+            Number((r as { price?: unknown }).price) >= 0
+            ? Number((r as { price?: unknown }).price)
+            : null
+          : null,
       priceFrom:
         r.price_from !== null && r.price_from !== undefined
           ? Number.isFinite(Number(r.price_from)) && Number(r.price_from) >= 0
@@ -711,7 +723,22 @@ export async function resolveDraftSiteForPreview(): Promise<
           type: "gallery",
           variant,
           settings: parsedSet.value as PublicSection["settings"],
-          data: { assets: [] },
+          data: {
+            assets: [
+              {
+                url: `https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=${encodeURIComponent("Modern elegant hair salon interior with stylish chairs and lighting")}&image_size=square_hd`,
+                alt: "Interno del salone con postazioni styling",
+              },
+              {
+                url: `https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=${encodeURIComponent("Professional hairstylist doing haircut for female client")}&image_size=square_hd`,
+                alt: "Parrucchiere durante un taglio cliente",
+              },
+              {
+                url: `https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=${encodeURIComponent("Luxury beauty salon display shelf with hair care products")}&image_size=square_hd`,
+                alt: "Espositore prodotti per capelli professionali",
+              },
+            ],
+          },
         });
         break;
       case "staff":
@@ -719,7 +746,22 @@ export async function resolveDraftSiteForPreview(): Promise<
           type: "staff",
           variant,
           settings: parsedSet.value as PublicSection["settings"],
-          data: { members: [] },
+          data: {
+            members: [
+              {
+                name: "Sofia Ricci",
+                role: "Titolare & Hair Stylist Senior",
+                bio: "15 anni di esperienza in tagli e colorazioni per ogni tipologia di capello.",
+                photoUrl: `https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=${encodeURIComponent("Professional smiling female hair stylist portrait in salon uniform")}&image_size=square_hd`,
+              },
+              {
+                name: "Marco Moretti",
+                role: "Barber & Men\u2019s Specialist",
+                bio: "Specializzato in tagli uomo, barba e trattamenti tradizionali.",
+                photoUrl: `https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=${encodeURIComponent("Professional confident male barber portrait with scissors and apron")}&image_size=square_hd`,
+              },
+            ],
+          },
         });
         break;
       case "reviews":
@@ -727,7 +769,25 @@ export async function resolveDraftSiteForPreview(): Promise<
           type: "reviews",
           variant,
           settings: parsedSet.value as PublicSection["settings"],
-          data: { reviews: [] },
+          data: {
+            reviews: [
+              {
+                author: "Giulia Bianchi",
+                rating: 5,
+                body: "Esperienza fantastica. Sofia ha capito esattamente cosa volevo e il risultato è andato oltre le aspettative. Ambiente pulito e accogliente.",
+              },
+              {
+                author: "Luca Ferrari",
+                rating: 5,
+                body: "Marco è un barber eccezionale. Taglio e barba perfetti ogni volta, consiglio vivamente.",
+              },
+              {
+                author: "Anna Romano",
+                rating: 4,
+                body: "Personale gentile e molto preparato. Prezzi onesti per la qualità offerta. Tornerò sicuramente.",
+              },
+            ],
+          },
         });
         break;
       case "contact": {
@@ -748,6 +808,110 @@ export async function resolveDraftSiteForPreview(): Promise<
             },
           });
         }
+        break;
+      }
+      case "price_list":
+        if (services.length > 0) {
+          sections.push({
+            type: "price_list",
+            variant,
+            settings: parsedSet.value as z.infer<typeof priceListSettingsSchema>,
+            data: { services },
+          });
+        }
+        break;
+      case "features_cta": {
+        const typedSettings = (parsedSet.value ?? {}) as Record<string, unknown>;
+        const finalSettings: Record<string, unknown> = { ...typedSettings };
+        if (!finalSettings["eyebrow"]) finalSettings["eyebrow"] = "Perché sceglierci";
+        if (!finalSettings["headline"])
+          finalSettings["headline"] = "Qualità, esperienza e rispetto del cliente";
+        if (!finalSettings["subheadline"])
+          finalSettings["subheadline"] =
+            "Abbiamo costruito il nostro salone su principi semplici: ascolto, professionalità e risultati duraturi. Scopri perché le persone ci scelgono e tornano.";
+        if (!finalSettings["ctaPrimaryLabel"]) finalSettings["ctaPrimaryLabel"] = "Prenota ora";
+        if (!finalSettings["ctaPrimaryTarget"]) finalSettings["ctaPrimaryTarget"] = "#booking";
+        if (!finalSettings["ctaSecondaryLabel"])
+          finalSettings["ctaSecondaryLabel"] = "Scopri i servizi";
+        if (!finalSettings["ctaSecondaryTarget"]) finalSettings["ctaSecondaryTarget"] = "#services";
+        sections.push({
+          type: "features_cta",
+          variant,
+          settings: finalSettings as z.infer<typeof featuresCtaSettingsSchema>,
+          data: {
+            features: [
+              {
+                icon: "⚡",
+                title: "Veloce e semplice",
+                description: "Prenota in pochi clic, senza attese o chiamate telefoniche.",
+              },
+              {
+                icon: "🎯",
+                title: "Qualità garantita",
+                description: "Servizi selezionati e professionisti qualificati per te.",
+              },
+              {
+                icon: "💎",
+                title: "Prezzi trasparenti",
+                description: "Nessuna sorpresa: il prezzo che vedi è quello che paghi.",
+              },
+              {
+                icon: "✅",
+                title: "Flessibile e sicuro",
+                description: "Modifica o cancella senza penali fino a 24h prima.",
+              },
+            ],
+          },
+        });
+        break;
+      }
+      case "booking_widget": {
+        const bookingServices: BookingWidgetServiceOption[] = draft.services
+          .filter((s) => Boolean(s.active) && s.id && typeof s.id === "string")
+          .sort((a, b) => Number(a.position ?? 0) - Number(b.position ?? 0))
+          .map((r) => ({
+            id: String(r.id ?? ""),
+            name: String(r.name ?? "")
+              .trim()
+              .slice(0, 120),
+            duration_minutes:
+              r.duration_minutes !== null && r.duration_minutes !== undefined
+                ? Number.isFinite(Number(r.duration_minutes)) &&
+                  Number(r.duration_minutes) >= 1 &&
+                  Number(r.duration_minutes) <= 1440
+                  ? Math.round(Number(r.duration_minutes))
+                  : null
+                : null,
+            price_from:
+              r.price_from !== null && r.price_from !== undefined
+                ? Number.isFinite(Number(r.price_from)) && Number(r.price_from) >= 0
+                  ? Number(r.price_from)
+                  : null
+                : null,
+            currency:
+              typeof r.currency === "string" && ["EUR", "USD", "GBP", "CHF"].includes(r.currency)
+                ? r.currency
+                : "EUR",
+            active: Boolean(r.active),
+          }))
+          .filter((s) => s.name.length > 0 && s.id.length > 0);
+        const defaultAvailability: BookingAvailabilityRow[] = Array.from({ length: 7 }, (_, i) => ({
+          weekday: i,
+          enabled: i >= 1 && i <= 5,
+          start_time: i === 0 || i === 6 ? "00:00" : "09:00",
+          end_time: i === 0 || i === 6 ? "00:00" : "18:00",
+        }));
+        sections.push({
+          type: "booking_widget",
+          variant,
+          settings: parsedSet.value as z.infer<typeof bookingWidgetSettingsSchema>,
+          data: {
+            slug: site.slug ?? null,
+            services: bookingServices,
+            availability: defaultAvailability,
+            timezone: site.timezone ?? "Europe/Rome",
+          },
+        });
         break;
       }
     }

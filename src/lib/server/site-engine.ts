@@ -15,6 +15,9 @@ import {
   staffSettingsSchema,
   reviewsSettingsSchema,
   contactSettingsSchema,
+  priceListSettingsSchema,
+  featuresCtaSettingsSchema,
+  bookingWidgetSettingsSchema,
   safeVariant,
 } from "@/lib/server/content-engine";
 import type {
@@ -23,6 +26,8 @@ import type {
   PublicService,
   PublicTheme,
   SectionType,
+  BookingWidgetServiceOption,
+  BookingAvailabilityRow,
 } from "@/lib/server/content-engine";
 
 const SLUG_MAX_LEN = 60;
@@ -371,24 +376,32 @@ type SectionRow = {
 };
 
 type ServiceRow = {
+  id?: string | null;
   name: string;
   description: string | null;
+  price?: string | number | null;
   price_from: string | number | null;
   currency: string;
   duration_minutes: number | null;
+  active?: boolean;
 };
 
 function mapServices(rows: ServiceRow[]): PublicService[] {
   const out: PublicService[] = [];
   for (const r of rows) {
     if (typeof r.name !== "string" || r.name.trim().length === 0) continue;
+    const p = r.price;
     const pf = r.price_from;
-    const priceNum =
+    const priceFixed =
+      p == null ? null : typeof p === "number" ? p : typeof p === "string" ? Number(p) : null;
+    const priceFromNum =
       pf == null ? null : typeof pf === "number" ? pf : typeof pf === "string" ? Number(pf) : null;
     out.push({
       name: r.name.trim().slice(0, 120),
       description: typeof r.description === "string" ? r.description.slice(0, 1000) : null,
-      priceFrom: priceNum != null && isFinite(priceNum) && priceNum >= 0 ? priceNum : null,
+      price: priceFixed != null && isFinite(priceFixed) && priceFixed >= 0 ? priceFixed : null,
+      priceFrom:
+        priceFromNum != null && isFinite(priceFromNum) && priceFromNum >= 0 ? priceFromNum : null,
       currency:
         typeof r.currency === "string" && ["EUR", "USD", "GBP", "CHF"].includes(r.currency)
           ? r.currency
@@ -424,6 +437,7 @@ export async function resolvePublicSiteContent(params: {
 
   let rows: SectionRow[] = [];
   const services: PublicService[] = [];
+  let rawServiceRows: ServiceRow[] = [];
 
   if (tenantId) {
     const [sectionsRes, servicesRes] = await Promise.all([
@@ -434,7 +448,7 @@ export async function resolvePublicSiteContent(params: {
         .order("position", { ascending: true }),
       supabase
         .from("services")
-        .select("name,description,price_from,currency,duration_minutes")
+        .select("id,name,description,price,price_from,currency,duration_minutes,active")
         .eq("tenant_id", tenantId)
         .eq("active", true)
         .order("position", { ascending: true }),
@@ -449,7 +463,8 @@ export async function resolvePublicSiteContent(params: {
       }));
     }
     if (!servicesRes.error && servicesRes.data) {
-      services.push(...mapServices(servicesRes.data as ServiceRow[]));
+      rawServiceRows = servicesRes.data as unknown as ServiceRow[];
+      services.push(...mapServices(rawServiceRows));
     }
   }
 
@@ -583,6 +598,82 @@ export async function resolvePublicSiteContent(params: {
             },
           });
         }
+        break;
+      }
+      case "price_list":
+        if (services.length > 0) {
+          sections.push({
+            type: "price_list",
+            variant,
+            settings: parsed.value as z.infer<typeof priceListSettingsSchema>,
+            data: { services },
+          });
+        }
+        break;
+      case "features_cta":
+        sections.push({
+          type: "features_cta",
+          variant,
+          settings: parsed.value as z.infer<typeof featuresCtaSettingsSchema>,
+          data: { features: null },
+        });
+        break;
+      case "booking_widget": {
+        const bookingServices: BookingWidgetServiceOption[] = rawServiceRows
+          .filter((r) => r && typeof r.name === "string" && r.name.trim().length > 0 && r.id)
+          .map((r) => {
+            const pf = r.price_from;
+            const priceFrom =
+              pf == null
+                ? null
+                : typeof pf === "number"
+                  ? pf
+                  : typeof pf === "string"
+                    ? Number(pf)
+                    : null;
+            const dm = r.duration_minutes;
+            const dur =
+              dm == null
+                ? null
+                : typeof dm === "number"
+                  ? dm
+                  : typeof dm === "string"
+                    ? Number(dm)
+                    : null;
+            return {
+              id: String(r.id ?? ""),
+              name: String(r.name ?? "")
+                .trim()
+                .slice(0, 120),
+              duration_minutes:
+                dur != null && isFinite(dur) && dur >= 1 && dur <= 1440 ? Math.round(dur) : null,
+              price_from:
+                priceFrom != null && isFinite(priceFrom) && priceFrom >= 0 ? priceFrom : null,
+              currency:
+                typeof r.currency === "string" && ["EUR", "USD", "GBP", "CHF"].includes(r.currency)
+                  ? r.currency
+                  : "EUR",
+              active: typeof r.active === "boolean" ? r.active : true,
+            };
+          })
+          .filter((s) => s.name.length > 0 && s.id.length > 0);
+        const defaultAvailability: BookingAvailabilityRow[] = Array.from({ length: 7 }, (_, i) => ({
+          weekday: i,
+          enabled: i >= 1 && i <= 5,
+          start_time: i === 0 || i === 6 ? "00:00" : "09:00",
+          end_time: i === 0 || i === 6 ? "00:00" : "18:00",
+        }));
+        sections.push({
+          type: "booking_widget",
+          variant,
+          settings: parsed.value as z.infer<typeof bookingWidgetSettingsSchema>,
+          data: {
+            slug: site.slug ?? null,
+            services: bookingServices,
+            availability: defaultAvailability,
+            timezone: site.timezone ?? "Europe/Rome",
+          },
+        });
         break;
       }
     }
