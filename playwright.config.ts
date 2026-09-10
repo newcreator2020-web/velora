@@ -35,7 +35,7 @@ export default defineConfig({
       ? `node .\\node_modules\\next\\dist\\bin\\next start -p ${PORT} --hostname 127.0.0.1`
       : `node .\\node_modules\\next\\dist\\bin\\next dev -p ${PORT} --hostname 127.0.0.1`,
     url: `${baseURL}/api/health`,
-    reuseExistingServer: false,
+    reuseExistingServer: true,
     timeout: 300_000,
     env: {
       DO_NOT_TRACK: "1",

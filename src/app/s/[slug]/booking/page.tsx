@@ -34,16 +34,24 @@ export async function generateMetadata(props: PublicBookingPageProps): Promise<M
   if (result._tag !== "Found") return { title: "Prenotazione non disponibile" };
   const s = result.site;
   const base = s.canonicalPath || `/s/${encodeURIComponent(s.slug)}`;
-  const bookingCanonical = base.endsWith("/") ? `${base}booking` : `${base}/booking`;
+  const bookingCanonicalPath = base.endsWith("/") ? `${base}booking` : `${base}/booking`;
+  const defaultBase =
+    process.env["NEXT_PUBLIC_APP_URL"] && process.env["NEXT_PUBLIC_APP_URL"].length > 0
+      ? process.env["NEXT_PUBLIC_APP_URL"].replace(/\/+$/, "")
+      : "http://localhost:3000";
+  const bookingCanonical = `${defaultBase}${bookingCanonicalPath}`;
+  const description = `Prenota online un appuntamento da ${
+    s.businessName || "il nostro studio"
+  }. Visualizza subito orari disponibili, prezzi e professionisti. Conferma in pochi passaggi con deposito sicuro.`;
   return {
     title: `Prenota — ${s.businessName}`,
-    description: `Prenota un appuntamento online da ${s.businessName}.`,
+    description,
     alternates: { canonical: bookingCanonical },
     robots: { index: true, follow: true },
     openGraph: {
       type: "website",
       title: `Prenota — ${s.businessName}`,
-      description: `Prenota un appuntamento online da ${s.businessName}.`,
+      description,
       url: bookingCanonical,
       locale: s.locale,
       siteName: s.businessName,

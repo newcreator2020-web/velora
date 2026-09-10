@@ -1,6 +1,7 @@
 "use client";
 
-import { useFormState as useActionStateCompat, useFormStatus } from "react-dom";
+import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 import { onboardingAction, type OnboardingActionResult } from "./actions";
 
 const initial: OnboardingActionResult = { ok: false };
@@ -89,7 +90,7 @@ function Field({
 }
 
 export function OnboardingForm() {
-  const [state, action] = useActionStateCompat(onboardingAction, initial);
+  const [state, action] = useActionState(onboardingAction, initial);
   const v: Record<string, unknown> = (state.values ?? {}) as Record<string, unknown>;
   const fe = state.fieldErrors ?? {};
 

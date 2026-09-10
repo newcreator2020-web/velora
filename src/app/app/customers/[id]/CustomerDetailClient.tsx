@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { useFormState } from "react-dom";
+import { useState, useActionState } from "react";
 import { updateCustomerAction } from "@/app/app/bookings/actions";
 import type { Database } from "@/types/supabase";
 
@@ -11,7 +10,7 @@ type Customer = Database["public"]["Tables"]["customers"]["Row"] & {
 
 export default function CustomerDetailClient({ customer }: { customer: Customer }) {
   const [notes, setNotes] = useState(customer.notes ?? "");
-  const [state, formAction, isPending] = useFormState(updateCustomerAction, undefined);
+  const [state, formAction, isPending] = useActionState(updateCustomerAction, undefined);
   return (
     <form action={formAction} className="mt-3 space-y-2">
       <input type="hidden" name="customer_id" value={customer.id} />

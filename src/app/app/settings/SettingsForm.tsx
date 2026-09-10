@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useFormState as useActionStateCompat, useFormStatus } from "react-dom";
+import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 import { settingsAction, type SettingsActionResult } from "./actions";
 
 type Props = {
@@ -123,7 +124,7 @@ function Field({
 }
 
 export function SettingsForm({ initial }: Props) {
-  const [state, action] = useActionStateCompat(settingsAction, initial as SettingsActionResult);
+  const [state, action] = useActionState(settingsAction, initial as SettingsActionResult);
 
   const values = (state.values ?? initial.values ?? {}) as Partial<Record<string, string | null>>;
   const fe = state.fieldErrors ?? ({} as Record<string, string[]>);

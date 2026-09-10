@@ -144,3 +144,26 @@ export type DomainActionResult =
       error: string;
       code?: "AUTH" | "VALIDATION" | "INTERNAL" | "VERIFICATION_FAILED" | "ROUTING_NOT_READY";
     };
+
+export type RollbackPublicationResult =
+  | {
+      ok: true;
+      message: string;
+      from_version_number: number;
+      to_version_number_source: number;
+      restored_status: PublicationStatus;
+      new_version_number: number;
+      sections_applied: number;
+      services_applied: number;
+      theme_applied: boolean;
+      info?: undefined;
+      error?: undefined;
+      code?: undefined;
+    }
+  | {
+      ok: false;
+      error: string;
+      code: "AUTH" | "VALIDATION" | "INTERNAL" | "AUTHZ" | "NOT_FOUND";
+      message?: string;
+      info?: undefined;
+    };

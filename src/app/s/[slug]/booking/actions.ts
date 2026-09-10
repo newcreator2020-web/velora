@@ -5,7 +5,6 @@ import { headers } from "next/headers";
 import { BookingError, createPublicBooking, type PublicBookingResult } from "@/lib/server/booking";
 import { resolvePublicTenant, slugSchema } from "@/lib/server/site-engine";
 import { getSupabaseServiceClient } from "@/lib/supabase/service";
-import { calculateDeposit, createStripeDepositCheckout } from "@/lib/server/billing";
 import {
   sendBookingConfirmed,
   signBookingCancelToken,
@@ -13,15 +12,46 @@ import {
 } from "@/lib/server/email";
 import type { Database } from "@/types/supabase";
 
+export type BankInfo = {
+  account_holder: string | null;
+  iban: string | null;
+  bic_swift: string | null;
+  bank_name: string | null;
+  payment_note_template: string | null;
+  country: string | null;
+};
+
+export type BookingPaymentInfo = {
+  total_price_cents: number;
+  deposit_amount_cents: number | null;
+  currency: string;
+  payment_status: string;
+  bank_info: BankInfo | null;
+  service_name: string | null;
+};
+
 export type BookingActionState = {
   ok: boolean;
-  error_code?: string;
-  error?: string;
-  booking?: PublicBookingResult;
-  redirectToCheckout?: string;
-  fieldErrors?: {
-    booking?: string;
-  };
+  error_code?: string | undefined;
+  error?: string | undefined;
+  booking?: PublicBookingResult | undefined;
+  redirectToCheckout?: string | undefined;
+  payment?: BookingPaymentInfo | undefined;
+  bank_declared?:
+    | {
+        ok: boolean;
+        deposit_payment_ref: string | null;
+        deposit_payment_method: string | null;
+        deposit_requested_at: string | null;
+      }
+    | undefined;
+  declare_error?: string | undefined;
+  fieldErrors?:
+    | {
+        booking?: string | undefined;
+        declare?: string | undefined;
+      }
+    | undefined;
 };
 
 type BookingFullJoinRow = Database["public"]["Tables"]["bookings"]["Row"] & {
@@ -261,6 +291,13 @@ async function runCreateBookingAction(form: FormData): Promise<BookingActionStat
       consentUrl,
     });
 
+    scheduleEmailConfirmation({
+      bookingId: booking.booking_id,
+      fallbackEmail,
+      fallbackName,
+      fallbackPhone,
+    });
+
     try {
       const serviceId = form.get("service_id")?.toString() ?? "";
       const parsedSlug = slugSchema.safeParse(slug);
@@ -270,98 +307,77 @@ async function runCreateBookingAction(form: FormData): Promise<BookingActionStat
         if (t._tag === "Found") tenantId = t.tenantId;
       }
       if (!tenantId) {
-        scheduleEmailConfirmation({
-          bookingId: booking.booking_id,
-          fallbackEmail,
-          fallbackName,
-          fallbackPhone,
-        });
         return { ok: true as const, booking };
       }
       const sb = getSupabaseServiceClient();
-      const svc = await sb
-        .from("services")
-        .select("id, tenant_id, deposit_strategy, deposit_value, currency, price_from, name")
-        .eq("id", serviceId)
-        .eq("tenant_id", tenantId)
-        .limit(1)
-        .maybeSingle();
-      if (!svc.data) {
-        scheduleEmailConfirmation({
-          bookingId: booking.booking_id,
-          fallbackEmail,
-          fallbackName,
-          fallbackPhone,
-        });
-        return { ok: true as const, booking };
-      }
-      const svcRow = svc.data as {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sbAny = sb as unknown as any;
+      const [svcRes, bkRes, bankRes] = await Promise.all([
+        sb
+          .from("services")
+          .select("id, tenant_id, currency, price_from, name, deposit_strategy, deposit_value")
+          .eq("id", serviceId)
+          .eq("tenant_id", tenantId)
+          .limit(1)
+          .maybeSingle(),
+        sb
+          .from("bookings")
+          .select("id, payment_status, deposit_amount")
+          .eq("id", booking.booking_id)
+          .limit(1)
+          .maybeSingle(),
+        sbAny
+          .from("tenant_bank_accounts")
+          .select("account_holder, iban, bic_swift, bank_name, payment_note_template, country")
+          .eq("tenant_id", tenantId)
+          .eq("is_primary", true)
+          .eq("active", true)
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      const svcRow = svcRes.data as {
         id: string;
         tenant_id: string;
-        deposit_strategy: "NONE" | "PERCENT" | "FIXED";
-        deposit_value: number;
-        currency: string;
+        currency: string | null;
         price_from: number | null;
-        name: string;
-      };
-      const total =
-        svcRow.price_from != null && Number.isFinite(svcRow.price_from)
+        name: string | null;
+        deposit_strategy: string | null;
+        deposit_value: number | null;
+      } | null;
+      const bkRow = bkRes.data as {
+        id: string;
+        payment_status: string | null;
+        deposit_amount: number | null;
+      } | null;
+      const bankRow = bankRes.data as BankInfo | null;
+
+      const totalCents =
+        svcRow?.price_from != null && Number.isFinite(svcRow.price_from)
           ? Number(svcRow.price_from)
-          : 0;
-      const deposit = await calculateDeposit(svcRow, total);
-      if (deposit.amount <= 0) {
-        scheduleEmailConfirmation({
-          bookingId: booking.booking_id,
-          fallbackEmail,
-          fallbackName,
-          fallbackPhone,
-        });
-        return { ok: true as const, booking };
-      }
-      const baseEnv = process.env["NEXT_PUBLIC_APP_URL"] ?? process.env["APP_URL"];
-      const baseUrl =
-        host && proto && !baseEnv
-          ? `${proto}://${host}`
-          : typeof baseEnv === "string" && baseEnv.length > 0
-            ? baseEnv.replace(/\/$/, "")
-            : host
-              ? `${proto ?? "http"}://${host}`
-              : "http://127.0.0.1:3000";
-      const success_url = `${baseUrl}/s/${encodeURIComponent(slug)}/booking?payment=success&booking=${encodeURIComponent(booking.booking_id)}`;
-      const cancel_url = `${baseUrl}/s/${encodeURIComponent(slug)}/booking?payment=cancel&booking=${encodeURIComponent(booking.booking_id)}`;
-      const checkoutOpts: Parameters<typeof createStripeDepositCheckout>[0] = {
-        booking_id: booking.booking_id,
-        tenant_id: tenantId,
-        success_url,
-        cancel_url,
-        deposit_amount: deposit.amount,
-        currency: deposit.currency,
-        service_name: svcRow.name,
+          : Number(booking.total_price ?? 0);
+      const depositCents =
+        bkRow && bkRow.deposit_amount != null && Number.isFinite(bkRow.deposit_amount)
+          ? Number(bkRow.deposit_amount)
+          : booking.deposit_amount != null && Number.isFinite(booking.deposit_amount)
+            ? Number(booking.deposit_amount)
+            : null;
+
+      const payment: BookingPaymentInfo = {
+        total_price_cents: totalCents,
+        deposit_amount_cents: depositCents,
+        currency: svcRow?.currency ?? "EUR",
+        payment_status: bkRow?.payment_status ?? "unpaid",
+        bank_info: bankRow ? bankRow : null,
+        service_name: svcRow?.name ?? null,
       };
-      const ce = form.get("customer_email")?.toString();
-      if (ce) checkoutOpts.customer_email = ce;
-      const cn = form.get("customer_name")?.toString();
-      if (cn) checkoutOpts.customer_name = cn;
-      const checkout = await createStripeDepositCheckout(checkoutOpts);
-      return {
-        ok: true as const,
-        booking,
-        redirectToCheckout: checkout.sessionUrl,
-      };
-    } catch (checkoutErr) {
-      scheduleEmailConfirmation({
-        bookingId: booking.booking_id,
-        fallbackEmail,
-        fallbackName,
-        fallbackPhone,
-      });
-      return {
-        ok: false as const,
-        error:
-          checkoutErr instanceof Error
-            ? checkoutErr.message
-            : "Errore durante la preparazione del pagamento. Riprova.",
-      };
+
+      return { ok: true as const, booking, payment };
+    } catch (err) {
+      console.warn(
+        `[booking-actions] enrich payment fallito: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return { ok: true as const, booking };
     }
   } catch (e) {
     if (e instanceof BookingError) {
@@ -371,5 +387,89 @@ async function runCreateBookingAction(form: FormData): Promise<BookingActionStat
       return { ok: false as const, error: e.message };
     }
     return { ok: false as const, error: "Impossibile prenotare. Riprova tra qualche minuto." };
+  }
+}
+
+export async function declareBankTransferAction(
+  prev: BookingActionState,
+  form: FormData,
+): Promise<BookingActionState> {
+  const bookingId = form.get("booking_id")?.toString() ?? "";
+  const cro = form.get("deposit_payment_ref")?.toString() ?? "";
+  const note = form.get("deposit_payment_note")?.toString() ?? "";
+  const email = form.get("customer_email")?.toString() ?? "";
+
+  if (!bookingId || bookingId.length < 10) {
+    return {
+      ...prev,
+      ok: false,
+      declare_error: "Prenotazione non valida. Ricarica la pagina e riprova.",
+      fieldErrors: { declare: "Prenotazione non valida." },
+    };
+  }
+  if (!cro || cro.trim().length < 5) {
+    return {
+      ...prev,
+      ok: false,
+      declare_error: "Inserisci il CRO / codice di riferimento del bonifico (almeno 5 caratteri).",
+      fieldErrors: { declare: "CRO obbligatorio." },
+    };
+  }
+
+  try {
+    const sb = getSupabaseServiceClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAnyRpc = sb as unknown as any;
+    const { data, error } = await sbAnyRpc.rpc("booking_public_declare_bank_transfer", {
+      p_booking_id: bookingId,
+      p_customer_email: email,
+      p_cro_ref: cro,
+      p_note: note,
+    });
+    if (error) {
+      return {
+        ...prev,
+        ok: false,
+        declare_error:
+          "Non siamo riusciti a registrare la conferma. Contatta la struttura telefonicamente.",
+      };
+    }
+    const rows =
+      (data as unknown as Array<{
+        ok: boolean;
+        deposit_payment_ref: string | null;
+        deposit_payment_method: string | null;
+        deposit_requested_at: string | null;
+      }> | null) ?? [];
+    const row = rows[0];
+    if (!row || !row.ok) {
+      return {
+        ...prev,
+        ok: false,
+        declare_error:
+          "Non siamo riusciti a registrare la conferma. Contatta la struttura telefonicamente.",
+      };
+    }
+    return {
+      ...prev,
+      ok: true,
+      bank_declared: {
+        ok: true,
+        deposit_payment_ref: row.deposit_payment_ref,
+        deposit_payment_method: row.deposit_payment_method,
+        deposit_requested_at: row.deposit_requested_at,
+      },
+      declare_error: undefined,
+      fieldErrors: undefined,
+    };
+  } catch (e) {
+    return {
+      ...prev,
+      ok: false,
+      declare_error:
+        e instanceof Error
+          ? e.message
+          : "Non siamo riusciti a registrare la conferma. Riprova tra poco.",
+    };
   }
 }

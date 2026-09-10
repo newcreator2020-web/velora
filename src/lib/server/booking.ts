@@ -120,6 +120,9 @@ export type PublicBookingResult = {
   ends_at: string;
   resource_slug?: string | null;
   resource_display_name?: string | null;
+  total_price: number;
+  deposit_amount: number | null;
+  customer_email?: string | null;
 };
 
 export async function createPublicBooking(input: PublicBookingInput): Promise<PublicBookingResult> {

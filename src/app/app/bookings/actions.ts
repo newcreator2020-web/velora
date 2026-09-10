@@ -74,6 +74,113 @@ export async function setBookingStatusAction(input: { booking_id: unknown; to_st
   return { ok: false as const, error: res.message, code: res.code };
 }
 
+const DepositMarkSchema = z.object({
+  booking_id: z.string().uuid(),
+  note: z.string().max(1000).optional().or(z.literal("")),
+});
+
+type DepositMarkResult = { ok: true; code: "OK" } | { ok: false; code: string; error: string };
+
+export async function markDepositPaidAction(
+  _prevState: unknown,
+  form: FormData,
+): Promise<DepositMarkResult> {
+  await requireTenantRole("manager");
+  const parsed = DepositMarkSchema.safeParse({
+    booking_id: form.get("booking_id")?.toString(),
+    note: form.get("note")?.toString(),
+  });
+  if (!parsed.success) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Dati non validi." };
+  }
+  const supabase = await createSupabaseServerClient();
+  try {
+    const r = await (
+      supabase as unknown as {
+        rpc: (
+          n: string,
+          a: Record<string, unknown>,
+        ) => Promise<{ data?: unknown; error?: unknown }>;
+      }
+    ).rpc("booking_backoffice_set_deposit_paid", {
+      p_booking_id: parsed.data.booking_id,
+      p_paid: true,
+      p_note: parsed.data.note ?? null,
+    });
+    if (r.error) {
+      const err = r.error as unknown as { code?: string; message?: string };
+      return {
+        ok: false,
+        code: err.code ?? "RPC_ERROR",
+        error: err.message ?? "Errore durante la conferma.",
+      };
+    }
+    if (r.data === false) {
+      return { ok: false, code: "NOT_FOUND", error: "Prenotazione non trovata." };
+    }
+    revalidatePath("/app/bookings");
+    revalidatePath("/app/calendar");
+    return { ok: true, code: "OK" };
+  } catch (e: unknown) {
+    const err = (e ?? {}) as { message?: string; code?: string };
+    return {
+      ok: false,
+      code: err.code ?? "INTERNAL",
+      error: err.message ?? "Errore imprevisto.",
+    };
+  }
+}
+
+export async function markDepositUnpaidAction(
+  _prevState: unknown,
+  form: FormData,
+): Promise<DepositMarkResult> {
+  await requireTenantRole("manager");
+  const parsed = DepositMarkSchema.safeParse({
+    booking_id: form.get("booking_id")?.toString(),
+    note: form.get("note")?.toString(),
+  });
+  if (!parsed.success) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Dati non validi." };
+  }
+  const supabase = await createSupabaseServerClient();
+  try {
+    const r = await (
+      supabase as unknown as {
+        rpc: (
+          n: string,
+          a: Record<string, unknown>,
+        ) => Promise<{ data?: unknown; error?: unknown }>;
+      }
+    ).rpc("booking_backoffice_set_deposit_paid", {
+      p_booking_id: parsed.data.booking_id,
+      p_paid: false,
+      p_note: parsed.data.note ?? null,
+    });
+    if (r.error) {
+      const err = r.error as unknown as { code?: string; message?: string };
+      return {
+        ok: false,
+        code: err.code ?? "RPC_ERROR",
+        error: err.message ?? "Errore durante la modifica.",
+      };
+    }
+    if (r.data === false) {
+      return { ok: false, code: "NOT_FOUND", error: "Prenotazione non trovata." };
+    }
+    revalidatePath("/app/bookings");
+    revalidatePath("/app/calendar");
+    return { ok: true, code: "OK" };
+  } catch (e: unknown) {
+    const err = (e ?? {}) as { message?: string; code?: string };
+    return {
+      ok: false,
+      code: err.code ?? "INTERNAL",
+      error: err.message ?? "Errore imprevisto.",
+    };
+  }
+}
+
 const CustomerUpdateActionSchema = z.object({
   customer_id: z.string().uuid(),
   display_name: z.string().min(1).max(120).optional(),

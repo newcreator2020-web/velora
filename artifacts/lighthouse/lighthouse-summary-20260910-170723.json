@@ -1,0 +1,25 @@
+{
+  "generatedAt": "2026-09-10T15:07:23.261Z",
+  "mode": "placeholder-missing-deps",
+  "missingDependency": "lighthouse",
+  "installHint": "pnpm add -D lighthouse chrome-launcher",
+  "targets": [
+    {
+      "url": "http://localhost:3000/s/slugo-mtu30v76-1fon",
+      "skipped": true
+    },
+    {
+      "url": "http://localhost:3000/s/slugo-mtu30v76-1fon/booking",
+      "skipped": true
+    },
+    {
+      "url": "http://localhost:3000/s/slugo-mtu30v76-1fon/about",
+      "skipped": true
+    },
+    {
+      "url": "http://localhost:3000/s/slugo-mtu30v76-1fon/services",
+      "skipped": true
+    }
+  ],
+  "note": "T23 bozza: struttura corretta, ma metriche reali richiedono lighthouse installato."
+}

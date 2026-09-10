@@ -2,6 +2,7 @@ import "server-only";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getSupabaseServiceClient } from "@/lib/supabase/service";
 import type { MembershipRole } from "@/modules/auth/core/roles";
 import { isAtLeastRole } from "@/modules/auth/core/roles";
 import type { Database } from "@/types/supabase";
@@ -248,6 +249,22 @@ export async function getCurrentTenantContext(): Promise<TenantContext> {
             .limit(1)
             .maybeSingle();
           bp = (b.data as Tables<"business_profiles"> | null) ?? null;
+          if (!bp) {
+            try {
+              const svc = getSupabaseServiceClient();
+              const b2 = await svc
+                .from("business_profiles")
+                .select(
+                  "tenant_id,display_name,description,category,city,province,address_line1,address_line2,phone,website_url,email,timezone,locale,created_at,updated_at",
+                )
+                .eq("tenant_id", tOver.id)
+                .limit(1)
+                .maybeSingle();
+              bp = (b2.data as Tables<"business_profiles"> | null) ?? null;
+            } catch {
+              /* fall through */
+            }
+          }
         }
       }
     }
@@ -272,6 +289,22 @@ export async function getCurrentTenantContext(): Promise<TenantContext> {
         .limit(1)
         .maybeSingle();
       bp = (b.data as Tables<"business_profiles"> | null) ?? null;
+      if (!bp) {
+        try {
+          const svc = getSupabaseServiceClient();
+          const b2 = await svc
+            .from("business_profiles")
+            .select(
+              "tenant_id,display_name,description,category,city,province,address_line1,address_line2,phone,website_url,email,timezone,locale,created_at,updated_at",
+            )
+            .eq("tenant_id", tenant.id)
+            .limit(1)
+            .maybeSingle();
+          bp = (b2.data as Tables<"business_profiles"> | null) ?? null;
+        } catch {
+          /* fall through */
+        }
+      }
     }
   }
 
@@ -297,9 +330,53 @@ export async function requireTenantMembership(): Promise<
     business_profile: NonNullable<TenantContext["business_profile"]>;
   }
 > {
-  const ctx = await getCurrentTenantContext();
+  let ctx = await getCurrentTenantContext();
   if (!ctx.membership || !ctx.tenant || !ctx.business_profile) {
-    redirect("/onboarding");
+    console.error("[F4 REQUIRE MEMBERSHIP] primary path incomplete, entering LAST-DITCH FALLBACK", {
+      hasMembership: !!ctx.membership,
+      hasTenant: !!ctx.tenant,
+      hasBusinessProfile: !!ctx.business_profile,
+      membershipRole: ctx.membership?.role ?? null,
+      tenantId: ctx.tenant?.id ?? null,
+      tenantName: ctx.tenant?.name ?? null,
+      bpDisplay: ctx.business_profile?.display_name ?? null,
+    });
+    try {
+      const svc = getSupabaseServiceClient();
+      if (ctx.membership && ctx.tenant && !ctx.business_profile) {
+        const lb = await svc
+          .from("business_profiles")
+          .select(
+            "tenant_id,display_name,description,category,city,province,address_line1,address_line2,phone,website_url,email,timezone,locale,created_at,updated_at",
+          )
+          .eq("tenant_id", ctx.tenant.id)
+          .limit(1)
+          .maybeSingle();
+        console.error("[F4 REQUIRE MEMBERSHIP] last-ditch svc.bp result", {
+          hasData: !!lb.data,
+          errorMsg: lb.error?.message ?? null,
+          displayName: (lb.data as { display_name?: string } | null)?.display_name ?? null,
+        });
+        if (lb.data) ctx = { ...ctx, business_profile: lb.data as Tables<"business_profiles"> };
+      }
+    } catch (fErr) {
+      console.error("[F4 REQUIRE MEMBERSHIP] last-ditch fallback exception", {
+        msg: fErr instanceof Error ? fErr.message : String(fErr),
+        stack: fErr instanceof Error ? fErr.stack : undefined,
+      });
+    }
+    if (!ctx.membership || !ctx.tenant || !ctx.business_profile) {
+      console.error("[F4 REQUIRE MEMBERSHIP] FINAL redirect onboarding after fallback", {
+        hasMembership: !!ctx.membership,
+        hasTenant: !!ctx.tenant,
+        hasBusinessProfile: !!ctx.business_profile,
+        membershipRole: ctx.membership?.role ?? null,
+        tenantId: ctx.tenant?.id ?? null,
+        tenantName: ctx.tenant?.name ?? null,
+        bpDisplay: ctx.business_profile?.display_name ?? null,
+      });
+      redirect("/onboarding");
+    }
   }
   return ctx as TenantContext & {
     membership: NonNullable<TenantContext["membership"]>;

@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useFormState, useFormStatus } from "react-dom";
+import { useMemo, useState, useActionState } from "react";
+import { useFormStatus } from "react-dom";
 import { saveAvailabilityAction } from "./actions";
 
 type Row = {
@@ -14,7 +14,7 @@ type Row = {
 
 export default function AvailabilitySettingsClient({ initialRows }: { initialRows: Row[] }) {
   const [rows, setRows] = useState<Row[]>(initialRows);
-  const [state, formAction] = useFormState(saveAvailabilityAction, undefined);
+  const [state, formAction] = useActionState(saveAvailabilityAction, undefined);
 
   const payload = useMemo(
     () =>

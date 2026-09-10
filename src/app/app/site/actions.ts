@@ -1,6 +1,17 @@
 "use server";
 
 import { createHash, randomBytes } from "node:crypto";
+import { appendFileSync } from "node:fs";
+import { join } from "node:path";
+
+function traceF4(tag: string, extra: Record<string, unknown> = {}) {
+  try {
+    const line = JSON.stringify({ t: Date.now(), tag, ...extra }) + "\n";
+    appendFileSync(join(process.cwd(), "f4_trace.log"), line);
+  } catch {
+    /* fs trace non bloccante */
+  }
+}
 import {
   loadEditorialDraft,
   saveEditorialDraft,
@@ -9,7 +20,7 @@ import {
   type SaveDraftResult,
   type PublishResult,
 } from "@/lib/server/site-studio";
-import { requireTenantMembership } from "@/lib/server/auth";
+import { requireTenantMembership, requireTenantRole } from "@/lib/server/auth";
 import {
   editorialDraftInputSchema,
   findImagesMissingAlt,
@@ -22,7 +33,7 @@ import { resolveTenantEntitlements } from "@/lib/server/entitlements";
 import { getSupabaseServiceClient } from "@/lib/supabase/service";
 import { normalizeHostname, slugSchema } from "@/lib/server/site-engine";
 import { getDnsResolver } from "@/lib/server/dns-resolver";
-import { revalidateTag } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import {
   PUBLICATION_ALLOWED_TRANSITIONS,
   PUBLICATION_STATUS_LABEL,
@@ -34,6 +45,7 @@ import {
   type PublicationStatus,
   type PublicationVersionRow,
   type PublicationWorkflowState,
+  type RollbackPublicationResult,
   type TransitionPublicationResult,
 } from "./lib";
 
@@ -191,119 +203,173 @@ export async function saveEditorialAction(
   formData: FormData,
 ): Promise<EditorialActionResult> {
   const snapshot = snapshotFromInput(formData);
-  const res = (await saveEditorialDraft(formData)) as SaveDraftResult;
-  if (res.ok) {
-    const ctx = await requireTenantMembership();
-    const fresh = await loadEditorialDraft(ctx as Parameters<typeof loadEditorialDraft>[0]);
-    return {
-      ok: true,
-      revision: res.revision,
-      updated_at: res.updated_at,
+  try {
+    const res = (await saveEditorialDraft(formData)) as SaveDraftResult;
+    if (res.ok) {
+      const ctx = await requireTenantMembership();
+      const fresh = await loadEditorialDraft(ctx as Parameters<typeof loadEditorialDraft>[0]);
+      return {
+        ok: true,
+        revision: res.revision,
+        updated_at: res.updated_at,
+        values: {
+          sections: fresh.sections,
+          services: fresh.services,
+          theme: fresh.theme,
+        },
+        info: { kind: "SAVED" },
+      };
+    }
+    const errorResult: {
+      ok: false;
+      error: string;
+      code:
+        "VALIDATION" | "AUTH" | "INTERNAL" | "CONCURRENT" | "ENTITLEMENT_DENIED" | "LIMIT_REACHED";
       values: {
-        sections: fresh.sections,
-        services: fresh.services,
-        theme: fresh.theme,
-      },
-      info: { kind: "SAVED" },
+        sections: StudioDraftSection[];
+        services: StudioDraftService[];
+        theme: StudioDraftTheme;
+      };
+      fieldErrors?: Partial<Record<string, string[]>>;
+    } = {
+      ok: false,
+      error: res.message,
+      code: res.code as Extract<(typeof errorResult)["code"], (typeof res)["code"]>,
+      values: snapshot,
+    };
+    if (res.fieldErrors) {
+      errorResult.fieldErrors = res.fieldErrors;
+    }
+    return errorResult;
+  } catch (e) {
+    const code = (e as { digest?: string } | undefined)?.digest;
+    if (typeof code === "string" && (code.startsWith("NEXT_REDIRECT") || code === "NEXT_NOT_FOUND"))
+      throw e;
+    console.error("[F4 R17 saveEditorialAction UNCAUGHT]", e);
+    return {
+      ok: false,
+      error: `Errore interno: ${e instanceof Error ? e.message : String(e)}`,
+      code: "INTERNAL" as const,
+      values: snapshot,
     };
   }
-  const errorResult: {
-    ok: false;
-    error: string;
-    code:
-      "VALIDATION" | "AUTH" | "INTERNAL" | "CONCURRENT" | "ENTITLEMENT_DENIED" | "LIMIT_REACHED";
-    values: {
-      sections: StudioDraftSection[];
-      services: StudioDraftService[];
-      theme: StudioDraftTheme;
-    };
-    fieldErrors?: Partial<Record<string, string[]>>;
-  } = {
-    ok: false,
-    error: res.message,
-    code: res.code as Extract<(typeof errorResult)["code"], (typeof res)["code"]>,
-    values: snapshot,
-  };
-  if (res.fieldErrors) {
-    errorResult.fieldErrors = res.fieldErrors;
-  }
-  return errorResult;
 }
 
 export async function publishEditorialAction(
   _prev: EditorialActionResult,
   formData: FormData,
 ): Promise<EditorialActionResult> {
-  const revision = (formData.get("revision") as string | null) ?? null;
-  const ctx = await requireTenantMembership();
-  const draft = await loadEditorialDraft(ctx as Parameters<typeof loadEditorialDraft>[0]);
+  const snapshot = snapshotFromInput(formData);
+  void snapshot;
+  try {
+    const revision = (formData.get("revision") as string | null) ?? null;
+    const ctx = await requireTenantMembership();
+    const draft = await loadEditorialDraft(ctx as Parameters<typeof loadEditorialDraft>[0]);
 
-  const workflow = await loadWorkflowState(ctx as Parameters<typeof loadWorkflowState>[0]);
+    const workflow = await loadWorkflowState(ctx as Parameters<typeof loadWorkflowState>[0]);
 
-  const altIssues: AltTextIssue[] = findImagesMissingAlt(
-    draft.sections as Parameters<typeof findImagesMissingAlt>[0],
-  );
-  if (altIssues.length > 0) {
-    const snapshot = snapshotFromInput(formData);
-    const details: string[] = altIssues.map((it) => {
-      const kind = it.issue === "missing_alt" ? "CAMPO ALT MANCANTE" : "ALT VUOTO";
-      return `${kind} — ${it.breadcrumb}`;
-    });
-    const shortMsg =
-      altIssues.length === 1
-        ? `1 immagine ha problemi SEO: aggiungi un testo descrittivo (alt text) prima di pubblicare.`
-        : `${altIssues.length} immagini hanno problemi SEO: aggiungi testi descrittivi (alt text) prima di pubblicare.`;
-    return {
-      ok: false,
-      error: shortMsg,
-      code: "VALIDATION",
-      fieldErrors: {
-        publish: details,
-      },
-      values: snapshot,
-    };
-  }
-
-  if (workflow.status !== "validated" && workflow.status !== "published") {
-    const snapshot = snapshotFromInput(formData);
-    return {
-      ok: false,
-      error: `Per pubblicare devi prima portare lo stato in "Validata" (attuale: ${PUBLICATION_STATUS_LABEL[workflow.status]}).`,
-      code: "VALIDATION",
-      fieldErrors: {
-        publish: [
-          `Workflow: passa per gli stati Bozza → Pronta per QA → Validata prima di Pubblica.`,
-        ],
-      },
-      values: snapshot,
-    };
-  }
-
-  const res = (await publishSiteDraft(revision)) as PublishResult;
-  if (res.ok) {
-    try {
-      const svc = getSupabaseServiceClient();
-      const svcAny = svc as unknown as {
-        from: (relation: string) => {
-          upsert: (payload: Record<string, unknown>, opts?: { onConflict?: string }) => unknown;
-        };
+    const altIssues: AltTextIssue[] = findImagesMissingAlt(
+      draft.sections as Parameters<typeof findImagesMissingAlt>[0],
+    );
+    if (altIssues.length > 0) {
+      const snapshot = snapshotFromInput(formData);
+      const details: string[] = altIssues.map((it) => {
+        const kind = it.issue === "missing_alt" ? "CAMPO ALT MANCANTE" : "ALT VUOTO";
+        return `${kind} — ${it.breadcrumb}`;
+      });
+      const shortMsg =
+        altIssues.length === 1
+          ? `1 immagine ha problemi SEO: aggiungi un testo descrittivo (alt text) prima di pubblicare.`
+          : `${altIssues.length} immagini hanno problemi SEO: aggiungi testi descrittivi (alt text) prima di pubblicare.`;
+      return {
+        ok: false,
+        error: shortMsg,
+        code: "VALIDATION",
+        fieldErrors: {
+          publish: details,
+        },
+        values: snapshot,
       };
-      const nextVersion = (workflow.version_number || 0) + 1;
-      const snapshotJSON = {
-        sections: draft.sections,
-        services: draft.services,
-        theme: draft.theme,
-        revision: draft.revision,
-        generated_at: new Date().toISOString(),
+    }
+
+    if (workflow.status !== "validated" && workflow.status !== "published") {
+      const snapshot = snapshotFromInput(formData);
+      return {
+        ok: false,
+        error: `Per pubblicare devi prima portare lo stato in "Validata" (attuale: ${PUBLICATION_STATUS_LABEL[workflow.status]}).`,
+        code: "VALIDATION",
+        fieldErrors: {
+          publish: [
+            `Workflow: passa per gli stati Bozza → Pronta per QA → Validata prima di Pubblica.`,
+          ],
+        },
+        values: snapshot,
       };
-      let hash: string | null = null;
+    }
+
+    const res = (await publishSiteDraft(revision)) as PublishResult;
+    if (res.ok) {
       try {
-        hash = createHash("sha256").update(JSON.stringify(snapshotJSON)).digest("hex");
-      } catch {
-        hash = null;
-      }
-      void svcAny.from("site_publication_versions").upsert(
-        {
+        const svc = getSupabaseServiceClient();
+        const svcAny = svc as unknown as {
+          from: (relation: string) => {
+            insert: (payload: Record<string, unknown> | Record<string, unknown>[]) => {
+              select: (cols: string) => {
+                limit: (n: number) => {
+                  maybeSingle: () => Promise<{
+                    data: Record<string, unknown> | null;
+                    error?: { message?: string; code?: string } | null;
+                  }>;
+                };
+              };
+            };
+            select: (cols: string) => {
+              eq: (
+                k: string,
+                v: unknown,
+              ) => {
+                order: (
+                  k: string,
+                  o?: { ascending?: boolean },
+                ) => {
+                  limit: (n: number) => {
+                    maybeSingle: () => Promise<{
+                      data: Record<string, unknown> | null;
+                      error?: { message?: string; code?: string } | null;
+                    }>;
+                  };
+                };
+              };
+            };
+          };
+        };
+        const lastQ = await svcAny
+          .from("site_publication_versions")
+          .select("version_number")
+          .eq("tenant_id", ctx.tenant!.id)
+          .order("version_number", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const lastVersion =
+          lastQ.data &&
+          typeof (lastQ.data as { version_number?: unknown }).version_number === "number"
+            ? Number((lastQ.data as { version_number: number }).version_number)
+            : 0;
+        const nextVersion = Math.max(lastVersion, workflow.version_number || 0) + 1;
+        const snapshotJSON = {
+          sections: draft.sections,
+          services: draft.services,
+          theme: draft.theme,
+          revision: draft.revision,
+          generated_at: new Date().toISOString(),
+        };
+        let hash: string | null = null;
+        try {
+          hash = createHash("sha256").update(JSON.stringify(snapshotJSON)).digest("hex");
+        } catch {
+          hash = null;
+        }
+        void svcAny.from("site_publication_versions").insert({
           tenant_id: ctx.tenant!.id,
           status: "published",
           version_number: nextVersion,
@@ -313,136 +379,196 @@ export async function publishEditorialAction(
           created_by: (ctx.user as { id?: string } | undefined)?.id ?? null,
           note: "Pubblicazione diretta da SiteStudio",
           updated_at: new Date().toISOString(),
+        });
+        void svc.from("audit_logs").insert({
+          tenant_id: ctx.tenant!.id,
+          actor_user_id: (ctx.user as { id?: string } | undefined)?.id ?? null,
+          action: "site.published",
+          entity_type: "site_publication",
+          entity_id: ctx.tenant!.id,
+          metadata: {
+            success: true,
+            from: workflow.status,
+            to: "published",
+            version_number: nextVersion,
+            published_at: res.published_at,
+            sections_applied: res.sections_applied,
+            services_applied: res.services_applied,
+            theme_applied: res.theme_applied,
+            version_hash: hash,
+          } as unknown as import("@/types/supabase").Json,
+        });
+      } catch {
+        // audit non bloccante
+      }
+      const fresh = await loadEditorialDraft(ctx as Parameters<typeof loadEditorialDraft>[0]);
+      return {
+        ok: true,
+        revision: fresh.revision ?? "",
+        updated_at: res.published_at,
+        values: {
+          sections: fresh.sections,
+          services: fresh.services,
+          theme: fresh.theme,
         },
-        { onConflict: "tenant_id" },
-      );
-      void svc.from("audit_logs").insert({
-        tenant_id: ctx.tenant!.id,
+        info: {
+          kind: "PUBLISHED",
+          payload: {
+            published_at: res.published_at,
+            sections_applied: res.sections_applied,
+            services_applied: res.services_applied,
+            theme_applied: res.theme_applied,
+          },
+        },
+      };
+    }
+    try {
+      const s = getSupabaseServiceClient();
+      void s.from("audit_logs").insert({
+        tenant_id: ctx.tenant?.id ?? null,
         actor_user_id: (ctx.user as { id?: string } | undefined)?.id ?? null,
-        action: "site.published",
+        action: "site.publish_attempt",
         entity_type: "site_publication",
-        entity_id: ctx.tenant!.id,
+        entity_id: ctx.tenant?.id ?? null,
         metadata: {
-          success: true,
-          from: workflow.status,
-          to: "published",
-          version_number: nextVersion,
-          published_at: res.published_at,
-          sections_applied: res.sections_applied,
-          services_applied: res.services_applied,
-          theme_applied: res.theme_applied,
-          version_hash: hash,
+          success: false,
+          code: res.code,
+          message: res.message,
+          revision_input: revision,
         } as unknown as import("@/types/supabase").Json,
       });
     } catch {
       // audit non bloccante
     }
-    const fresh = await loadEditorialDraft(ctx as Parameters<typeof loadEditorialDraft>[0]);
+    const snapshot = snapshotFromInput(formData);
     return {
-      ok: true,
-      revision: fresh.revision ?? "",
-      updated_at: res.published_at,
-      values: {
-        sections: fresh.sections,
-        services: fresh.services,
-        theme: fresh.theme,
-      },
-      info: {
-        kind: "PUBLISHED",
-        payload: {
-          published_at: res.published_at,
-          sections_applied: res.sections_applied,
-          services_applied: res.services_applied,
-          theme_applied: res.theme_applied,
-        },
-      },
+      ok: false,
+      error: res.message,
+      code: res.code,
+      values: snapshot,
+    };
+  } catch (e) {
+    const code = (e as { digest?: string } | undefined)?.digest;
+    if (typeof code === "string" && (code.startsWith("NEXT_REDIRECT") || code === "NEXT_NOT_FOUND"))
+      throw e;
+    console.error("[F4 R17 publishEditorialAction UNCAUGHT]", e);
+    const snapshot = snapshotFromInput(formData);
+    return {
+      ok: false,
+      error: `Errore interno: ${e instanceof Error ? e.message : String(e)}`,
+      code: "INTERNAL" as const,
+      values: snapshot,
     };
   }
-  try {
-    const s = getSupabaseServiceClient();
-    void s.from("audit_logs").insert({
-      tenant_id: ctx.tenant?.id ?? null,
-      actor_user_id: (ctx.user as { id?: string } | undefined)?.id ?? null,
-      action: "site.publish_attempt",
-      entity_type: "site_publication",
-      entity_id: ctx.tenant?.id ?? null,
-      metadata: {
-        success: false,
-        code: res.code,
-        message: res.message,
-        revision_input: revision,
-      } as unknown as import("@/types/supabase").Json,
-    });
-  } catch {
-    // audit non bloccante
-  }
-  const snapshot = snapshotFromInput(formData);
-  return {
-    ok: false,
-    error: res.message,
-    code: res.code,
-    values: snapshot,
-  };
 }
 
 export async function unpublishEditorialAction(): Promise<EditorialActionResult> {
-  const res = await unpublishSite();
-  if (res.ok) {
-    try {
-      const ctx = await requireTenantMembership();
-      const svc = getSupabaseServiceClient();
-      const svcAny = svc as unknown as {
-        from: (relation: string) => {
-          upsert: (payload: Record<string, unknown>, opts?: { onConflict?: string }) => unknown;
+  traceF4("UNPUBLISH_ACTION_START");
+  console.error("[F4 ACTIONS] unpublishEditorialAction START");
+  try {
+    const res = await unpublishSite();
+    traceF4("UNPUBLISH_ACTION_UNPUBLISHSITE_DONE", { ok: res.ok });
+    console.error("[F4 ACTIONS] unpublishEditorialAction unpublishSite result", {
+      ok: res.ok,
+      code: (res as { code?: string } | undefined)?.code,
+      message: (res as { message?: string } | undefined)?.message,
+    });
+    if (res.ok) {
+      try {
+        const ctx = await requireTenantMembership();
+        const svc = getSupabaseServiceClient();
+        const svcAny = svc as unknown as {
+          from: (relation: string) => {
+            insert: (payload: Record<string, unknown> | Record<string, unknown>[]) => unknown;
+            select: (cols: string) => {
+              eq: (
+                k: string,
+                v: unknown,
+              ) => {
+                order: (
+                  k: string,
+                  o?: { ascending?: boolean },
+                ) => {
+                  limit: (n: number) => {
+                    maybeSingle: () => Promise<{
+                      data: Record<string, unknown> | null;
+                      error?: { message?: string; code?: string } | null;
+                    }>;
+                  };
+                };
+              };
+            };
+          };
         };
-      };
-      void svcAny.from("site_publication_versions").upsert(
-        {
+        const lastQ = await svcAny
+          .from("site_publication_versions")
+          .select("version_number")
+          .eq("tenant_id", ctx.tenant!.id)
+          .order("version_number", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const lastVersion =
+          lastQ.data &&
+          typeof (lastQ.data as { version_number?: unknown }).version_number === "number"
+            ? Number((lastQ.data as { version_number: number }).version_number)
+            : 0;
+        const nextVersion = lastVersion + 1;
+        void svcAny.from("site_publication_versions").insert({
           tenant_id: ctx.tenant!.id,
           status: "draft",
-          version_number: 1,
+          version_number: nextVersion,
           snapshot: {} as Record<string, unknown>,
           hash_sha256: null,
           published_at: null,
           note: "Unpublish manuale da SiteStudio",
+          created_by: (ctx.user as { id?: string } | undefined)?.id ?? null,
           updated_at: new Date().toISOString(),
+        });
+        void svc.from("audit_logs").insert({
+          tenant_id: ctx.tenant!.id,
+          actor_user_id: (ctx.user as { id?: string } | undefined)?.id ?? null,
+          action: "site.state_changed",
+          entity_type: "site_publication",
+          entity_id: ctx.tenant!.id,
+          metadata: {
+            from: "published",
+            to: "draft",
+            reason: "unpublish_manual",
+          } as unknown as import("@/types/supabase").Json,
+        });
+      } catch {
+        // audit non bloccante
+      }
+      const ctx = await requireTenantMembership();
+      const fresh = await loadEditorialDraft(ctx as Parameters<typeof loadEditorialDraft>[0]);
+      return {
+        ok: true,
+        revision: fresh.revision ?? "",
+        updated_at: res.unpublished_at,
+        values: {
+          sections: fresh.sections,
+          services: fresh.services,
+          theme: fresh.theme,
         },
-        { onConflict: "tenant_id" },
-      );
-      void svc.from("audit_logs").insert({
-        tenant_id: ctx.tenant!.id,
-        actor_user_id: (ctx.user as { id?: string } | undefined)?.id ?? null,
-        action: "site.state_changed",
-        entity_type: "site_publication",
-        entity_id: ctx.tenant!.id,
-        metadata: {
-          from: "published",
-          to: "draft",
-          reason: "unpublish_manual",
-        } as unknown as import("@/types/supabase").Json,
-      });
-    } catch {
-      // audit non bloccante
+        info: { kind: "UNPUBLISHED", payload: { unpublished_at: res.unpublished_at } },
+      };
     }
-    const ctx = await requireTenantMembership();
-    const fresh = await loadEditorialDraft(ctx as Parameters<typeof loadEditorialDraft>[0]);
     return {
-      ok: true,
-      revision: fresh.revision ?? "",
-      updated_at: res.unpublished_at,
-      values: {
-        sections: fresh.sections,
-        services: fresh.services,
-        theme: fresh.theme,
-      },
-      info: { kind: "UNPUBLISHED", payload: { unpublished_at: res.unpublished_at } },
+      ok: false,
+      error: res.message,
+      code: res.code,
+    };
+  } catch (e) {
+    const code = (e as { digest?: string } | undefined)?.digest;
+    if (typeof code === "string" && (code.startsWith("NEXT_REDIRECT") || code === "NEXT_NOT_FOUND"))
+      throw e;
+    console.error("[F4 R17 unpublishEditorialAction UNCAUGHT]", e);
+    return {
+      ok: false,
+      error: `Errore interno: ${e instanceof Error ? e.message : String(e)}`,
+      code: "INTERNAL" as const,
     };
   }
-  return {
-    ok: false,
-    error: res.message,
-    code: res.code,
-  };
 }
 
 export async function transitionPublicationAction(
@@ -488,6 +614,17 @@ export async function transitionPublicationAction(
             k: string,
             v: unknown,
           ) => {
+            order: (
+              k: string,
+              o?: { ascending?: boolean },
+            ) => {
+              limit: (n: number) => {
+                maybeSingle: () => Promise<{
+                  data: Record<string, unknown> | null;
+                  error?: { message?: string; code?: string } | null;
+                }>;
+              };
+            };
             limit: (n: number) => {
               maybeSingle: () => Promise<{
                 data: Record<string, unknown> | null;
@@ -496,10 +633,7 @@ export async function transitionPublicationAction(
             };
           };
         };
-        upsert: (
-          payload: Record<string, unknown>,
-          opts?: { onConflict?: string },
-        ) => {
+        insert: (payload: Record<string, unknown> | Record<string, unknown>[]) => {
           select: (cols: string) => {
             limit: (n: number) => {
               maybeSingle: () => Promise<{
@@ -518,6 +652,7 @@ export async function transitionPublicationAction(
         "id,tenant_id,version_number,status,snapshot,hash_sha256,published_at,created_by,note,created_at,updated_at",
       )
       .eq("tenant_id", ctx.tenant.id)
+      .order("version_number", { ascending: false })
       .limit(1)
       .maybeSingle();
     const existing = existingQ.data as PublicationVersionRow | null | undefined;
@@ -548,13 +683,13 @@ export async function transitionPublicationAction(
       hash = null;
     }
 
-    let nextVersion = existing ? Number(existing.version_number) || 1 : 1;
+    let nextVersion = existing ? Number(existing.version_number) || 0 : 0;
+    nextVersion += 1;
     let publishedAt: string | null = existing?.published_at ?? null;
     let auditAction = "site.state_changed";
     let auditExtra: Record<string, unknown> = {};
 
     if (to === "published") {
-      nextVersion = (existing?.version_number || 0) + 1;
       publishedAt = new Date().toISOString();
       auditAction = "site.published";
       auditExtra = {
@@ -570,7 +705,7 @@ export async function transitionPublicationAction(
       };
     }
 
-    const upsertPayload: Record<string, unknown> = {
+    const insertPayload: Record<string, unknown> = {
       tenant_id: ctx.tenant.id,
       status: to,
       version_number: nextVersion,
@@ -584,7 +719,7 @@ export async function transitionPublicationAction(
 
     const ups = await svcAny
       .from("site_publication_versions")
-      .upsert(upsertPayload, { onConflict: "tenant_id" })
+      .insert(insertPayload)
       .select("version_number,status,published_at")
       .limit(1)
       .maybeSingle();
@@ -966,6 +1101,155 @@ export async function verifyCustomDomainAction(): Promise<DomainActionResult> {
       error:
         "Record TXT di ownership trovato, ma il routing DNS non è ancora configurato correttamente. Aggiungi un record CNAME che punti al dominio di destinazione oppure un record A che punti all'indirizzo IP fornito.",
       code: "ROUTING_NOT_READY",
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Errore interno";
+    return { ok: false, error: msg, code: "INTERNAL" };
+  }
+}
+
+export async function loadPublicationVersions(): Promise<
+  | { ok: true; versions: PublicationVersionRow[]; latest: number | null }
+  | { ok: false; error: string; code: "AUTH" | "INTERNAL" }
+> {
+  try {
+    const ctx = await requireTenantMembership();
+    if (!ctx.tenant?.id) {
+      return { ok: false, error: "Autenticazione richiesta.", code: "AUTH" };
+    }
+    const svc = getSupabaseServiceClient();
+    const svcAny = svc as unknown as {
+      from: (relation: never) => {
+        select: (cols: string) => {
+          eq: (
+            k: string,
+            v: unknown,
+          ) => {
+            order: (
+              k: string,
+              o?: { ascending?: boolean },
+            ) => Promise<{
+              data?: unknown;
+              error?: { message?: string; code?: string } | null;
+            }>;
+          };
+        };
+      };
+    };
+    const q = await svcAny
+      .from("site_publication_versions" as never)
+      .select(
+        "id,tenant_id,version_number,status,snapshot,hash_sha256,published_at,created_by,note,created_at,updated_at",
+      )
+      .eq("tenant_id", ctx.tenant.id)
+      .order("version_number", { ascending: false });
+    if (q.error) {
+      return {
+        ok: false,
+        error:
+          process.env.NODE_ENV === "production"
+            ? "Errore nel caricamento delle versioni."
+            : `DB: ${q.error.message ?? "unknown"}`,
+        code: "INTERNAL",
+      };
+    }
+    const rows = Array.isArray(q.data) ? (q.data as unknown as PublicationVersionRow[]) : [];
+    const latest = rows.length > 0 ? Number(rows[0]?.version_number ?? 1) : null;
+    return { ok: true, versions: rows, latest };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Errore interno";
+    return { ok: false, error: msg, code: "INTERNAL" };
+  }
+}
+
+export async function rollbackPublicationAction(
+  _prev: RollbackPublicationResult,
+  formData: FormData,
+): Promise<RollbackPublicationResult> {
+  try {
+    const ctx = await requireTenantRole("owner");
+    const tenantId = ctx.tenant?.id;
+    const actorId = (ctx.user as { id?: string } | undefined)?.id;
+    if (!tenantId) {
+      return { ok: false, error: "Autenticazione richiesta.", code: "AUTH" };
+    }
+    const rawTarget = formData.get("target_version");
+    const targetStr = typeof rawTarget === "string" ? rawTarget.trim() : "";
+    const targetVersion = Number(targetStr);
+    if (!Number.isFinite(targetVersion) || targetVersion < 1) {
+      return {
+        ok: false,
+        error: "Versione target non valida.",
+        code: "VALIDATION",
+      };
+    }
+    const svc = getSupabaseServiceClient();
+    const rpcArgs: Record<string, unknown> = {
+      p_tenant_id: tenantId,
+      p_target_version: targetVersion,
+    };
+    if (typeof actorId === "string" && actorId.length > 0) {
+      rpcArgs["p_actor_id"] = actorId;
+    }
+    const { data, error } = await (
+      svc.rpc as unknown as (
+        fn: string,
+        args: Record<string, unknown>,
+      ) => Promise<{
+        data?: unknown;
+        error?: { message?: string; code?: string } | null;
+      }>
+    )("site_publication_restore", rpcArgs);
+
+    if (error) {
+      const code =
+        String(error.code ?? "") === "42501" || String(error.code ?? "").toUpperCase() === "AUTHZ"
+          ? "AUTHZ"
+          : "INTERNAL";
+      return {
+        ok: false,
+        error:
+          code === "AUTHZ"
+            ? "Autorizzazione negata."
+            : process.env.NODE_ENV === "production"
+              ? "Rollback fallito. Riprova."
+              : `Rollback fallito: ${error.message ?? "unknown"}`,
+        code,
+      };
+    }
+    const arr = Array.isArray(data) ? (data as unknown[]) : [];
+    const first = (arr[0] ?? data) as { [k: string]: unknown } | null | undefined;
+    if (!first || first["ok"] !== true) {
+      const msgRaw = first?.["message"];
+      const msg = typeof msgRaw === "string" ? msgRaw : "Rollback fallito.";
+      return { ok: false, error: msg, code: "INTERNAL" };
+    }
+    const restored = String(first["restored_status"] ?? "draft") as PublicationStatus;
+    const fromVer = Number(first["from_version_number"] ?? 0);
+    const toVerSrc = Number(first["to_version_number"] ?? targetVersion);
+    const newVer = Number(first["new_version_number"] ?? 0);
+    const sec = Number(first["sections_applied"] ?? 0);
+    const svcC = Number(first["services_applied"] ?? 0);
+    const thm = Boolean(first["theme_applied"] ?? false);
+    const message = String(first["message"] ?? "Rollback completato.");
+    try {
+      const slug = (ctx.tenant as { slug?: string } | undefined)?.slug;
+      if (typeof slug === "string" && slug.length > 0) {
+        (revalidatePath as unknown as (p: string) => void)(`/s/${slug}`);
+      }
+    } catch {
+      // cache invalidation non bloccante
+    }
+    return {
+      ok: true,
+      message,
+      from_version_number: fromVer,
+      to_version_number_source: toVerSrc,
+      restored_status: restored,
+      new_version_number: newVer,
+      sections_applied: sec,
+      services_applied: svcC,
+      theme_applied: thm,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Errore interno";

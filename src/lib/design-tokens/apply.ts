@@ -103,9 +103,13 @@ export function applyTheme(
     sharp: "2px 2px 0 0 rgb(0 0 0 / 0.15), 0 0 0 1px rgb(0 0 0 / 0.1)",
   };
 
+  // Backward compat: tight/normal/loose mappano a compact/default/comfortable (stessi moltiplicatori)
   const spacingMap: Record<string, number> = {
+    compact: 0.85,
     tight: 0.85,
+    default: 1,
     normal: 1,
+    comfortable: 1.15,
     loose: 1.15,
   };
 
@@ -116,6 +120,28 @@ export function applyTheme(
     lg: "12px",
     xl: "20px",
     full: "9999px",
+  };
+
+  // Motion tokens: none / subtle / default / playful → durate + easing CSS variabili
+  const motionPreset: Record<string, { duration: string; easing: string; hoverDuration: string }> =
+    {
+      none: { duration: "0ms", easing: "linear", hoverDuration: "0ms" },
+      subtle: { duration: "120ms", easing: "ease-out", hoverDuration: "80ms" },
+      default: { duration: "200ms", easing: "cubic-bezier(0.4,0,0.2,1)", hoverDuration: "150ms" },
+      playful: {
+        duration: "320ms",
+        easing: "cubic-bezier(0.34,1.56,0.64,1)",
+        hoverDuration: "180ms",
+      },
+    };
+
+  // Photography style → CSS filter applicabili a img.section-photo
+  const photoFilterPreset: Record<string, string> = {
+    warm: "saturate(1.05) sepia(0.05) contrast(1.02)",
+    cool: "saturate(0.95) hue-rotate(-5deg) contrast(1.03)",
+    mono: "grayscale(1) contrast(1.1)",
+    vivid: "saturate(1.3) contrast(1.08)",
+    natural: "saturate(0.98) contrast(1)",
   };
 
   const cssVars: Record<string, string> = {};
@@ -185,6 +211,37 @@ export function applyTheme(
   cssVars["--destructive-foreground"] = "#FFFFFF";
   cssVars["--popover"] = palette.card;
   cssVars["--popover-foreground"] = palette.cardForeground;
+
+  const motionAny = motionPreset as Record<
+    string,
+    { duration: string; easing: string; hoverDuration: string }
+  >;
+  const motion = motionAny[layout.motion] ??
+    motionAny["default"] ?? {
+      duration: "200ms",
+      easing: "cubic-bezier(0.4,0,0.2,1)",
+      hoverDuration: "150ms",
+    };
+  cssVars["--theme-motion-duration"] = motion.duration;
+  cssVars["--theme-motion-easing"] = motion.easing;
+  cssVars["--theme-motion-hover-duration"] = motion.hoverDuration;
+
+  const photoAny = photoFilterPreset as Record<string, string>;
+  cssVars["--theme-photography-filter"] =
+    photoAny[layout.photographyStyle] ?? photoAny["natural"] ?? "none";
+
+  const densityMult = spacingMapAny[layout.density] ?? spacingMapAny[layout.spacing] ?? 1;
+  cssVars["--theme-density"] = String(layout.density ?? "default");
+  cssVars["--theme-density-multiplier"] = String(densityMult);
+  cssVars["--theme-section-style"] = String(layout.sectionStyle ?? "card");
+  cssVars["--theme-button-style"] = String(layout.buttonStyle ?? "solid");
+  cssVars["--theme-container-max-width-class"] = String(layout.containerMaxWidth ?? "max-w-5xl");
+  cssVars["--theme-body-max-width"] = `${String(layout.bodyMaxWidth ?? 1140)}px`;
+
+  cssVars["--theme-font-weight-heading"] = String(preset.typography.fontWeightHeading ?? 600);
+  cssVars["--theme-font-weight-body"] = String(preset.typography.fontWeightBody ?? 400);
+  cssVars["--theme-heading-scale"] = String(preset.typography.headingScale ?? 1.2);
+  cssVars["--theme-body-line-height"] = String(preset.typography.bodyLineHeight ?? 1.6);
 
   return {
     cssVars,

@@ -23,13 +23,20 @@ export async function generateMetadata(props: PublicSitePageProps): Promise<Meta
   if (result._tag !== "Found") return notFoundMetadata();
   const s = result.site;
   const title = s.description ? `${s.businessName} — ${s.description}` : s.businessName;
-  const description =
+  const rawDescription =
     s.description ?? `${s.businessName}. ${[s.city, s.province].filter(Boolean).join(", ")}`;
-  const canonical = s.canonicalPath;
+  const description =
+    rawDescription && rawDescription.trim().length >= 50
+      ? rawDescription.trim()
+      : `${s.businessName || "Studio"}. Servizi professionali a ${
+          s.city || "dove ti trovi"
+        }. Prenota online 24/7, consulta orari e prezzi trasparenti. Qualità e affidabilità garantite.`;
+  const canonicalPath = s.canonicalPath || `/s/${encodeURIComponent(slug)}`;
   const defaultBase =
     process.env["NEXT_PUBLIC_APP_URL"] && process.env["NEXT_PUBLIC_APP_URL"].length > 0
       ? process.env["NEXT_PUBLIC_APP_URL"].replace(/\/+$/, "")
-      : canonical.replace(/\/+$/, "");
+      : "http://localhost:3000";
+  const canonical = `${defaultBase}${canonicalPath}`;
   const ogFallback = `${defaultBase}/og-default.png`;
   const ogImageUrl =
     ((s as unknown as Record<string, unknown>)["ogImageUrl"] as string | undefined) || ogFallback;

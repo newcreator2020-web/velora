@@ -12,6 +12,16 @@ export const SECTION_TYPES = [
   "price_list",
   "features_cta",
   "booking_widget",
+  "faq",
+  "hours",
+  "location",
+  "navbar",
+  "footer",
+  "trust",
+  "booking_cta",
+  "whatsapp_cta",
+  "social_links",
+  "legal_links",
 ] as const;
 
 export type SectionType = (typeof SECTION_TYPES)[number];
@@ -32,6 +42,11 @@ export const ALLOWED_VARIANTS = [
   "compact",
   "full",
   "premium",
+  "transparent",
+  "expanded",
+  "inline",
+  "floating",
+  "icons",
 ] as const;
 
 export type SectionVariant = (typeof ALLOWED_VARIANTS)[number];
@@ -47,6 +62,16 @@ export const SECTION_VARIANTS: Record<SectionType, ReadonlyArray<SectionVariant>
   price_list: ["table", "cards", "default"],
   features_cta: ["split", "minimal", "default", "premium"],
   booking_widget: ["default", "compact", "full"],
+  navbar: ["default", "centered", "minimal", "transparent"],
+  footer: ["default", "minimal", "expanded"],
+  legal_links: ["default", "inline"],
+  faq: ["default", "cards", "compact"],
+  hours: ["default", "cards", "compact"],
+  location: ["default", "cards", "minimal"],
+  trust: ["default", "carousel", "minimal"],
+  booking_cta: ["default", "split", "compact"],
+  whatsapp_cta: ["default", "floating", "inline"],
+  social_links: ["default", "inline", "icons"],
 } as const;
 
 export function getVariantsForSection(t: SectionType): ReadonlyArray<SectionVariant> {
@@ -64,7 +89,17 @@ export const FONT_HEADING_ALLOWED = ["sans", "serif", "mono", "display"] as cons
 export const FONT_BODY_ALLOWED = ["sans", "serif", "mono"] as const;
 export const RADIUS_ALLOWED = ["none", "sm", "md", "lg", "xl", "full"] as const;
 
-export const SINGLETON_TYPES: ReadonlyArray<SectionType> = ["hero", "about", "contact"];
+export const SINGLETON_TYPES: ReadonlyArray<SectionType> = [
+  "hero",
+  "about",
+  "contact",
+  "navbar",
+  "footer",
+  "booking_cta",
+  "whatsapp_cta",
+  "social_links",
+  "legal_links",
+];
 
 export function safeVariant(v: string): (typeof ALLOWED_VARIANTS)[number] {
   return ALLOWED_VARIANTS.includes(v as (typeof ALLOWED_VARIANTS)[number])
@@ -193,6 +228,91 @@ export const bookingWidgetSettingsSchema = z.object({
   variant: variantAllowed.optional(),
 });
 
+export const navbarSettingsSchema = z.object({
+  showLogo: z.boolean().nullish(),
+  showBookingButton: z.boolean().nullish(),
+  showPhone: z.boolean().nullish(),
+  ctaLabel: nonEmptyText(30).nullish(),
+  variant: variantAllowed.optional(),
+});
+
+export const footerSettingsSchema = z.object({
+  showBrand: z.boolean().nullish(),
+  showNavLinks: z.boolean().nullish(),
+  showContactMini: z.boolean().nullish(),
+  copyrightOwner: nonEmptyText(80).nullish(),
+  variant: variantAllowed.optional(),
+});
+
+export const trustSettingsSchema = z.object({
+  eyebrow,
+  headline: nonEmptyText(120).nullish(),
+  itemsLabel1: nonEmptyText(60).nullish(),
+  itemsLabel2: nonEmptyText(60).nullish(),
+  itemsLabel3: nonEmptyText(60).nullish(),
+  itemsLabel4: nonEmptyText(60).nullish(),
+  itemsSub1: nonEmptyText(120).nullish(),
+  itemsSub2: nonEmptyText(120).nullish(),
+  itemsSub3: nonEmptyText(120).nullish(),
+  itemsSub4: nonEmptyText(120).nullish(),
+  variant: variantAllowed.optional(),
+});
+
+export const hoursSettingsSchema = z.object({
+  eyebrow,
+  headline: nonEmptyText(120).nullish(),
+  showTodayHighlight: z.boolean().nullish(),
+  showClosedLabel: z.boolean().nullish(),
+  variant: variantAllowed.optional(),
+});
+
+export const faqSettingsSchema = z.object({
+  eyebrow,
+  headline: nonEmptyText(120).nullish(),
+  showOpenFirst: z.boolean().nullish(),
+  variant: variantAllowed.optional(),
+});
+
+export const locationSettingsSchema = z.object({
+  eyebrow,
+  headline: nonEmptyText(120).nullish(),
+  showDirectionsButton: z.boolean().nullish(),
+  showStaticMap: z.boolean().nullish(),
+  ctaLabel: nonEmptyText(40).nullish(),
+  variant: variantAllowed.optional(),
+});
+
+export const bookingCtaSettingsSchema = z.object({
+  eyebrow,
+  headline: nonEmptyText(160).nullish(),
+  subheadline: nonEmptyText(320).nullish(),
+  ctaPrimaryLabel: nonEmptyText(40).nullish(),
+  ctaSecondaryLabel: nonEmptyText(40).nullish(),
+  variant: variantAllowed.optional(),
+});
+
+export const whatsappCtaSettingsSchema = z.object({
+  eyebrow,
+  headline: nonEmptyText(160).nullish(),
+  subheadline: nonEmptyText(320).nullish(),
+  ctaLabel: nonEmptyText(40).nullish(),
+  prefilledMessage: nonEmptyText(200).nullish(),
+  variant: variantAllowed.optional(),
+});
+
+export const socialLinksSettingsSchema = z.object({
+  eyebrow,
+  headline: nonEmptyText(120).nullish(),
+  variant: variantAllowed.optional(),
+});
+
+export const legalLinksSettingsSchema = z.object({
+  privacyLabel: nonEmptyText(40).nullish(),
+  cookieLabel: nonEmptyText(40).nullish(),
+  termsLabel: nonEmptyText(40).nullish(),
+  variant: variantAllowed.optional(),
+});
+
 export type SectionSettingsSchemaMap = {
   hero: typeof heroSettingsSchema;
   about: typeof aboutSettingsSchema;
@@ -204,6 +324,16 @@ export type SectionSettingsSchemaMap = {
   price_list: typeof priceListSettingsSchema;
   features_cta: typeof featuresCtaSettingsSchema;
   booking_widget: typeof bookingWidgetSettingsSchema;
+  navbar: typeof navbarSettingsSchema;
+  footer: typeof footerSettingsSchema;
+  trust: typeof trustSettingsSchema;
+  hours: typeof hoursSettingsSchema;
+  faq: typeof faqSettingsSchema;
+  location: typeof locationSettingsSchema;
+  booking_cta: typeof bookingCtaSettingsSchema;
+  whatsapp_cta: typeof whatsappCtaSettingsSchema;
+  social_links: typeof socialLinksSettingsSchema;
+  legal_links: typeof legalLinksSettingsSchema;
 };
 
 export const SECTION_SETTINGS_SCHEMAS: SectionSettingsSchemaMap = {
@@ -217,6 +347,16 @@ export const SECTION_SETTINGS_SCHEMAS: SectionSettingsSchemaMap = {
   price_list: priceListSettingsSchema,
   features_cta: featuresCtaSettingsSchema,
   booking_widget: bookingWidgetSettingsSchema,
+  navbar: navbarSettingsSchema,
+  footer: footerSettingsSchema,
+  trust: trustSettingsSchema,
+  hours: hoursSettingsSchema,
+  faq: faqSettingsSchema,
+  location: locationSettingsSchema,
+  booking_cta: bookingCtaSettingsSchema,
+  whatsapp_cta: whatsappCtaSettingsSchema,
+  social_links: socialLinksSettingsSchema,
+  legal_links: legalLinksSettingsSchema,
 };
 
 export function parseSectionSettings(
@@ -304,19 +444,141 @@ export function buildDefaultDeterministicSections(
     enabled: boolean;
     variant: (typeof ALLOWED_VARIANTS)[number];
     settings: unknown;
-  }> = [{ section_type: "hero", position: 0, enabled: true, variant: "centered", settings: {} }];
+  }> = [];
+  let pos = 0;
+  list.push({
+    section_type: "navbar",
+    position: pos++,
+    enabled: true,
+    variant: "default",
+    settings: {},
+  });
+  list.push({
+    section_type: "hero",
+    position: pos++,
+    enabled: true,
+    variant: "centered",
+    settings: {},
+  });
+  list.push({
+    section_type: "trust",
+    position: pos++,
+    enabled: true,
+    variant: "default",
+    settings: {},
+  });
   if (bp.description && bp.description.trim().length > 0) {
     list.push({
       section_type: "about",
-      position: list.length,
+      position: pos++,
       enabled: true,
       variant: "default",
       settings: {},
     });
   }
+  if (_servicesCount > 0) {
+    list.push({
+      section_type: "services",
+      position: pos++,
+      enabled: true,
+      variant: "cards",
+      settings: {},
+    });
+    list.push({
+      section_type: "price_list",
+      position: pos++,
+      enabled: true,
+      variant: "table",
+      settings: {},
+    });
+  }
+  list.push({
+    section_type: "hours",
+    position: pos++,
+    enabled: true,
+    variant: "default",
+    settings: {},
+  });
+  list.push({
+    section_type: "staff",
+    position: pos++,
+    enabled: false,
+    variant: "cards",
+    settings: {},
+  });
+  list.push({
+    section_type: "gallery",
+    position: pos++,
+    enabled: false,
+    variant: "grid",
+    settings: {},
+  });
+  list.push({
+    section_type: "reviews",
+    position: pos++,
+    enabled: false,
+    variant: "carousel",
+    settings: {},
+  });
+  list.push({
+    section_type: "faq",
+    position: pos++,
+    enabled: false,
+    variant: "default",
+    settings: {},
+  });
+  list.push({
+    section_type: "location",
+    position: pos++,
+    enabled: true,
+    variant: "default",
+    settings: {},
+  });
+  list.push({
+    section_type: "booking_cta",
+    position: pos++,
+    enabled: true,
+    variant: "split",
+    settings: {},
+  });
+  list.push({
+    section_type: "whatsapp_cta",
+    position: pos++,
+    enabled: false,
+    variant: "inline",
+    settings: {},
+  });
   list.push({
     section_type: "contact",
-    position: list.length,
+    position: pos++,
+    enabled: true,
+    variant: "default",
+    settings: {},
+  });
+  list.push({
+    section_type: "booking_widget",
+    position: pos++,
+    enabled: false,
+    variant: "compact",
+    settings: {},
+  });
+  list.push({
+    section_type: "social_links",
+    position: pos++,
+    enabled: true,
+    variant: "icons",
+    settings: {},
+  });
+  list.push({
+    section_type: "legal_links",
+    position: pos++,
+    enabled: true,
+    variant: "inline",
+    settings: {},
+  });
+  list.push({
+    section_type: "footer",
+    position: pos,
     enabled: true,
     variant: "default",
     settings: {},
@@ -458,6 +720,137 @@ export type ContactSection = {
   };
 };
 
+export type NavbarSection = {
+  type: "navbar";
+  variant: (typeof ALLOWED_VARIANTS)[number];
+  settings: z.infer<typeof navbarSettingsSchema>;
+  data: {
+    businessName: string;
+    logoUrl: string | null;
+    phone: string | null;
+    slug: string;
+    navigation: Array<{ href: string; label: string }>;
+  };
+};
+
+export type FooterSection = {
+  type: "footer";
+  variant: (typeof ALLOWED_VARIANTS)[number];
+  settings: z.infer<typeof footerSettingsSchema>;
+  data: {
+    businessName: string;
+    logoUrl: string | null;
+    phone: string | null;
+    email: string | null;
+    address: string | null;
+    copyrightOwner: string;
+    slug: string;
+    navLinks: Array<{ href: string; label: string }>;
+    year: number;
+  };
+};
+
+export type TrustItem = {
+  icon: string | null;
+  label: string;
+  subtitle: string | null;
+};
+
+export type TrustSection = {
+  type: "trust";
+  variant: (typeof ALLOWED_VARIANTS)[number];
+  settings: z.infer<typeof trustSettingsSchema>;
+  data: { items: TrustItem[] };
+};
+
+export type WeeklyHourRow = {
+  day: string;
+  weekdayIndex: number;
+  enabled: boolean;
+  start: string;
+  end: string;
+};
+
+export type HoursSection = {
+  type: "hours";
+  variant: (typeof ALLOWED_VARIANTS)[number];
+  settings: z.infer<typeof hoursSettingsSchema>;
+  data: { weeklyHours: WeeklyHourRow[]; timezone: string | null };
+};
+
+export type FAQItem = {
+  question: string;
+  answer: string;
+};
+
+export type FAQSection = {
+  type: "faq";
+  variant: (typeof ALLOWED_VARIANTS)[number];
+  settings: z.infer<typeof faqSettingsSchema>;
+  data: { items: FAQItem[] };
+};
+
+export type LocationSection = {
+  type: "location";
+  variant: (typeof ALLOWED_VARIANTS)[number];
+  settings: z.infer<typeof locationSettingsSchema>;
+  data: {
+    address: string | null;
+    city: string | null;
+    province: string | null;
+    postalCode: string | null;
+    countryCode: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    googleMapsDirectionsUrl: string | null;
+    googleMapsEmbed: string | null;
+  };
+};
+
+export type BookingCtaSection = {
+  type: "booking_cta";
+  variant: (typeof ALLOWED_VARIANTS)[number];
+  settings: z.infer<typeof bookingCtaSettingsSchema>;
+  data: {
+    bookingUrl: string;
+  };
+};
+
+export type WhatsappCtaSection = {
+  type: "whatsapp_cta";
+  variant: (typeof ALLOWED_VARIANTS)[number];
+  settings: z.infer<typeof whatsappCtaSettingsSchema>;
+  data: {
+    whatsapp: string | null;
+    waMeLink: string | null;
+  };
+};
+
+export type SocialLinkItem = {
+  platform: string;
+  url: string;
+  label: string;
+};
+
+export type SocialLinksSection = {
+  type: "social_links";
+  variant: (typeof ALLOWED_VARIANTS)[number];
+  settings: z.infer<typeof socialLinksSettingsSchema>;
+  data: { links: SocialLinkItem[] };
+};
+
+export type LegalLinkItem = {
+  label: string;
+  href: string;
+};
+
+export type LegalLinksSection = {
+  type: "legal_links";
+  variant: (typeof ALLOWED_VARIANTS)[number];
+  settings: z.infer<typeof legalLinksSettingsSchema>;
+  data: { links: LegalLinkItem[] };
+};
+
 export type PublicSection =
   | HeroSection
   | AboutSection
@@ -468,7 +861,17 @@ export type PublicSection =
   | ContactSection
   | PriceListSection
   | FeaturesCtaSection
-  | BookingWidgetSection;
+  | BookingWidgetSection
+  | NavbarSection
+  | FooterSection
+  | TrustSection
+  | HoursSection
+  | FAQSection
+  | LocationSection
+  | BookingCtaSection
+  | WhatsappCtaSection
+  | SocialLinksSection
+  | LegalLinksSection;
 
 export type PublicSite = {
   business: PublicSiteData;

@@ -41,7 +41,7 @@ export default async function AppBookingsPage(props: BookingsPageProps) {
   const baseQ = supabase
     .from("bookings")
     .select(
-      "*,services!bookings_service_id_fkey(name,duration_minutes),customers!bookings_customer_id_fkey(id,display_name)",
+      "*,services!bookings_service_id_fkey(name,duration_minutes),customers!bookings_customer_id_fkey(id,display_name),payment_status,deposit_amount,deposit_paid_at,deposit_requested_at,deposit_payment_method,deposit_payment_ref,deposit_payment_note",
     )
     .eq("tenant_id", tenant.id);
 
@@ -137,7 +137,7 @@ export default async function AppBookingsPage(props: BookingsPageProps) {
         </nav>
       </header>
       <BookingsListClient
-        bookings={(bookings.data ?? []) as BookingWithService[]}
+        bookings={(bookings.data ?? []) as unknown as BookingWithService[]}
         services={(services.data ?? []) as Array<{ id: string; name: string }>}
         timezone={tz}
         canOperate={canOperate}

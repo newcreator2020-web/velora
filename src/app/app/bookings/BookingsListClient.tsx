@@ -1,9 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { useFormState } from "react-dom";
-import { cancelBookingAction, completeBookingAction, noShowBookingAction } from "./actions";
+import { useMemo, useState, useActionState } from "react";
+import {
+  cancelBookingAction,
+  completeBookingAction,
+  noShowBookingAction,
+  markDepositPaidAction,
+  markDepositUnpaidAction,
+} from "./actions";
 
 type BookingRow = {
   id: string;
@@ -18,6 +23,11 @@ type BookingRow = {
   notes: string | null;
   payment_status?: string | null;
   deposit_amount?: number | null;
+  deposit_paid_at?: string | null;
+  deposit_requested_at?: string | null;
+  deposit_payment_method?: string | null;
+  deposit_payment_ref?: string | null;
+  deposit_payment_note?: string | null;
   services: { name: string; duration_minutes: number | null } | null;
   customers?: { id: string; display_name: string } | null;
 };
@@ -54,6 +64,17 @@ function fmt(iso: string, tz: string): string {
   } catch {
     return String(iso);
   }
+}
+
+function fmtEuroCents(cents: number | null | undefined): string {
+  if (cents == null || !Number.isFinite(cents)) return "—";
+  const eur = Number(cents) / 100;
+  return new Intl.NumberFormat("it-IT", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(eur);
 }
 
 function timeOnly(iso: string, tz: string): string {
@@ -106,9 +127,11 @@ function StatusBadge({ status }: { status: string }) {
 function PaymentStatusBadge({
   payment_status,
   deposit_amount,
+  booking,
 }: {
   payment_status?: string | null | undefined;
   deposit_amount?: number | null | undefined;
+  booking?: BookingRow | null | undefined;
 }) {
   if (!payment_status) return null;
   type Entry = { label: string; className: string };
@@ -116,6 +139,10 @@ function PaymentStatusBadge({
     unpaid: {
       label: "IN ATTESA CAPARRA",
       className: "bg-yellow-50 text-yellow-800 ring-1 ring-inset ring-yellow-600/20",
+    },
+    deposit_pending_bank: {
+      label: "BONIFICO IN ATTESA",
+      className: "bg-sky-50 text-sky-800 ring-1 ring-inset ring-sky-600/20",
     },
     deposit_paid: {
       label: "CAPARRA PAGATA",
@@ -145,18 +172,47 @@ function PaymentStatusBadge({
   const entry = map[payment_status] ?? null;
   if (!entry) return null;
   const showAmount =
-    (payment_status === "deposit_paid" || payment_status === "paid") &&
+    (payment_status === "deposit_pending_bank" ||
+      payment_status === "deposit_paid" ||
+      payment_status === "paid") &&
     deposit_amount != null &&
     Number.isFinite(deposit_amount) &&
     deposit_amount > 0;
+  const tip = showAmount
+    ? `Caparra: ${fmtEuroCents(deposit_amount)}${
+        booking?.deposit_payment_ref ? " · Riferimento: " + booking.deposit_payment_ref : ""
+      }${
+        booking?.deposit_paid_at
+          ? " · Data accredito: " + safeFormatShort(booking.deposit_paid_at)
+          : ""
+      }`
+    : undefined;
   return (
     <span
-      title={showAmount ? `Caparra: €${Number(deposit_amount).toFixed(2)}` : undefined}
+      title={tip}
       className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide uppercase ${entry.className}`}
     >
       {entry.label}
     </span>
   );
+}
+
+function safeFormatShort(iso: string): string {
+  try {
+    const dt = new Date(iso);
+    if (Number.isNaN(dt.getTime())) return String(iso);
+    const dtf = new Intl.DateTimeFormat("it-IT", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    });
+    return dtf.format(dt);
+  } catch {
+    return String(iso);
+  }
 }
 
 export default function BookingsListClient(props: Props) {
@@ -335,6 +391,8 @@ export default function BookingsListClient(props: Props) {
                       <CancelRow booking={b} />
                     </>
                   ) : null}
+                  <MarkDepositPaidRow booking={b} />
+                  <MarkDepositUnpaidRow booking={b} />
                 </div>
               ) : null}
             </li>
@@ -418,13 +476,21 @@ export default function BookingsListClient(props: Props) {
                       </div>
                     </td>
                     <td className="px-4 py-3 align-top text-right">
-                      {props.canOperate && b.status === "confirmed" ? (
-                        <div className="inline-flex flex-wrap justify-end gap-2">
-                          <CompleteRow booking={b} compact />
-                          <NoShowRow booking={b} compact />
-                          <CancelRow booking={b} compact />
-                        </div>
-                      ) : null}
+                      <div className="inline-flex flex-wrap justify-end gap-2">
+                        {props.canOperate && b.status === "confirmed" ? (
+                          <>
+                            <CompleteRow booking={b} compact />
+                            <NoShowRow booking={b} compact />
+                            <CancelRow booking={b} compact />
+                          </>
+                        ) : null}
+                        {props.canOperate ? (
+                          <>
+                            <MarkDepositPaidRow booking={b} compact />
+                            <MarkDepositUnpaidRow booking={b} compact />
+                          </>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -438,7 +504,7 @@ export default function BookingsListClient(props: Props) {
 }
 
 function CancelRow({ booking, compact }: { booking: BookingRow; compact?: boolean }) {
-  const [state, formAction, isPending] = useFormState(cancelBookingAction, undefined);
+  const [state, formAction, isPending] = useActionState(cancelBookingAction, undefined);
   return (
     <form action={formAction}>
       <input type="hidden" name="booking_id" value={booking.id} />
@@ -462,7 +528,7 @@ function CancelRow({ booking, compact }: { booking: BookingRow; compact?: boolea
 }
 
 function CompleteRow({ booking, compact }: { booking: BookingRow; compact?: boolean }) {
-  const [state, formAction, isPending] = useFormState(completeBookingAction, undefined);
+  const [state, formAction, isPending] = useActionState(completeBookingAction, undefined);
   return (
     <form action={formAction}>
       <input type="hidden" name="booking_id" value={booking.id} />
@@ -486,7 +552,7 @@ function CompleteRow({ booking, compact }: { booking: BookingRow; compact?: bool
 }
 
 function NoShowRow({ booking, compact }: { booking: BookingRow; compact?: boolean }) {
-  const [state, formAction, isPending] = useFormState(noShowBookingAction, undefined);
+  const [state, formAction, isPending] = useActionState(noShowBookingAction, undefined);
   return (
     <form action={formAction}>
       <input type="hidden" name="booking_id" value={booking.id} />
@@ -499,6 +565,67 @@ function NoShowRow({ booking, compact }: { booking: BookingRow; compact?: boolea
         aria-label={`Segna no-show prenotazione ${booking.id}`}
       >
         No show
+      </button>
+      {state && state.ok === false ? (
+        <div className="mt-1 text-xs text-red-700" role="alert">
+          {state.error}
+        </div>
+      ) : null}
+    </form>
+  );
+}
+
+function MarkDepositPaidRow({ booking, compact }: { booking: BookingRow; compact?: boolean }) {
+  const [state, formAction, isPending] = useActionState(markDepositPaidAction, undefined);
+  const showBtn =
+    booking.deposit_amount != null &&
+    Number.isFinite(booking.deposit_amount) &&
+    booking.deposit_amount > 0 &&
+    booking.payment_status !== "deposit_paid" &&
+    booking.payment_status !== "paid";
+  if (!showBtn) return null;
+  return (
+    <form action={formAction}>
+      <input type="hidden" name="booking_id" value={booking.id} />
+      <button
+        type="submit"
+        disabled={isPending}
+        className={`rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-60 ${
+          compact ? "" : ""
+        }`}
+        aria-label={`Segna caparra pagata prenotazione ${booking.id}`}
+      >
+        Segna caparra pagata
+      </button>
+      {state && state.ok === false ? (
+        <div className="mt-1 text-xs text-red-700" role="alert">
+          {state.error}
+        </div>
+      ) : null}
+    </form>
+  );
+}
+
+function MarkDepositUnpaidRow({ booking, compact }: { booking: BookingRow; compact?: boolean }) {
+  const [state, formAction, isPending] = useActionState(markDepositUnpaidAction, undefined);
+  const showBtn =
+    booking.deposit_amount != null &&
+    Number.isFinite(booking.deposit_amount) &&
+    booking.deposit_amount > 0 &&
+    booking.payment_status === "deposit_paid";
+  if (!showBtn) return null;
+  return (
+    <form action={formAction}>
+      <input type="hidden" name="booking_id" value={booking.id} />
+      <button
+        type="submit"
+        disabled={isPending}
+        className={`rounded-md border border-slate-300 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60 ${
+          compact ? "" : ""
+        }`}
+        aria-label={`Reimposta caparra non pagata prenotazione ${booking.id}`}
+      >
+        Reimposta non pagata
       </button>
       {state && state.ok === false ? (
         <div className="mt-1 text-xs text-red-700" role="alert">

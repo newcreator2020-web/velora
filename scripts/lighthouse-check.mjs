@@ -116,13 +116,12 @@ async function loadLighthouseDeps() {
   return { ok: true, lighthouse, chromeLauncher };
 }
 
-async function runOne(lighthouse, chromeFlags, url) {
+async function runOne(lighthouse, chromePort, url) {
   const opts = {
     logLevel: "info",
     output: "json",
     onlyCategories: CATEGORIES,
-    port: undefined,
-    chromeFlags,
+    port: chromePort,
     throttlingMethod: "simulate",
     formFactor: "mobile",
     screenEmulation: {
@@ -176,9 +175,21 @@ async function main() {
   }
 
   const { lighthouse, chromeLauncher } = deps;
-  const chrome = await chromeLauncher.launch({
-    chromeFlags: ["--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
-  });
+  const launchOpts = {
+    chromeFlags: [
+      "--headless=new",
+      "--no-sandbox",
+      "--disable-gpu",
+      "--disable-dev-shm-usage",
+      "--disable-web-security",
+      "--allow-insecure-localhost",
+      "--host-resolver-rules=MAP localhost 127.0.0.1",
+    ],
+  };
+  if (process.env.CHROME_PATH) {
+    launchOpts.chromePath = process.env.CHROME_PATH;
+  }
+  const chrome = await chromeLauncher.launch(launchOpts);
   try {
     const stamp = nowStamp();
     const summary = {
@@ -197,7 +208,7 @@ async function main() {
       let runnerResult = null;
       let error = null;
       try {
-        runnerResult = await runOne(lighthouse, [`--remote-debugging-port=${chrome.port}`], url);
+        runnerResult = await runOne(lighthouse, chrome.port, url);
       } catch (err) {
         error = err instanceof Error ? err.message : String(err);
         console.error(`[T23-lighthouse]   ERRORE: ${error}`);

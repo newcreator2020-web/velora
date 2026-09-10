@@ -10,6 +10,16 @@ import { ContactSectionComponent } from "@/components/site/sections/Contact";
 import { PriceListSectionComponent } from "@/components/site/sections/PriceList";
 import { FeaturesCtaSectionComponent } from "@/components/site/sections/FeaturesCTA";
 import { BookingWidgetSectionComponent } from "@/components/site/sections/BookingWidget";
+import { NavbarSectionComponent } from "@/components/site/sections/Navbar";
+import { FooterSectionComponent } from "@/components/site/sections/Footer";
+import { TrustSectionComponent } from "@/components/site/sections/Trust";
+import { HoursSectionComponent } from "@/components/site/sections/Hours";
+import { FAQSectionComponent } from "@/components/site/sections/FAQ";
+import { LocationSectionComponent } from "@/components/site/sections/Location";
+import { BookingCtaSectionComponent } from "@/components/site/sections/BookingCTA";
+import { WhatsappCtaSectionComponent } from "@/components/site/sections/WhatsappCTA";
+import { SocialLinksSectionComponent } from "@/components/site/sections/SocialLinks";
+import { LegalLinksSectionComponent } from "@/components/site/sections/LegalLinks";
 
 type RenderFn = (section: PublicSection) => React.ReactNode | null;
 
@@ -27,6 +37,21 @@ const FEATURES_CTA: RenderFn = (s) =>
   s.type === "features_cta" ? <FeaturesCtaSectionComponent {...s} /> : null;
 const BOOKING_WIDGET: RenderFn = (s) =>
   s.type === "booking_widget" ? <BookingWidgetSectionComponent {...s} /> : null;
+const NAVBAR: RenderFn = (s) => (s.type === "navbar" ? <NavbarSectionComponent {...s} /> : null);
+const FOOTER: RenderFn = (s) => (s.type === "footer" ? <FooterSectionComponent {...s} /> : null);
+const TRUST: RenderFn = (s) => (s.type === "trust" ? <TrustSectionComponent {...s} /> : null);
+const HOURS: RenderFn = (s) => (s.type === "hours" ? <HoursSectionComponent {...s} /> : null);
+const FAQ: RenderFn = (s) => (s.type === "faq" ? <FAQSectionComponent {...s} /> : null);
+const LOCATION: RenderFn = (s) =>
+  s.type === "location" ? <LocationSectionComponent {...s} /> : null;
+const BOOKING_CTA: RenderFn = (s) =>
+  s.type === "booking_cta" ? <BookingCtaSectionComponent {...s} /> : null;
+const WHATSAPP_CTA: RenderFn = (s) =>
+  s.type === "whatsapp_cta" ? <WhatsappCtaSectionComponent {...s} /> : null;
+const SOCIAL_LINKS: RenderFn = (s) =>
+  s.type === "social_links" ? <SocialLinksSectionComponent {...s} /> : null;
+const LEGAL_LINKS: RenderFn = (s) =>
+  s.type === "legal_links" ? <LegalLinksSectionComponent {...s} /> : null;
 
 export const SECTION_RENDERERS: Record<PublicSection["type"], RenderFn> = {
   hero: HERO,
@@ -39,6 +64,16 @@ export const SECTION_RENDERERS: Record<PublicSection["type"], RenderFn> = {
   price_list: PRICE_LIST,
   features_cta: FEATURES_CTA,
   booking_widget: BOOKING_WIDGET,
+  navbar: NAVBAR,
+  footer: FOOTER,
+  trust: TRUST,
+  hours: HOURS,
+  faq: FAQ,
+  location: LOCATION,
+  booking_cta: BOOKING_CTA,
+  whatsapp_cta: WHATSAPP_CTA,
+  social_links: SOCIAL_LINKS,
+  legal_links: LEGAL_LINKS,
 };
 
 export function SiteRenderer({ sections }: { sections: PublicSection[] }) {

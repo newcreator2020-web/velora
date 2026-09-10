@@ -1,0 +1,128 @@
+{
+  "generatedAt": "2026-09-10T22:02:30.345Z",
+  "mode": "mobile",
+  "categories": [
+    "performance",
+    "accessibility",
+    "best-practices",
+    "seo"
+  ],
+  "results": [
+    {
+      "index": 1,
+      "url": "http://localhost:3000/s/slugo-mtu30v76-1fon?v=51",
+      "slug": "slugo-mtu30v76-1fon",
+      "ok": true,
+      "error": null,
+      "scores": {
+        "performance": {
+          "title": "Performance",
+          "score": 0.73,
+          "scorePct": 73
+        },
+        "accessibility": {
+          "title": "Accessibility",
+          "score": 0.96,
+          "scorePct": 96
+        },
+        "best-practices": {
+          "title": "Best Practices",
+          "score": 0.96,
+          "scorePct": 96
+        },
+        "seo": {
+          "title": "SEO",
+          "score": 0.91,
+          "scorePct": 91
+        }
+      }
+    },
+    {
+      "index": 2,
+      "url": "http://localhost:3000/s/slugo-mtu30v76-1fon/booking?v=51",
+      "slug": "booking",
+      "ok": true,
+      "error": null,
+      "scores": {
+        "performance": {
+          "title": "Performance",
+          "score": 0.7,
+          "scorePct": 70
+        },
+        "accessibility": {
+          "title": "Accessibility",
+          "score": 0.96,
+          "scorePct": 96
+        },
+        "best-practices": {
+          "title": "Best Practices",
+          "score": 1,
+          "scorePct": 100
+        },
+        "seo": {
+          "title": "SEO",
+          "score": 0.91,
+          "scorePct": 91
+        }
+      }
+    },
+    {
+      "index": 3,
+      "url": "http://localhost:3000/s/slugo-mtu30v76-1fon?v=52",
+      "slug": "slugo-mtu30v76-1fon",
+      "ok": true,
+      "error": null,
+      "scores": {
+        "performance": {
+          "title": "Performance",
+          "score": 0.75,
+          "scorePct": 75
+        },
+        "accessibility": {
+          "title": "Accessibility",
+          "score": 0.96,
+          "scorePct": 96
+        },
+        "best-practices": {
+          "title": "Best Practices",
+          "score": 0.96,
+          "scorePct": 96
+        },
+        "seo": {
+          "title": "SEO",
+          "score": 0.91,
+          "scorePct": 91
+        }
+      }
+    },
+    {
+      "index": 4,
+      "url": "http://localhost:3000/s/slugo-mtu30v76-1fon/booking?v=52",
+      "slug": "booking",
+      "ok": true,
+      "error": null,
+      "scores": {
+        "performance": {
+          "title": "Performance",
+          "score": 0.7,
+          "scorePct": 70
+        },
+        "accessibility": {
+          "title": "Accessibility",
+          "score": 0.96,
+          "scorePct": 96
+        },
+        "best-practices": {
+          "title": "Best Practices",
+          "score": 1,
+          "scorePct": 100
+        },
+        "seo": {
+          "title": "SEO",
+          "score": 0.91,
+          "scorePct": 91
+        }
+      }
+    }
+  ]
+}

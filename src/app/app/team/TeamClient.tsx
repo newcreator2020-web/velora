@@ -1,6 +1,6 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
-import { useFormState, useFormStatus } from "react-dom";
+import { useEffect, useMemo, useState, useActionState } from "react";
+import { useFormStatus } from "react-dom";
 import {
   createResourceAction,
   listResourceServicesAction,
@@ -77,7 +77,7 @@ function ErrorBadge({ err }: { err?: ResourceActionResult }) {
 }
 
 function CreateForm() {
-  const [state, formAction] = useFormState(
+  const [state, formAction] = useActionState(
     createResourceAction,
     undefined as unknown as ResourceActionResult,
   );
@@ -152,7 +152,7 @@ function ResourceRow({
   canWrite: boolean;
   timezone?: string;
 }) {
-  const [updState, updAction] = useFormState(
+  const [updState, updAction] = useActionState(
     updateResourceAction,
     undefined as unknown as ResourceActionResult,
   );
