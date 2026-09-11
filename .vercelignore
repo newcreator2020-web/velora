@@ -1,0 +1,24 @@
+node_modules
+build
+dist
+.git
+.trae
+.log
+.figma
+
+# Next.js dev/cache only oversized sst turbpapck files (production .next output preserved)
+.next/dev
+.next/cache
+.next/server/development-build-manifest.js*
+.next/server/middleware-build-manifest.js*
+.next/static/development
+
+# Supabase CLI sandbox home
+.supabase-home
+supabase/.home
+
+# Playwright artifacts
+playwright-report
+test-results
+blob-report
+.playwright-browsers
