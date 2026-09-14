@@ -22,3 +22,6 @@ playwright-report
 test-results
 blob-report
 .playwright-browsers
+
+# Heavy untracked artifacts dir (screenshots, logs, lighthouse, csv)
+artifacts/

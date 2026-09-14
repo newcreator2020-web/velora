@@ -1,0 +1,56 @@
+name: Deploy Vercel Production
+on:
+  push:
+    branches:
+      - feature/auth-onboarding
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --prefer-offline --ignore-scripts
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@59.11.7
+
+      - name: Pull Vercel project environment
+        run: vercel pull --yes --environment=production --token=$VERCEL_TOKEN
+
+      - name: Build project for Vercel production
+        run: vercel build --prod --token=$VERCEL_TOKEN
+
+      - name: Deploy prebuilt to Vercel production
+        id: deploy
+        run: |
+          DEPLOY_URL=$(vercel deploy --prebuilt --prod --token=$VERCEL_TOKEN)
+          echo "DEPLOY_URL=$DEPLOY_URL" >> $GITHUB_OUTPUT
+          echo "Deploy URL: $DEPLOY_URL"
+
+      - name: Summarize deployment
+        run: |
+          echo "## Deploy Completato" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Production URL**: ${{ steps.deploy.outputs.DEPLOY_URL }}" >> $GITHUB_STEP_SUMMARY
