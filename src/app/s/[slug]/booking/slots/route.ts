@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAnonReadonlyClient } from "@/lib/supabase/server";
 import { WEEKDAY_LABELS } from "@/lib/server/booking";
 import { slugSchema, resolvePublicTenant } from "@/lib/server/site-engine";
 
@@ -43,7 +43,7 @@ export async function GET(req: Request, props: { params: Promise<{ slug: string 
   if (!service_id || !dateStr) return NextResponse.json({ slots: [] }, { status: 400 });
   const dateRegex = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/;
   if (!dateRegex.test(dateStr)) return NextResponse.json({ slots: [] }, { status: 400 });
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseAnonReadonlyClient();
   const svc = await supabase
     .from("services")
     .select("id,duration_minutes,active,tenant_id")

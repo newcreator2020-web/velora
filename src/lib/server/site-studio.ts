@@ -618,6 +618,9 @@ export async function resolveDraftSiteForPreview(): Promise<
     province: bp.province ?? null,
     postalCode: bp.postal_code ?? null,
     countryCode: bp.country_code ?? null,
+    whatsapp: (bp as { whatsapp?: string | null }).whatsapp ?? null,
+    latitude: (bp as { latitude?: number | null }).latitude ?? null,
+    longitude: (bp as { longitude?: number | null }).longitude ?? null,
     locale: bp.locale || "it",
     timezone: bp.timezone || "Europe/Rome",
     canonicalPath: `/s/${tenant.slug}`,
@@ -914,6 +917,124 @@ export async function resolveDraftSiteForPreview(): Promise<
         });
         break;
       }
+      case "navbar":
+        sections.push({
+          type: "navbar",
+          variant,
+          settings: parsedSet.value as PublicSection["settings"],
+          data: {
+            businessName: site.businessName,
+            logoUrl: null,
+            phone: site.phone,
+            slug: site.slug,
+            navigation: [],
+          },
+        });
+        break;
+      case "footer":
+        sections.push({
+          type: "footer",
+          variant,
+          settings: parsedSet.value as PublicSection["settings"],
+          data: {
+            businessName: site.businessName,
+            logoUrl: null,
+            phone: site.phone,
+            email: site.email,
+            address: site.address,
+            copyrightOwner: site.businessName,
+            slug: site.slug,
+            navLinks: [],
+            year: new Date().getFullYear(),
+          },
+        });
+        break;
+      case "trust":
+        sections.push({
+          type: "trust",
+          variant,
+          settings: parsedSet.value as PublicSection["settings"],
+          data: { items: [] },
+        });
+        break;
+      case "hours":
+        sections.push({
+          type: "hours",
+          variant,
+          settings: parsedSet.value as PublicSection["settings"],
+          data: { weeklyHours: [], timezone: site.timezone ?? "Europe/Rome" },
+        });
+        break;
+      case "faq":
+        sections.push({
+          type: "faq",
+          variant,
+          settings: parsedSet.value as PublicSection["settings"],
+          data: { items: [] },
+        });
+        break;
+      case "location":
+        sections.push({
+          type: "location",
+          variant,
+          settings: parsedSet.value as PublicSection["settings"],
+          data: {
+            address: site.address,
+            city: site.city,
+            province: site.province,
+            postalCode: site.postalCode,
+            countryCode: site.countryCode,
+            latitude: site.latitude,
+            longitude: site.longitude,
+            googleMapsDirectionsUrl: null,
+            googleMapsEmbed: null,
+          },
+        });
+        break;
+      case "booking_cta":
+        sections.push({
+          type: "booking_cta",
+          variant,
+          settings: parsedSet.value as PublicSection["settings"],
+          data: {
+            bookingUrl: `/s/${site.slug}/book`,
+          },
+        });
+        break;
+      case "whatsapp_cta":
+        if (site.whatsapp && site.whatsapp.trim().length > 0) {
+          const clean = site.whatsapp.replace(/[^0-9]/g, "");
+          const waLink =
+            clean.length > 0
+              ? `https://wa.me/${clean}?text=${encodeURIComponent("Ciao, vorrei avere informazioni")}`
+              : null;
+          sections.push({
+            type: "whatsapp_cta",
+            variant,
+            settings: parsedSet.value as PublicSection["settings"],
+            data: {
+              whatsapp: site.whatsapp,
+              waMeLink: waLink,
+            },
+          });
+        }
+        break;
+      case "social_links":
+        sections.push({
+          type: "social_links",
+          variant,
+          settings: parsedSet.value as PublicSection["settings"],
+          data: { links: [] },
+        });
+        break;
+      case "legal_links":
+        sections.push({
+          type: "legal_links",
+          variant,
+          settings: parsedSet.value as PublicSection["settings"],
+          data: { links: [] },
+        });
+        break;
     }
   }
 

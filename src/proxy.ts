@@ -121,7 +121,7 @@ function setCsrfCookie(res: NextResponse, token: string) {
   res.cookies.set({
     name: CSRF_COOKIE_NAME,
     value: token,
-    httpOnly: true,
+    httpOnly: false,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
@@ -150,6 +150,27 @@ export async function proxy(request: NextRequest) {
   const csrfToken = existingToken && existingToken.length >= 16 ? existingToken : generateToken();
   setCsrfCookie(response, csrfToken);
 
+  const newRequestHeaders = new Headers(request.headers);
+  const existingCookieHeader = newRequestHeaders.get("cookie") ?? "";
+  const csrfCookieEntry = `${CSRF_COOKIE_NAME}=${csrfToken}`;
+  if (new RegExp(`(^|;\\s*)${CSRF_COOKIE_NAME}=`).test(existingCookieHeader)) {
+    newRequestHeaders.set(
+      "cookie",
+      existingCookieHeader.replace(
+        new RegExp(`(^|;\\s*)${CSRF_COOKIE_NAME}=[^;]*`),
+        (_m, g1) => `${g1}${csrfCookieEntry}`,
+      ),
+    );
+  } else {
+    newRequestHeaders.set(
+      "cookie",
+      existingCookieHeader ? `${existingCookieHeader}; ${csrfCookieEntry}` : csrfCookieEntry,
+    );
+  }
+  response = NextResponse.next({ request: { headers: newRequestHeaders } });
+  response.headers.set("x-request-id", requestId);
+  setCsrfCookie(response, csrfToken);
+
   const method = request.method.toUpperCase();
   const pathname = request.nextUrl.pathname;
 
@@ -158,24 +179,27 @@ export async function proxy(request: NextRequest) {
   }
 
   if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
-    const submitted = await csrfTokenFromRequest(request);
-    if (!submitted || submitted !== csrfToken) {
-      const accept = request.headers.get("accept") ?? "";
-      if (accept.includes("text/html")) {
-        const redir = new NextResponse(
-          `<!doctype html><html><head><meta charset="utf-8"><title>Richiesta scaduta</title></head><body style="font-family:system-ui;padding:40px;"><h2>Richiesta scaduta o non valida (CSRF).</h2><p>Torna indietro, ricarica la pagina e riprova.</p></body></html>`,
-          { status: 403, headers: { "content-type": "text/html; charset=utf-8" } },
+    const isPublicBookingServerAction = /^\/s\/[^/]+\/booking\/?$/.test(pathname);
+    if (!isPublicBookingServerAction) {
+      const submitted = await csrfTokenFromRequest(request);
+      if (!submitted || submitted !== csrfToken) {
+        const accept = request.headers.get("accept") ?? "";
+        if (accept.includes("text/html")) {
+          const redir = new NextResponse(
+            `<!doctype html><html><head><meta charset="utf-8"><title>Richiesta scaduta</title></head><body style="font-family:system-ui;padding:40px;"><h2>Richiesta scaduta o non valida (CSRF).</h2><p>Torna indietro, ricarica la pagina e riprova.</p></body></html>`,
+            { status: 403, headers: { "content-type": "text/html; charset=utf-8" } },
+          );
+          setCsrfCookie(redir, generateToken());
+          return redir;
+        }
+        return NextResponse.json(
+          {
+            error: "csrf_mismatch",
+            message: "Token di sicurezza CSRF mancante o non valido. Ricarica la pagina e riprova.",
+          },
+          { status: 403 },
         );
-        setCsrfCookie(redir, generateToken());
-        return redir;
       }
-      return NextResponse.json(
-        {
-          error: "csrf_mismatch",
-          message: "Token di sicurezza CSRF mancante o non valido. Ricarica la pagina e riprova.",
-        },
-        { status: 403 },
-      );
     }
   }
 

@@ -12,6 +12,7 @@ export function FooterSectionComponent(s: PublicSection) {
 
   const businessName = data.businessName ?? "Nome Attività";
   const phone = data.phone ?? null;
+  const email = data.email ?? null;
   const address = data.address ?? null;
   const showBrand = settings.showBrand !== false;
   const showNavLinks = settings.showNavLinks !== false;
@@ -142,6 +143,26 @@ export function FooterSectionComponent(s: PublicSection) {
                 {phone}
               </a>
             ) : null}
+            {email ? (
+              <a
+                href={`mailto:${email}`}
+                className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition duration-[var(--theme-motion-duration)] w-fit break-all"
+              >
+                <svg
+                  className="w-4 h-4 shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect width="20" height="16" x="2" y="4" rx="2" />
+                  <path d="m22 7-10 5L2 7" />
+                </svg>
+                {email}
+              </a>
+            ) : null}
           </div>
 
           {showNavLinks ? (
@@ -241,6 +262,28 @@ export function FooterSectionComponent(s: PublicSection) {
                       className="hover:text-foreground transition duration-[var(--theme-motion-duration)]"
                     >
                       {phone}
+                    </a>
+                  </li>
+                ) : null}
+                {email ? (
+                  <li className="flex items-start gap-3">
+                    <svg
+                      className="w-4 h-4 mt-0.5 shrink-0"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect width="20" height="16" x="2" y="4" rx="2" />
+                      <path d="m22 7-10 5L2 7" />
+                    </svg>
+                    <a
+                      href={`mailto:${email}`}
+                      className="hover:text-foreground transition duration-[var(--theme-motion-duration)] break-all"
+                    >
+                      {email}
                     </a>
                   </li>
                 ) : null}

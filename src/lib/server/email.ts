@@ -340,7 +340,7 @@ function buildBookingSummaryRows(params: EmailBookingContext): string {
   const durationLabel = duration > 0 ? `${duration} min` : "";
   const price =
     booking.services?.price_from != null
-      ? formatCurrency(booking.services.price_from / 100, booking.services.currency)
+      ? formatCurrency(booking.services.price_from, booking.services.currency)
       : "";
   const resource = booking.staff_resources?.display_name ?? "";
   const rows: string[] = [];

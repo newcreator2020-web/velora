@@ -52,7 +52,8 @@ export type DesignTokensLayout = {
   bodyMaxWidth: 1024 | 1140 | 1200 | 1280 | 1440;
 };
 
-export type DesignPresetId = "elegant" | "soft_beauty" | "barber_strong" | "minimal";
+export type DesignPresetId =
+  "elegant" | "soft_beauty" | "barber_strong" | "minimal" | "editorial" | "warm_natural" | "luxury";
 
 export type DesignPreset = {
   id: DesignPresetId;

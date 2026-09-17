@@ -599,12 +599,21 @@ function SiteStudioInner({ outer }: { outer: InnerOuter }) {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <a
+              href={`/s/${encodeURIComponent(slug)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-1.5 px-5 py-2.5 text-sm font-semibold rounded-lg bg-indigo-600 text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+            >
+              Apri sito pubblico
+              <span aria-hidden>↗</span>
+            </a>
+            <a
               href="/app/site/preview"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border bg-white text-slate-900 border-slate-300 hover:bg-slate-50"
             >
-              Anteprima privata
+              Bozza live
               <span aria-hidden>↗</span>
             </a>
             <a
@@ -612,14 +621,19 @@ function SiteStudioInner({ outer }: { outer: InnerOuter }) {
               target={publicUrl && published ? "_blank" : undefined}
               rel={publicUrl && published ? "noopener noreferrer" : undefined}
               aria-disabled={!publicUrl || !published ? "true" : undefined}
+              title={
+                !publicUrl || !published
+                  ? "Dominio custom non disponibile o sito non pubblicato"
+                  : "Apri sul dominio custom configurato"
+              }
               className={[
                 "inline-flex items-center justify-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border",
                 publicUrl && published
                   ? "bg-white text-slate-900 border-slate-300 hover:bg-slate-50"
-                  : "bg-slate-100 text-slate-400 border-slate-200 pointer-events-none",
+                  : "bg-slate-100 text-slate-400 border-slate-200 pointer-events-none cursor-not-allowed",
               ].join(" ")}
             >
-              Sito pubblico
+              Dominio custom
               <span aria-hidden>↗</span>
             </a>
           </div>

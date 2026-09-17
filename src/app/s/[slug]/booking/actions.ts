@@ -1,7 +1,7 @@
 "use server";
 
 import "server-only";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { BookingError, createPublicBooking, type PublicBookingResult } from "@/lib/server/booking";
 import { resolvePublicTenant, slugSchema } from "@/lib/server/site-engine";
 import { getSupabaseServiceClient } from "@/lib/supabase/service";
@@ -220,14 +220,46 @@ function scheduleEmailConfirmation(params: {
 }
 
 export async function createBookingAction(form: FormData): Promise<BookingActionState> {
-  console.warn("🚨 createBookingAction FORM KEYS COUNT:", [...form.keys()].length);
-  [...form.entries()].forEach(([k, v]) => {
+  const normalizedForm = normalizeActionFormData(form);
+  const CSRF_COOKIE_NAME = "velora_csrf_token";
+  try {
+    const store = await cookies();
+    const existing = store.get(CSRF_COOKIE_NAME)?.value;
+    const csrfFromForm = normalizedForm.get("_csrf")?.toString();
+    const tokenValue =
+      existing && existing.length >= 16
+        ? existing
+        : csrfFromForm && csrfFromForm.length >= 16
+          ? csrfFromForm
+          : globalThis.crypto && "randomUUID" in globalThis.crypto
+            ? (globalThis.crypto as Crypto).randomUUID().replace(/-/g, "")
+            : Math.random().toString(16).slice(2) + Date.now().toString(16);
+    store.set(CSRF_COOKIE_NAME, tokenValue, {
+      path: "/",
+      sameSite: "lax",
+      httpOnly: false,
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 60 * 60,
+    });
+    if (csrfFromForm && csrfFromForm.length >= 16 && csrfFromForm !== tokenValue) {
+      return {
+        ok: false as const,
+        error_code: "csrf_mismatch",
+        error: "Token di sicurezza CSRF mancante o non valido. Ricarica la pagina e riprova.",
+      };
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn("[booking-actions] csrf cookie set/validate skipped:", msg.slice(0, 200));
+  }
+  console.warn("🚨 createBookingAction FORM KEYS COUNT:", [...normalizedForm.keys()].length);
+  [...normalizedForm.entries()].forEach(([k, v]) => {
     const strVal =
       typeof v === "string" ? v : v instanceof File ? `FILE[${v.name} ${v.size}b]` : String(v);
     console.warn(`   📌 [${k}]=${strVal.slice(0, 120)}`);
   });
 
-  const result = await runCreateBookingAction(form);
+  const result = await runCreateBookingAction(normalizedForm);
 
   console.warn(
     "🚀 createBookingAction RESULT:",
@@ -240,6 +272,15 @@ export async function createBookingAction(form: FormData): Promise<BookingAction
       (result.redirectToCheckout ? "YES(" + String(result.redirectToCheckout).length + ")" : "NO"),
   );
   return result;
+}
+
+function normalizeActionFormData(form: FormData): FormData {
+  const out = new FormData();
+  for (const [rawKey, val] of form.entries()) {
+    const key = typeof rawKey === "string" ? rawKey.replace(/^_\d+_/, "") : rawKey;
+    out.append(key, val);
+  }
+  return out;
 }
 
 async function runCreateBookingAction(form: FormData): Promise<BookingActionState> {
@@ -381,11 +422,22 @@ async function runCreateBookingAction(form: FormData): Promise<BookingActionStat
     }
   } catch (e) {
     if (e instanceof BookingError) {
+      console.warn("[booking-actions] BookingError:", {
+        code: e.code,
+        message: e.message,
+        userMessage: e.userMessage,
+      });
       return { ok: false as const, error_code: e.code, error: e.userMessage };
     }
     if (e instanceof Error) {
+      console.warn("[booking-actions] Error:", {
+        name: e.name,
+        message: e.message,
+        stack: e.stack?.slice(0, 500),
+      });
       return { ok: false as const, error: e.message };
     }
+    console.warn("[booking-actions] Unknown error:", e);
     return { ok: false as const, error: "Impossibile prenotare. Riprova tra qualche minuto." };
   }
 }
@@ -394,10 +446,11 @@ export async function declareBankTransferAction(
   prev: BookingActionState,
   form: FormData,
 ): Promise<BookingActionState> {
-  const bookingId = form.get("booking_id")?.toString() ?? "";
-  const cro = form.get("deposit_payment_ref")?.toString() ?? "";
-  const note = form.get("deposit_payment_note")?.toString() ?? "";
-  const email = form.get("customer_email")?.toString() ?? "";
+  const normalizedForm = normalizeActionFormData(form);
+  const bookingId = normalizedForm.get("booking_id")?.toString() ?? "";
+  const cro = normalizedForm.get("deposit_payment_ref")?.toString() ?? "";
+  const note = normalizedForm.get("deposit_payment_note")?.toString() ?? "";
+  const email = normalizedForm.get("customer_email")?.toString() ?? "";
 
   if (!bookingId || bookingId.length < 10) {
     return {

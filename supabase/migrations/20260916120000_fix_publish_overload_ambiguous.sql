@@ -1,0 +1,12 @@
+-- ============================================================================
+-- 2026-09-16 FINAL GATE FIX: publish_site_draft overload ambiguous
+-- Root cause:
+--   overload 1: publish_site_draft(p_tenant_id UUID)  [wrapper 20260909131000]
+--   overload 2: publish_site_draft(p_tenant_id UUID, p_expected_revision UUID DEFAULT NULL, p_actor_id UUID DEFAULT NULL)  [20260909150000]
+-- When called as publish_site_draft(uuid) → Postgres throws:
+--   function public.publish_site_draft(uuid) is not unique
+-- Fix: DROP wrapper 1-arg since 3-arg with DEFAULT NULL covers 1, 2, and 3 arg calls.
+-- Safe (no regress): wrapper 1-arg body was SELECT * FROM 3-arg (p,NULL,auth.uid).
+--   3-arg default for p_actor_id = NULL, but 3-arg body sets v_actor_uid = COALESCE(p_actor_id, auth.uid()) anyway → behavior identical.
+-- ============================================================================
+DROP FUNCTION IF EXISTS public.publish_site_draft(p_tenant_id UUID);

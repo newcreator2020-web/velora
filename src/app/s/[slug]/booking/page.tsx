@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { randomUUID } from "crypto";
-import { notFound, redirect } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { notFound } from "next/navigation";
+import { createSupabaseAnonReadonlyClient } from "@/lib/supabase/server";
 import { slugSchema, resolvePublicTenant } from "@/lib/server/site-engine";
 import { getBusinessAvailability } from "@/lib/server/booking";
 import BookingClientForm from "./BookingClientForm";
@@ -66,7 +66,7 @@ export default async function PublicBookingPage(props: PublicBookingPageProps) {
   const result = await resolvePublicTenant({ slug: parsed.data });
   if (result._tag !== "Found") notFound();
   const { site, tenantId } = result;
-  const supabase = await createSupabaseServerClient();
+  const supabase = createSupabaseAnonReadonlyClient();
   const services = await supabase
     .from("services")
     .select("id,name,duration_minutes,price_from,currency,active")
@@ -79,9 +79,7 @@ export default async function PublicBookingPage(props: PublicBookingPageProps) {
   const csrfToken = safeToken(ck.get(CSRF_COOKIE_NAME)?.value);
   const sp = (await props.searchParams) ?? {};
   const existing = sp["_csrf"] as string | undefined;
-  if (!existing || existing.length < 16 || existing !== csrfToken) {
-    redirect(`/s/${encodeURIComponent(site.slug)}/booking?_csrf=${encodeURIComponent(csrfToken)}`);
-  }
+  const tokenToUse = existing && existing.length >= 16 ? existing : csrfToken;
   return (
     <main id="main-content" className="min-h-screen bg-neutral-50 pb-20 pt-12">
       <div className="mx-auto max-w-3xl px-4">
@@ -96,7 +94,7 @@ export default async function PublicBookingPage(props: PublicBookingPageProps) {
       </div>
       <BookingClientForm
         slug={site.slug}
-        csrfToken={csrfToken}
+        csrfToken={tokenToUse}
         services={(services.data ?? []) as ServiceRow[]}
         availability={availability}
         timezone={site.timezone || "Europe/Rome"}

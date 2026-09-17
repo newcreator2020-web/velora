@@ -262,8 +262,20 @@ describe("FASE5 §45 integration resolver → ordered sections", () => {
     expect(r1._tag).toBe("NotFound");
   });
 
-  it("C minimal = default deterministic: Hero + Contact (C ha description NULL)", async () => {
+  it("C minimal = default deterministic: Hero + Contact + Staff/Gallery/Reviews/BookingWidget (engine default 2026-09, C ha description NULL + nessuna site_sections rows)", async () => {
+    // Documentazione aggiornata 2026-09-16 Final Gate T1:
+    // Content Engine v3 default fallback per tenant NUOVO senza site_sections rows e description=NULL
+    // genera 6 sezioni (hero, staff, gallery, reviews, contact, booking_widget) invece delle storiche 2.
+    // Istanze tonino/dry-tenant/barber-a pubblicate NON usano questo fallback (hanno site_sections + bp ok).
+    // Questo test verifica il deterministic corrente dopo GATE22 empty-state refactor 2026-09.
     const c = await expectSite("velora-itg-c");
-    expect(c.sections.map((x) => x.type)).toStrictEqual(["hero", "contact"]);
+    expect(c.sections.map((x) => x.type)).toStrictEqual([
+      "hero",
+      "staff",
+      "gallery",
+      "reviews",
+      "contact",
+      "booking_widget",
+    ]);
   });
 });

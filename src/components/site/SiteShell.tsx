@@ -1,5 +1,6 @@
 import type { PublicTheme } from "@/lib/server/content-engine";
 import { applyTheme } from "@/lib/design-tokens/apply";
+import { SectionRevealObserver } from "./SectionRevealObserver";
 
 export function SiteShell(props: {
   theme: PublicTheme;
@@ -171,6 +172,7 @@ export function SiteShell(props: {
       className={`site-shell min-h-screen w-full ${fonts.bodyClass} bg-background text-foreground ${radiusClass}`}
       style={styleVars}
     >
+      <SectionRevealObserver />
       <div className={`${fonts.headingClass}`} data-site-heading-font>
         {props.children}
       </div>

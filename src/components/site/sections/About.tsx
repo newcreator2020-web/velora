@@ -6,6 +6,12 @@ export function AboutSectionComponent(section: AboutSection) {
     return null;
   }
   const eyebrow = section.settings.eyebrow ?? null;
+  const headline =
+    (section.settings.headline &&
+      typeof section.settings.headline === "string" &&
+      section.settings.headline.trim().length > 0 &&
+      section.settings.headline) ||
+    "La nostra attività";
   const variant = section.variant === "split" ? "split" : "centered";
   const align = section.settings.alignment || "center";
 
@@ -55,7 +61,7 @@ export function AboutSectionComponent(section: AboutSection) {
               id="site-about-title"
               className="text-3xl md:text-5xl font-bold tracking-tight text-foreground mb-2 break-words leading-[1.1]"
             >
-              {section.data.businessName}
+              {headline}
             </h2>
             <p className="text-base md:text-lg leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">
               {section.data.description}
@@ -90,7 +96,7 @@ export function AboutSectionComponent(section: AboutSection) {
           id="site-about-title"
           className="text-3xl md:text-4xl font-bold tracking-tight text-foreground mb-3 break-words"
         >
-          {section.data.businessName}
+          {headline}
         </h2>
         <p className="text-base md:text-lg leading-relaxed text-muted-foreground whitespace-pre-wrap break-words">
           {section.data.description}

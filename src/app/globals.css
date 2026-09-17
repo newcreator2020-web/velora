@@ -906,3 +906,603 @@ button[type="submit"] {
 button[type="button"].slot-button {
   min-height: 44px;
 }
+
+/* ============================================================
+   VELORA DESIGN SYSTEM — PREMIUM (P2: Typography/Button/Image/Motion)
+   ============================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ------- Typography helpers (apply tokens clamp scale) ------- */
+.typo-display {
+  font-family: var(--theme-font-family-heading);
+  font-weight: var(--theme-font-weight-heading);
+  font-size: var(--t-fs-display);
+  line-height: var(--t-lh-heading);
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+.typo-h1 {
+  font-family: var(--theme-font-family-heading);
+  font-weight: var(--theme-font-weight-heading);
+  font-size: var(--t-fs-h1);
+  line-height: var(--t-lh-heading);
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+.typo-h2 {
+  font-family: var(--theme-font-family-heading);
+  font-weight: var(--theme-font-weight-heading);
+  font-size: var(--t-fs-h2);
+  line-height: var(--t-lh-subhead);
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.typo-h3 {
+  font-family: var(--theme-font-family-heading);
+  font-weight: var(--theme-font-weight-heading);
+  font-size: var(--t-fs-h3);
+  line-height: 1.2;
+  letter-spacing: -0.005em;
+  text-wrap: balance;
+}
+.typo-h4 {
+  font-family: var(--theme-font-family-heading);
+  font-weight: var(--theme-font-weight-heading);
+  font-size: var(--t-fs-h4);
+  line-height: 1.3;
+  text-wrap: balance;
+}
+.typo-body {
+  font-family: var(--theme-font-family-body);
+  font-size: var(--t-fs-body);
+  line-height: var(--t-lh-body);
+  font-weight: var(--theme-font-weight-body);
+  color: var(--foreground);
+  max-width: var(--t-measure);
+}
+.typo-lead {
+  font-size: var(--t-fs-lead);
+  line-height: 1.6;
+  color: var(--muted-foreground);
+  max-width: var(--t-measure-wide);
+  text-wrap: pretty;
+}
+.typo-small {
+  font-size: var(--t-fs-small);
+  line-height: 1.55;
+}
+.typo-eyebrow {
+  font-family: var(--theme-font-family-body);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--primary);
+  opacity: 0.85;
+}
+.measure {
+  max-width: var(--t-measure);
+}
+.measure-narrow {
+  max-width: var(--t-measure-narrow);
+}
+.measure-wide {
+  max-width: var(--t-measure-wide);
+}
+
+/* ------- Button System (P2.5) ------- */
+.btn {
+  --btn-py: 0.75rem;
+  --btn-px: 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 3rem;
+  padding: var(--btn-py) var(--btn-px);
+  border-radius: var(--radius);
+  font-family: var(--theme-font-family-body);
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+  border: 1px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    opacity var(--theme-motion-hover-duration) ease,
+    transform var(--theme-motion-hover-duration) ease,
+    background var(--theme-motion-hover-duration) ease,
+    color var(--theme-motion-hover-duration) ease,
+    border-color var(--theme-motion-hover-duration) ease,
+    box-shadow var(--theme-motion-hover-duration) ease;
+}
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring);
+}
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.99);
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  box-shadow: var(--shadow-base);
+}
+.btn-primary:hover:not(:disabled) {
+  opacity: 0.92;
+  box-shadow: var(--shadow-lg);
+}
+
+.btn-secondary {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  border-color: var(--border);
+}
+.btn-secondary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--secondary) 88%, var(--foreground) 12%);
+}
+
+.btn-outline {
+  background: transparent;
+  color: var(--foreground);
+  border: 1.5px solid var(--border);
+}
+.btn-outline:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--foreground);
+  border-color: transparent;
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--muted);
+  color: var(--primary);
+}
+
+.btn-lg {
+  min-height: 3.5rem;
+  --btn-py: 0.95rem;
+  --btn-px: 1.75rem;
+  font-size: 1rem;
+  border-radius: var(--radius);
+}
+.btn-sm {
+  min-height: 2.25rem;
+  --btn-py: 0.4rem;
+  --btn-px: 0.875rem;
+  font-size: 0.8125rem;
+}
+.btn-full {
+  width: 100%;
+}
+
+.btn[aria-busy="true"],
+.btn.is-loading {
+  pointer-events: none;
+  position: relative;
+  color: transparent !important;
+}
+.btn[aria-busy="true"]::after,
+.btn.is-loading::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: -0.55rem 0 0 -0.55rem;
+  border: 2px solid currentColor;
+  border-top-color: transparent !important;
+  border-radius: 9999px;
+  color: inherit;
+  opacity: 0.9;
+  animation: btn-spin 0.7s linear infinite;
+}
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ------- Image System (P2.6) ------- */
+.img-frame {
+  position: relative;
+  overflow: hidden;
+  background: var(--muted);
+  border-radius: var(--radius);
+}
+.img-frame img,
+.img-frame .next-image {
+  filter: var(--theme-photography-filter);
+  transition: transform var(--theme-motion-duration) var(--theme-motion-easing);
+}
+.img-frame:hover img,
+.img-frame:hover .next-image {
+  transform: scale(1.03);
+}
+.img-aspect-1-1 {
+  aspect-ratio: 1 / 1;
+}
+.img-aspect-4-3 {
+  aspect-ratio: 4 / 3;
+}
+.img-aspect-3-4 {
+  aspect-ratio: 3 / 4;
+}
+.img-aspect-4-5 {
+  aspect-ratio: 4 / 5;
+}
+.img-aspect-16-9 {
+  aspect-ratio: 16 / 9;
+}
+.img-aspect-2-3 {
+  aspect-ratio: 2 / 3;
+}
+.img-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--muted);
+  border-radius: var(--radius);
+}
+.img-skeleton::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    color-mix(in srgb, var(--muted-foreground) 8%, transparent) 50%,
+    transparent 80%
+  );
+  background-size: 200% 100%;
+  transform: translateX(-20%);
+  animation: skeleton-shimmer 1.6s linear infinite;
+}
+@keyframes skeleton-shimmer {
+  from {
+    transform: translateX(-40%);
+  }
+  to {
+    transform: translateX(40%);
+  }
+}
+
+/* ------- Section Padding helpers (apply DS tokens) ------- */
+.sec {
+  width: 100%;
+  padding: var(--t-section-py) var(--t-section-px);
+}
+.sec-sm {
+  width: 100%;
+  padding: var(--t-section-py-sm) var(--t-section-px);
+}
+.sec-lg {
+  width: 100%;
+  padding: var(--t-section-py-lg) var(--t-section-px);
+}
+
+/* ------- Section reveal entrances (P17 micro-interactions) ------- */
+.reveal {
+  opacity: 0;
+  transform: translateY(1rem);
+  transition:
+    opacity var(--theme-motion-duration) var(--theme-motion-easing),
+    transform var(--theme-motion-duration) var(--theme-motion-easing);
+}
+.reveal.reveal--in {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ============================================================
+   VELORA DS EXT — PHASE 4 BOOKING PREMIUM + TOKEN ALIAS
+   ============================================================ */
+
+/* --- Typography variants display level --- */
+.typo-display-h2 {
+  font-family: var(--theme-font-family-heading);
+  font-weight: var(--theme-font-weight-heading);
+  font-size: var(--t-fs-display-h2, var(--t-fs-h1, clamp(1.75rem, 1.5rem + 1.5vw, 2.75rem)));
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+  color: var(--foreground);
+}
+.typo-display-h4 {
+  font-family: var(--theme-font-family-heading);
+  font-weight: var(--theme-font-weight-heading);
+  font-size: var(--t-fs-display-h4, var(--t-fs-h4, 1.25rem));
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.eyebrow {
+  font-family: var(--theme-font-family-body);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--primary);
+  opacity: 0.88;
+  line-height: 1.4;
+}
+
+/* --- Container default (apply DS max-width tokens) --- */
+.container {
+  width: 100%;
+  max-width: var(--t-container, 80rem);
+  margin-left: auto;
+  margin-right: auto;
+}
+.container-default {
+  padding-inline: var(--t-section-px, 1rem);
+}
+
+/* --- Design Token Alias Utilities (map CSS vars to utility class names) --- */
+.bg-primary {
+  background-color: var(--primary);
+}
+.bg-background {
+  background-color: var(--background);
+}
+.bg-muted {
+  background-color: var(--muted);
+}
+.bg-destructive {
+  background-color: hsl(var(--destructive, 0 72% 51%));
+}
+
+.text-primary {
+  color: var(--primary);
+}
+.text-primary-foreground {
+  color: var(--primary-foreground);
+}
+.text-foreground {
+  color: var(--foreground);
+}
+.text-muted {
+  color: var(--muted-foreground);
+}
+.text-destructive {
+  color: hsl(var(--destructive, 0 72% 51%));
+}
+
+.border-border {
+  border-color: var(--border);
+}
+.ring-ring {
+  --tw-ring-color: var(--ring, var(--primary));
+}
+
+.bg-primary\/5 {
+  background-color: color-mix(in srgb, var(--primary) 5%, transparent);
+}
+.bg-primary\/10 {
+  background-color: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+.bg-destructive\/5 {
+  background-color: color-mix(in srgb, hsl(var(--destructive, 0 72% 51%)) 5%, transparent);
+}
+.border-primary\/20 {
+  border-color: color-mix(in srgb, var(--primary) 20%, var(--border));
+}
+.border-destructive\/30 {
+  border-color: color-mix(in srgb, hsl(var(--destructive, 0 72% 51%)) 30%, var(--border));
+}
+
+/* --- Booking Form Components (P11) --- */
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+.form-label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--foreground);
+  letter-spacing: -0.005em;
+}
+.form-input {
+  width: 100%;
+  min-height: 3rem;
+  padding: 0.75rem 0.875rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--foreground);
+  background-color: var(--background);
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 0.75rem);
+  outline: none;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background-color 0.15s ease;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.form-input::placeholder {
+  color: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+}
+.form-input:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--border) 72%, var(--foreground) 28%);
+}
+.form-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+.form-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background-color: var(--muted);
+}
+textarea.form-input {
+  min-height: 6rem;
+  resize: vertical;
+  font-family: inherit;
+}
+.form-hint {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  line-height: 1.5;
+}
+.form-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 0.75rem);
+  background-color: var(--background);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.form-checkbox:hover {
+  border-color: color-mix(in srgb, var(--border) 72%, var(--foreground) 28%);
+}
+.form-checkbox:has(input:checked) {
+  border-color: var(--primary);
+  background-color: color-mix(in srgb, var(--primary) 4%, var(--background));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 10%, transparent);
+}
+.form-checkbox-input {
+  margin-top: 0.15rem;
+  flex-shrink: 0;
+  width: 1.15rem;
+  height: 1.15rem;
+  accent-color: var(--primary);
+  cursor: pointer;
+  border-radius: 4px;
+}
+.form-checkbox-label {
+  font-size: 0.875rem;
+  color: var(--foreground);
+  line-height: 1.55;
+}
+
+/* --- Button motion micro-interactions (P17 reduced-motion safe) --- */
+.btn-motion {
+  position: relative;
+  will-change: transform;
+}
+@media not (prefers-reduced-motion: reduce) {
+  .btn-motion:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+  .btn-motion:active:not(:disabled) {
+    transform: translateY(0) scale(0.99);
+  }
+}
+
+/* --- Motion-safe wrapper (mirrors Tailwind v3 motion-safe variant behavior) --- */
+@media (prefers-reduced-motion: reduce) {
+  .motion-safe\:transition,
+  [class*="motion-safe\\:"] {
+    transition: none !important;
+    animation: none !important;
+    transform: none !important;
+  }
+}
+@media not (prefers-reduced-motion: reduce) {
+  .motion-safe\:transition {
+    transition-property: color, background-color, border-color, opacity, box-shadow, transform;
+  }
+  .motion-safe\:duration-150 {
+    transition-duration: 150ms;
+  }
+  .motion-safe\:ease-out {
+    transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .motion-safe\:hover\:-translate-y-0\.5:hover {
+    transform: translateY(-2px);
+  }
+  .motion-safe\:hover\:shadow-sm:hover {
+    box-shadow: var(--shadow-base, 0 1px 3px rgb(0 0 0 / 8%));
+  }
+  .motion-safe\:active\:scale-\[0\.98\]:active {
+    transform: scale(0.98);
+  }
+  .motion-safe\:animate-in {
+    animation: vds-fade-in-up 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .motion-safe\:fade-in {
+    animation-name: vds-fade-in;
+  }
+  .motion-safe\:zoom-in-95 {
+    animation-name: vds-zoom-in-95;
+  }
+  .motion-safe\:slide-in-from-top-1 {
+    animation-name: vds-slide-in-from-top-1;
+  }
+}
+@keyframes vds-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes vds-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes vds-zoom-in-95 {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes vds-slide-in-from-top-1 {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* --- Booking shell card radius / hover --- */
+.booking-card {
+  border-radius: calc(var(--radius, 1rem) + 0.25rem);
+}

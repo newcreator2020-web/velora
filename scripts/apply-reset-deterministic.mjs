@@ -60,6 +60,35 @@ ALTER TABLE public.tenant_memberships ENABLE TRIGGER tg_guard_last_active_owner;
 COMMIT;`;
 
 async function main() {
+  const ALLOWED = process.env.VELORA_ALLOW_GLOBAL_RESET === "I-KNOW-THIS-DESTROYS-ALL-TENANTS";
+  if (!ALLOWED) {
+    console.error(
+      "[RESET DETERMINISTIC] GLOBAL RESET BLOCKED.\n" +
+        "Per eseguire un reset globale MANUALE devi esportare la guardia:\n" +
+        '  export VELORA_ALLOW_GLOBAL_RESET="I-KNOW-THIS-DESTROYS-ALL-TENANTS"\n' +
+        "(PowerShell: $env:VELORA_ALLOW_GLOBAL_RESET='I-KNOW-THIS-DESTROYS-ALL-TENANTS')\n" +
+        "Questo comportamento evita che script QA o di routine chiamino apply-reset-deterministic come fallback automatico distruttivo.\n" +
+        "Se devi fare seed iniziale o ripristinare da zero, imposta la variabile e riesegui.",
+    );
+    process.exit(1);
+  }
+  if (process.stdout.isTTY) {
+    const readline = await import("node:readline/promises").catch(() => null);
+    if (readline) {
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      try {
+        const ans = await rl.question(
+          "[RESET DETERMINISTIC] Confermi distruzione TUTTI i tenant/services/bookings? (digita YES-ALL-DATA-LOST per confermare): ",
+        );
+        if (ans.trim() !== "YES-ALL-DATA-LOST") {
+          console.error("[RESET DETERMINISTIC] Aborted by user.");
+          process.exit(2);
+        }
+      } finally {
+        rl.close();
+      }
+    }
+  }
   const pg = new PgClient(buildPgOpts());
   await pg.connect();
   try {

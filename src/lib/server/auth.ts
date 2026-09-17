@@ -206,16 +206,32 @@ export async function getCurrentTenantContext(): Promise<TenantContext> {
     .limit(1)
     .maybeSingle();
 
-  const membership = await supabase
+  const membershipRows = await supabase
     .from("tenant_memberships")
     .select("id,tenant_id,role,status")
     .eq("user_id", user.id)
     .eq("status", "active")
-    .order("role", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .order("role", { ascending: false });
+  const allMemberships = (membershipRows.data as TenantContext["membership"][] | null) ?? [];
 
-  let mRow = membership.data as TenantContext["membership"] | null;
+  let mRow: TenantContext["membership"] | null = null;
+  for (const candRaw of allMemberships) {
+    const cand = candRaw as NonNullable<typeof candRaw> | null;
+    if (!cand) continue;
+    const tCheck = await supabase
+      .from("tenants")
+      .select("id,status")
+      .eq("id", cand.tenant_id)
+      .limit(1)
+      .maybeSingle();
+    const tOk = tCheck.data && (tCheck.data as { status?: string }).status !== "onboarding";
+    if (tOk) {
+      mRow = cand;
+      break;
+    }
+  }
+  if (!mRow && allMemberships.length > 0)
+    mRow = (allMemberships[0] ?? null) as TenantContext["membership"] | null;
   let tenant: Tables<"tenants"> | null = null;
   let bp: Tables<"business_profiles"> | null = null;
 

@@ -30,6 +30,8 @@ type PublicBookingFormProps = {
   timezone: string;
   horizonDays?: number;
   slotsApiBase?: string;
+  businessName?: string;
+  businessAddress?: string;
 };
 
 const CSRF_COOKIE_NAME = "velora_csrf_token";
@@ -148,11 +150,39 @@ declare global {
 }
 
 export default function PublicBookingForm(props: PublicBookingFormProps) {
-  const { slug, csrfToken: csrfTokenProp, services, availability, timezone, slotsApiBase } = props;
+  const {
+    slug,
+    csrfToken: csrfTokenProp,
+    services,
+    availability,
+    timezone,
+    slotsApiBase,
+    businessName: businessNameProp,
+    businessAddress: businessAddressProp,
+  } = props;
+  const businessName = businessNameProp && businessNameProp.length > 0 ? businessNameProp : slug;
+  const businessAddress = businessAddressProp ?? "";
   const csrfToken =
     (csrfTokenProp && csrfTokenProp.length >= 16 ? csrfTokenProp : null) ??
     readCookie(CSRF_COOKIE_NAME) ??
     safeRandomToken();
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (!csrfToken || csrfToken.length < 16) return;
+    const existing = readCookie(CSRF_COOKIE_NAME);
+    if (existing === csrfToken) return;
+    const secure = typeof window !== "undefined" && window.location.protocol === "https:";
+    const parts = [
+      `${CSRF_COOKIE_NAME}=${encodeURIComponent(csrfToken)}`,
+      "path=/",
+      "SameSite=Lax",
+      `max-age=${60 * 60}`,
+    ];
+    if (secure) parts.push("Secure");
+    document.cookie = parts.join("; ");
+  }, [csrfToken]);
+
   const slotsBase = slotsApiBase ?? `/s/${encodeURIComponent(slug)}/booking/slots`;
   const activeServices = useMemo(
     () => services.filter((s) => s.active && s.duration_minutes && s.duration_minutes > 0),
@@ -306,49 +336,6 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
     };
   }, [serviceId, slug]);
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!serviceId) {
-      queueMicrotask(() => setSlots([]));
-      return;
-    }
-    const svc = activeServices.find((s) => s.id === serviceId);
-    if (!svc) {
-      queueMicrotask(() => setSlots([]));
-      return;
-    }
-    queueMicrotask(() => setLoading(true));
-    const params = new URLSearchParams({
-      service_id: serviceId,
-      date,
-      resource_slug: resourceSlug || "any",
-    });
-    const url = `${slotsBase}?${params.toString()}`;
-    const doFetch = (attempt: number) => {
-      if (cancelled) return;
-      fetch(url)
-        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.statusText))))
-        .then((data) => {
-          if (!cancelled) setSlots((data?.slots ?? []) as Slot[]);
-        })
-        .catch(() => {
-          if (cancelled) return;
-          if (attempt === 0) {
-            setTimeout(() => doFetch(1), 500);
-            return;
-          }
-          setSlots([]);
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
-    };
-    doFetch(0);
-    return () => {
-      cancelled = true;
-    };
-  }, [serviceId, date, slug, resourceSlug, activeServices, slotsBase]);
-
   const weekdayOfSelected = useMemo(() => {
     const parts = date.split("-");
     const y = Number(parts[0]);
@@ -417,18 +404,168 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
   const declareError = declareFormState?.declare_error ?? declareFormState?.fieldErrors?.declare;
   const declareOk = declareFormState?.bank_declared?.ok === true;
 
+  const selectedService = activeServices.find((s) => s.id === serviceId) || null;
+  const slotsFetchFailedRef = useRef(false);
+  const [slotsFetchFailed, setSlotsFetchFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!serviceId) {
+      queueMicrotask(() => {
+        setSlots([]);
+        setSlotsFetchFailed(false);
+        slotsFetchFailedRef.current = false;
+      });
+      return;
+    }
+    const svc = activeServices.find((s) => s.id === serviceId);
+    if (!svc) {
+      queueMicrotask(() => {
+        setSlots([]);
+        setSlotsFetchFailed(false);
+        slotsFetchFailedRef.current = false;
+      });
+      return;
+    }
+    slotsFetchFailedRef.current = false;
+    queueMicrotask(() => {
+      setLoading(true);
+      setSlotsFetchFailed(false);
+    });
+    const params = new URLSearchParams({
+      service_id: serviceId,
+      date,
+      resource_slug: resourceSlug || "any",
+    });
+    const url = `${slotsBase}?${params.toString()}`;
+    const doFetch = (attempt: number) => {
+      if (cancelled) return;
+      fetch(url)
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.statusText))))
+        .then((data) => {
+          if (cancelled) return;
+          setSlots((data?.slots ?? []) as Slot[]);
+          slotsFetchFailedRef.current = false;
+          setSlotsFetchFailed(false);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          if (attempt === 0) {
+            setTimeout(() => doFetch(1), 500);
+            return;
+          }
+          setSlots([]);
+          slotsFetchFailedRef.current = true;
+          setSlotsFetchFailed(true);
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    };
+    doFetch(0);
+    return () => {
+      cancelled = true;
+    };
+  }, [serviceId, date, slug, resourceSlug, activeServices, slotsBase]);
+
   return (
     <section
       aria-labelledby="booking-heading"
-      className="mx-auto my-10 max-w-3xl rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm"
+      className="booking-card rounded-2xl border border-border bg-background p-5 sm:p-7 shadow-sm reveal"
     >
       <header className="mb-6">
-        <h1 id="booking-heading" className="text-2xl font-semibold">
-          Prenota un appuntamento
-        </h1>
-        <p className="mt-1 text-sm text-neutral-600">
-          Scegli servizio, professionista, giorno e orario disponibile. Conferma con i tuoi dati.
-        </p>
+        {selectedService || slot ? (
+          <div
+            role="region"
+            aria-label="Riepilogo prenotazione"
+            className={
+              "booking-summary sticky top-2 z-20 mb-5 rounded-xl border border-border bg-background/70 backdrop-blur p-3 sm:p-4 shadow-[0_2px_20px_rgba(0,0,0,0.06)] transition " +
+              (selectedService || slot
+                ? "opacity-100 translate-y-0"
+                : "opacity-0 pointer-events-none -translate-y-2")
+            }
+            data-visible={!!(selectedService || slot)}
+          >
+            <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+              <div className="flex-1 min-w-0">
+                <div className="text-[11px] uppercase tracking-wider text-muted font-semibold mb-0.5">
+                  Riepilogo
+                </div>
+                <div className="typo-body font-medium text-foreground truncate">
+                  {selectedService?.name || "Scegli servizio"}
+                </div>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-muted">
+                  {selectedService?.duration_minutes ? (
+                    <span className="inline-flex items-center gap-1">
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <circle cx="12" cy="12" r="10" />
+                        <polyline points="12 6 12 12 16 14" />
+                      </svg>
+                      {selectedService.duration_minutes} min
+                    </span>
+                  ) : null}
+                  {slot ? (
+                    <span className="inline-flex items-center gap-1 font-semibold text-foreground">
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                        <line x1="16" y1="2" x2="16" y2="6" />
+                        <line x1="8" y1="2" x2="8" y2="6" />
+                        <line x1="3" y1="10" x2="21" y2="10" />
+                      </svg>
+                      {slot.label}
+                    </span>
+                  ) : null}
+                  {multiMode && resourceSlug !== "any" ? (
+                    <span className="text-muted">
+                      {resources.find((r) => r.resource_slug === resourceSlug)
+                        ?.resource_display_name || null}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-[11px] uppercase tracking-wider text-muted font-semibold">
+                  Prezzo
+                </div>
+                <div className="typo-display-h4 font-bold text-primary">
+                  {selectedService && selectedService.price_from != null
+                    ? `${selectedService.price_from.toFixed(2)} ${selectedService.currency ?? "€"}`
+                    : "—"}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            <h1 id="booking-heading" className="typo-display-h2 text-foreground">
+              Prenota un appuntamento
+            </h1>
+            <p className="typo-body text-muted mt-2">
+              Scegli servizio, professionista, giorno e orario disponibile. Conferma con i tuoi
+              dati.
+            </p>
+          </>
+        )}
       </header>
 
       <form
@@ -444,11 +581,14 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
         <input type="hidden" name="resource_slug" value={resourceSlug || "any"} />
         <input type="hidden" name="privacy_accepted" value={privacyAccepted ? "1" : "0"} />
 
-        <div role="status" aria-live="polite" className="sm:col-span-2 sticky top-3 z-30">
+        <div role="status" aria-live="polite" className="sm:col-span-2">
           {formState && !formState.ok && (
-            <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div
+              className="mb-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-1"
+              role="alert"
+            >
               {fieldErrors?.booking && (
-                <div className="mb-1 font-medium">{fieldErrors.booking}</div>
+                <div className="mb-1 font-semibold">{fieldErrors.booking}</div>
               )}
               <div>
                 {formState.error ??
@@ -456,81 +596,149 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
                   "Errore durante la prenotazione. Riprova tra qualche secondo."}
               </div>
               {formState.error_code && (
-                <div className="mt-1 text-xs text-red-500/80">codice: {formState.error_code}</div>
+                <div className="mt-1 text-[11px] text-destructive/70">
+                  codice: {formState.error_code}
+                </div>
               )}
-            </div>
-          )}
-          {formState?.ok && !formState.redirectToCheckout && (
-            <div
-              className="mb-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800"
-              data-testid="booking-created"
-            >
-              Prenotazione confermata. Ti aspettiamo!
-              <br />
-              <span className="text-xs text-emerald-700">
-                <ClientFormattedDate
-                  iso={formState.booking?.starts_at}
-                  tz={timezone}
-                  placeholder="data e ora appuntamento"
-                />
-                {" · "}
-                codice: {(formState.booking?.booking_id ?? "").substring(0, 8)}
-                {formState.booking?.resource_display_name
-                  ? ` · con ${formState.booking.resource_display_name}`
-                  : ""}
-              </span>
             </div>
           )}
           {formState?.ok && formState.redirectToCheckout && (
             <div
-              className="mb-3 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800"
+              className="mb-3 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary"
               role="status"
               aria-live="polite"
             >
               Reindirizzamento al pagamento sicuro in corso…
               <br />
-              <span className="text-xs text-sky-700">
+              <span className="text-[11px] uppercase tracking-wide opacity-80">
                 Stiamo per aprirti la pagina di pagamento della caparra.
               </span>
             </div>
           )}
         </div>
 
+        {formState?.ok && !formState.redirectToCheckout && (
+          <div
+            className="sm:col-span-2 motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95"
+            data-testid="booking-created"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="rounded-2xl border border-primary/25 bg-gradient-to-br from-primary/[0.07] via-background to-background p-6 shadow-sm">
+              <div className="flex items-start gap-4">
+                <div
+                  className="shrink-0 rounded-full bg-primary/15 p-3 text-primary"
+                  aria-hidden="true"
+                >
+                  <svg
+                    width="24"
+                    height="24"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h2 className="typo-h3 text-foreground mb-1">Prenotazione confermata!</h2>
+                  <p className="typo-body text-muted-foreground">
+                    Ti aspettiamo. Riceverai a breve una email con tutti i dettagli.
+                  </p>
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                    <div className="rounded-lg bg-background p-3 ring-1 ring-primary/15">
+                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold mb-1">
+                        Data e ora
+                      </div>
+                      <div className="font-semibold text-foreground">
+                        <ClientFormattedDate
+                          iso={formState.booking?.starts_at}
+                          tz={timezone}
+                          placeholder="data e ora appuntamento"
+                        />
+                      </div>
+                    </div>
+                    <div className="rounded-lg bg-background p-3 ring-1 ring-primary/15">
+                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold mb-1">
+                        Codice
+                      </div>
+                      <div className="font-mono font-bold text-foreground">
+                        {(formState.booking?.booking_id ?? "").substring(0, 8).toUpperCase()}
+                      </div>
+                    </div>
+                    {formState.booking?.resource_display_name ? (
+                      <div className="rounded-lg bg-background p-3 ring-1 ring-primary/15">
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold mb-1">
+                          Operatore
+                        </div>
+                        <div className="font-semibold text-foreground">
+                          {formState.booking.resource_display_name}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    <BookingCalendarIcsLink
+                      startsAt={formState.booking?.starts_at ?? null}
+                      endsAt={formState.booking?.ends_at ?? null}
+                      serviceName={
+                        activeServices.find((s) => s.id === serviceId)?.name ?? "Appuntamento"
+                      }
+                      businessName={businessName}
+                      location={businessAddress}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {formState?.ok && needDeposit && (
           <div className="sm:col-span-2">
             <div
               aria-labelledby="deposit-heading"
-              className="rounded-xl border border-sky-200 bg-gradient-to-br from-sky-50 via-white to-white p-5 shadow-sm"
+              className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/5 via-background to-background p-5 sm:p-6 shadow-sm"
             >
-              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h2 id="deposit-heading" className="text-lg font-semibold text-sky-900">
+                  <h2
+                    id="deposit-heading"
+                    className="typo-h3 text-primary-foreground/90 bg-primary/90 inline-block px-3 py-1 rounded-md text-white text-sm font-semibold mb-2"
+                  >
                     Caparra di conferma
                   </h2>
-                  <p className="mt-0.5 text-sm text-neutral-600">
+                  <p className="typo-body text-muted">
                     Per confermare definitivamente l&apos;appuntamento, effettua un bonifico
                     bancario con la caparra indicata entro 24 ore.
                   </p>
                 </div>
-                <div className="mt-2 rounded-lg bg-white px-4 py-2 text-right ring-1 ring-sky-200 sm:mt-0">
-                  <div className="text-xs uppercase tracking-wide text-neutral-500">Caparra</div>
-                  <div className="text-2xl font-bold text-sky-700">{fmtEuro(depositCents)}</div>
-                  <div className="text-xs text-neutral-500">
+                <div className="mt-2 sm:mt-0 rounded-xl bg-background px-5 py-3 text-right ring-1 ring-border">
+                  <div className="text-[11px] uppercase tracking-wide text-muted font-semibold">
+                    Caparra
+                  </div>
+                  <div className="text-3xl font-bold text-primary tabular-nums">
+                    {fmtEuro(depositCents)}
+                  </div>
+                  <div className="text-xs text-muted">
                     su importo totale {fmtEuro(paymentInfo?.total_price_cents ?? null)}
                   </div>
                 </div>
               </div>
 
-              <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="rounded-lg bg-white p-4 ring-1 ring-neutral-200">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+              <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="rounded-xl bg-background p-5 ring-1 ring-border">
+                  <div className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-muted">
                     Coordinate bancarie
                   </div>
-                  <dl className="space-y-1.5 text-sm">
+                  <dl className="space-y-2 text-sm">
                     {bankInfo?.bank_name ? (
                       <>
-                        <dt className="inline text-neutral-500">Banca: </dt>
-                        <dd className="inline font-medium text-neutral-900">
+                        <dt className="inline text-muted">Banca: </dt>
+                        <dd className="inline font-semibold text-foreground">
                           {bankInfo.bank_name}
                         </dd>
                         <br />
@@ -538,8 +746,8 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
                     ) : null}
                     {bankInfo?.account_holder ? (
                       <>
-                        <dt className="inline text-neutral-500">Intestatario: </dt>
-                        <dd className="inline font-medium text-neutral-900 break-all">
+                        <dt className="inline text-muted">Intestatario: </dt>
+                        <dd className="inline font-semibold text-foreground break-all">
                           {bankInfo.account_holder}
                         </dd>
                         <br />
@@ -547,8 +755,8 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
                     ) : null}
                     {bankInfo?.iban ? (
                       <>
-                        <dt className="inline text-neutral-500">IBAN: </dt>
-                        <dd className="inline font-mono text-[13px] font-semibold text-neutral-900 break-all select-all">
+                        <dt className="inline text-muted">IBAN: </dt>
+                        <dd className="inline font-mono text-[13px] font-bold text-foreground break-all select-all">
                           {bankInfo.iban}
                         </dd>
                         <br />
@@ -556,42 +764,42 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
                     ) : null}
                     {bankInfo?.bic_swift ? (
                       <>
-                        <dt className="inline text-neutral-500">BIC / SWIFT: </dt>
-                        <dd className="inline font-mono text-[13px] font-medium text-neutral-900 select-all">
+                        <dt className="inline text-muted">BIC / SWIFT: </dt>
+                        <dd className="inline font-mono text-[13px] font-semibold text-foreground select-all">
                           {bankInfo.bic_swift}
                         </dd>
                       </>
                     ) : null}
                   </dl>
                 </div>
-                <div className="rounded-lg bg-white p-4 ring-1 ring-neutral-200">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                <div className="rounded-xl bg-background p-5 ring-1 ring-border">
+                  <div className="mb-3 text-[11px] font-semibold uppercase tracking-wide text-muted">
                     Causale bonifico
                   </div>
-                  <div className="rounded-md bg-sky-50 p-3 font-medium text-sky-900 break-all select-all ring-1 ring-sky-200/60">
+                  <div className="rounded-lg bg-primary/10 p-3 font-semibold text-primary/90 break-all select-all ring-1 ring-primary/20">
                     {buildCausale(paymentInfo, formState.booking?.booking_id)}
                   </div>
-                  <p className="mt-3 text-xs text-neutral-500">
-                    Scadenza: entro 24 ore dalla prenotazione. In caso di mancato ricevimento
-                    l&apos;appuntamento potrebbe essere annullato.
+                  <p className="mt-3 text-xs text-muted">
+                    Scadenza: entro 24 ore. In caso di mancato ricevimento l&apos;appuntamento
+                    potrebbe essere annullato.
                   </p>
                 </div>
               </div>
 
-              <div className="mt-5">
+              <div className="mt-6">
                 {declareOk ? (
                   <div
                     role="status"
                     aria-live="polite"
-                    className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
+                    className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800"
                   >
-                    <div className="font-semibold">Grazie! Conferma ricevuta.</div>
-                    <p className="mt-1 text-emerald-700/90">
+                    <div className="font-semibold text-base mb-1">Grazie! Conferma ricevuta.</div>
+                    <p className="text-emerald-700/90">
                       Abbiamo registrato la tua segnalazione di bonifico effettuato.
                       {declareFormState?.bank_declared?.deposit_payment_ref ? (
                         <>
                           <br />
-                          <span className="font-mono text-[12px]">
+                          <span className="font-mono text-[12px] mt-1 inline-block bg-white/60 px-2 py-0.5 rounded">
                             Riferimento: {declareFormState.bank_declared.deposit_payment_ref}
                           </span>
                         </>
@@ -607,7 +815,7 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
                     noValidate
                     className="space-y-3"
                   >
-                    <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
                       Ho già effettuato il bonifico
                     </div>
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -623,9 +831,12 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
                       <div>
                         <label
                           htmlFor="deposit_payment_ref"
-                          className="mb-1 block text-sm font-medium"
+                          className="mb-1.5 block text-sm font-medium text-foreground"
                         >
-                          CRO / Codice riferimento <span aria-hidden="true">*</span>
+                          CRO / Codice riferimento{" "}
+                          <span aria-hidden="true" className="text-destructive">
+                            *
+                          </span>
                         </label>
                         <input
                           id="deposit_payment_ref"
@@ -635,13 +846,13 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
                           maxLength={64}
                           placeholder="es. 12345678901234"
                           autoComplete="off"
-                          className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm"
+                          className="form-input w-full"
                         />
                       </div>
                       <div>
                         <label
                           htmlFor="deposit_payment_note"
-                          className="mb-1 block text-sm font-medium"
+                          className="mb-1.5 block text-sm font-medium text-foreground"
                         >
                           Note opzionali
                         </label>
@@ -650,28 +861,30 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
                           name="deposit_payment_note"
                           maxLength={400}
                           placeholder="Data bonifico, nome ordinante..."
-                          className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm"
+                          className="form-input w-full"
                         />
                       </div>
                     </div>
                     {declareError ? (
                       <div
                         role="alert"
-                        className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+                        className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800"
                       >
                         {declareError}
                       </div>
                     ) : null}
-                    <button
-                      type="submit"
-                      disabled={declarePending}
-                      className="inline-flex items-center justify-center rounded-lg bg-sky-700 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-70"
-                    >
-                      {declarePending ? "Invio in corso…" : "Ho effettuato il bonifico"}
-                    </button>
-                    <p className="text-xs text-neutral-500">
-                      Oppure contatta direttamente la struttura per telefono o WhatsApp.
-                    </p>
+                    <div className="flex flex-wrap items-center gap-3 pt-1">
+                      <button
+                        type="submit"
+                        disabled={declarePending}
+                        className="btn btn-primary btn-motion"
+                      >
+                        {declarePending ? "Invio in corso…" : "Ho effettuato il bonifico"}
+                      </button>
+                      <p className="text-xs text-muted">
+                        Oppure contatta direttamente la struttura per telefono o WhatsApp.
+                      </p>
+                    </div>
                   </form>
                 )}
               </div>
@@ -679,13 +892,13 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
           </div>
         )}
 
-        <div className="sm:col-span-2">
-          <label htmlFor="service" className="mb-1 block text-sm font-medium">
+        <div className="sm:col-span-2 form-field">
+          <label htmlFor="service" className="form-label">
             Servizio
           </label>
           <select
             id="service"
-            className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-3 text-sm min-h-12"
+            className="form-input w-full"
             value={serviceId}
             onChange={(e) => {
               markStarted();
@@ -707,13 +920,13 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
         </div>
 
         {multiMode ? (
-          <div className="sm:col-span-2">
-            <label htmlFor="operator" className="mb-1 block text-sm font-medium">
+          <div className="sm:col-span-2 form-field">
+            <label htmlFor="operator" className="form-label">
               Operatore
             </label>
             <select
               id="operator"
-              className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-3 text-sm min-h-12"
+              className="form-input w-full"
               value={resourceSlug || "any"}
               onChange={(e) => {
                 setResourceSlug(e.target.value);
@@ -730,8 +943,8 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
           </div>
         ) : null}
 
-        <div>
-          <label htmlFor="date" className="mb-1 block text-sm font-medium">
+        <div className="form-field">
+          <label htmlFor="date" className="form-label">
             Giorno
           </label>
           <input
@@ -740,33 +953,67 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
             type="date"
             min={minDate}
             max={maxDate}
-            className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-3 text-sm min-h-12"
+            className="form-input w-full"
             value={date}
             onChange={(e) => {
               setDate(e.target.value);
               setSlot(null);
             }}
           />
-          <p className="mt-1 text-xs text-neutral-500">
-            {avSelected && avSelected.enabled
-              ? `${WEEKDAYS[weekdayOfSelected]} · orario ${avSelected.start_time.substring(0, 5)}–${avSelected.end_time.substring(0, 5)}`
-              : `${WEEKDAYS[weekdayOfSelected]} · chiuso`}
+          <p className="form-hint">
+            {avSelected && avSelected.enabled ? (
+              <span className="inline-flex items-center gap-1">
+                <span
+                  className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500"
+                  aria-hidden="true"
+                />
+                {WEEKDAYS[weekdayOfSelected]} · orario {avSelected.start_time.substring(0, 5)}–
+                {avSelected.end_time.substring(0, 5)}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-muted">
+                <span
+                  className="inline-block w-1.5 h-1.5 rounded-full bg-destructive/70"
+                  aria-hidden="true"
+                />
+                {WEEKDAYS[weekdayOfSelected]} · chiuso
+              </span>
+            )}
           </p>
         </div>
 
-        <div>
-          <span className="mb-1 block text-sm font-medium">Slot disponibili</span>
-          <div className="min-h-[110px] rounded-lg border border-dashed border-neutral-300 bg-neutral-50 p-3">
+        <div className="form-field">
+          <span className="form-label">Slot disponibili</span>
+          <div className="min-h-[128px] rounded-xl border border-dashed border-border bg-muted/25 p-3 sm:p-4">
             {loading ? (
-              <p className="text-sm text-neutral-500">Caricamento slot…</p>
+              <div aria-label="Caricamento slot" role="status">
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <div key={i} className="img-skeleton h-11 rounded-md" aria-hidden="true" />
+                  ))}
+                </div>
+                <p className="sr-only">Caricamento slot…</p>
+              </div>
             ) : !serviceId ? (
-              <p className="text-sm text-neutral-500">Seleziona un servizio.</p>
+              <EmptyState
+                icon="service"
+                title="Seleziona un servizio"
+                subtitle="Scegli un servizio per vedere gli orari disponibili."
+              />
+            ) : slotsFetchFailed ? (
+              <EmptyState
+                icon="error"
+                title="Impossibile caricare gli slot"
+                subtitle="Riprova selezionando un altro giorno o servizio."
+              />
             ) : slots.length === 0 ? (
-              <p className="text-sm text-neutral-500">
-                Nessuno slot disponibile per la giornata. Prova un altro giorno o servizio.
-              </p>
+              <EmptyState
+                icon="calendar"
+                title="Nessuno slot disponibile"
+                subtitle="Prova un altro giorno o servizio, oppure contatta la struttura telefonicamente."
+              />
             ) : (
-              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
                 {slots.map((s) => {
                   const sel = slot?.iso === s.iso;
                   return (
@@ -777,12 +1024,12 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
                       onClick={() => setSlot(s.available ? s : null)}
                       aria-pressed={sel && s.available}
                       className={
-                        "rounded-md border px-2 py-2 text-sm transition min-h-11 slot-button " +
+                        "slot-btn rounded-md border px-2 py-2.5 text-sm font-medium min-h-11 motion-safe:transition motion-safe:duration-150 motion-safe:ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-ring " +
                         (s.available
                           ? sel
-                            ? "border-neutral-900 bg-neutral-900 text-white"
-                            : "border-neutral-300 bg-white hover:bg-neutral-100"
-                          : "cursor-not-allowed border-neutral-200 bg-neutral-100 text-neutral-400 line-through")
+                            ? "border-primary bg-primary text-primary-foreground shadow-sm motion-safe:active:scale-[0.98]"
+                            : "border-border bg-background text-foreground hover:bg-muted hover:border-muted-foreground/20 motion-safe:hover:-translate-y-0.5 motion-safe:hover:shadow-sm"
+                          : "cursor-not-allowed border-border bg-muted text-muted line-through opacity-60")
                       }
                     >
                       {s.label}
@@ -795,9 +1042,12 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
         </div>
 
         <div className="sm:col-span-2 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <label htmlFor="customer_name" className="mb-1 block text-sm font-medium">
-              Nome e cognome <span aria-hidden="true">*</span>
+          <div className="form-field">
+            <label htmlFor="customer_name" className="form-label">
+              Nome e cognome{" "}
+              <span aria-hidden="true" className="text-destructive">
+                *
+              </span>
             </label>
             <input
               id="customer_name"
@@ -806,11 +1056,11 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
               required
               maxLength={120}
               autoComplete="name"
-              className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-3 text-sm min-h-12"
+              className="form-input w-full"
             />
           </div>
-          <div>
-            <label htmlFor="customer_email" className="mb-1 block text-sm font-medium">
+          <div className="form-field">
+            <label htmlFor="customer_email" className="form-label">
               Email
             </label>
             <input
@@ -819,11 +1069,11 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
               type="email"
               maxLength={254}
               autoComplete="email"
-              className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-3 text-sm min-h-12"
+              className="form-input w-full"
             />
           </div>
-          <div>
-            <label htmlFor="customer_phone" className="mb-1 block text-sm font-medium">
+          <div className="form-field">
+            <label htmlFor="customer_phone" className="form-label">
               Telefono
             </label>
             <input
@@ -832,31 +1082,29 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
               type="tel"
               maxLength={32}
               autoComplete="tel"
-              className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-3 text-sm min-h-12"
+              className="form-input w-full"
             />
           </div>
-          <div className="sm:col-span-2">
-            <label htmlFor="notes" className="mb-1 block text-sm font-medium">
-              Note (opzionale, max 500 caratteri)
+          <div className="sm:col-span-2 form-field">
+            <label htmlFor="notes" className="form-label">
+              Note <span className="text-muted font-normal">(opzionale, max 500 caratteri)</span>
             </label>
             <textarea
               id="notes"
               name="notes"
               rows={4}
               maxLength={500}
-              className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-3 text-sm min-h-24"
+              className="form-input w-full"
             />
-            <p className="mt-1 text-xs text-neutral-500">
-              Almeno un contatto tra email e telefono è richiesto.
-            </p>
+            <p className="form-hint">Almeno un contatto tra email e telefono è richiesto.</p>
           </div>
         </div>
 
         <div className="sm:col-span-2">
-          <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition has-[:checked]:border-neutral-900">
+          <label className="form-checkbox">
             <input
               type="checkbox"
-              className="mt-0.5 h-4 w-4 flex-shrink-0 cursor-pointer rounded border-neutral-300 accent-neutral-900"
+              className="form-checkbox-input"
               checked={privacyAccepted}
               onChange={(e) => {
                 markStarted();
@@ -865,11 +1113,11 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
               required
               aria-describedby="privacy-hint"
             />
-            <span id="privacy-hint" className="text-sm text-neutral-700">
+            <span id="privacy-hint" className="form-checkbox-label">
               Dichiaro di aver letto e accettato la{" "}
               <a
                 href={privacyPolicyHref}
-                className="font-medium underline decoration-neutral-400 underline-offset-2 hover:text-neutral-900"
+                className="font-medium underline decoration-primary/50 underline-offset-2 hover:text-primary hover:decoration-primary"
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -879,7 +1127,7 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
               {fieldErrors?.booking ? (
                 <>
                   {" · "}
-                  <span className="font-medium text-red-700">{fieldErrors.booking}</span>
+                  <span className="font-semibold text-destructive">{fieldErrors.booking}</span>
                 </>
               ) : null}
             </span>
@@ -894,14 +1142,201 @@ export default function PublicBookingForm(props: PublicBookingFormProps) {
   );
 }
 
+function EmptyState({
+  icon,
+  title,
+  subtitle,
+}: {
+  icon: "calendar" | "service" | "error";
+  title: string;
+  subtitle?: string;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center py-4 text-center gap-2">
+      <div className="text-muted mb-1" aria-hidden="true">
+        {icon === "calendar" ? (
+          <svg
+            width="28"
+            height="28"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+            <line x1="16" y1="2" x2="16" y2="6" />
+            <line x1="8" y1="2" x2="8" y2="6" />
+            <line x1="3" y1="10" x2="21" y2="10" />
+            <line x1="9" y1="16" x2="15" y2="16" />
+          </svg>
+        ) : icon === "error" ? (
+          <svg
+            width="28"
+            height="28"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+        ) : (
+          <svg
+            width="28"
+            height="28"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+          </svg>
+        )}
+      </div>
+      <div className="text-sm font-medium text-foreground">{title}</div>
+      {subtitle ? <div className="text-xs text-muted max-w-sm">{subtitle}</div> : null}
+    </div>
+  );
+}
+
 function SubmitButton({ disabled, pending }: { disabled: boolean; pending: boolean }) {
   return (
     <button
       type="submit"
       disabled={disabled || pending}
-      className="inline-flex items-center justify-center rounded-lg bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60"
+      className="btn btn-primary btn-lg w-full btn-motion justify-center"
     >
-      {pending ? "Conferma in corso…" : "Conferma prenotazione"}
+      {pending ? (
+        <span className="inline-flex items-center gap-2">
+          <span
+            className="h-4 w-4 shrink-0 rounded-full border-2 border-white/40 border-t-white animate-spin"
+            aria-hidden="true"
+          />
+          Conferma in corso…
+        </span>
+      ) : (
+        "Conferma prenotazione"
+      )}
     </button>
+  );
+}
+
+function toIcsUtc(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    String(d.getUTCFullYear()) +
+    pad(d.getUTCMonth() + 1) +
+    pad(d.getUTCDate()) +
+    "T" +
+    pad(d.getUTCHours()) +
+    pad(d.getUTCMinutes()) +
+    pad(d.getUTCSeconds()) +
+    "Z"
+  );
+}
+
+function buildIcsString(
+  startsAt: string | undefined | null,
+  endsAt: string | undefined | null,
+  summary: string,
+  description: string,
+  location: string,
+): string | null {
+  const start = robustParseIso(startsAt);
+  if (!start) return null;
+  const end = robustParseIso(endsAt) ?? new Date(start.getTime() + 30 * 60 * 1000);
+  const uid =
+    "velora-" + (startsAt ?? "t") + "-" + Math.random().toString(36).slice(2, 10) + "@velora.local";
+  const stamp = toIcsUtc(new Date());
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//VELORA//Booking Calendar 1.0//IT",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "BEGIN:VEVENT",
+    `UID:${uid}`,
+    `DTSTAMP:${stamp}`,
+    `DTSTART:${toIcsUtc(start)}`,
+    `DTEND:${toIcsUtc(end)}`,
+    `SUMMARY:${summary.replace(/\n/g, " ")}`,
+    `DESCRIPTION:${description.replace(/\n/g, "\\n")}`,
+    `LOCATION:${location.replace(/\n/g, " ")}`,
+    "TRANSP:OPAQUE",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ];
+  return lines.join("\r\n");
+}
+
+function BookingCalendarIcsLink(props: {
+  startsAt?: string | null;
+  endsAt?: string | null;
+  serviceName: string;
+  businessName: string;
+  location?: string;
+}) {
+  const { startsAt, endsAt, serviceName, businessName, location } = props;
+  const href = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    const ics = buildIcsString(
+      startsAt,
+      endsAt,
+      `${serviceName} da ${businessName}`,
+      `Appuntamento: ${serviceName}\nPresso: ${businessName}`,
+      location ?? "",
+    );
+    if (!ics) return null;
+    try {
+      const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+      return URL.createObjectURL(blob);
+    } catch {
+      return null;
+    }
+  }, [startsAt, endsAt, serviceName, businessName, location]);
+
+  useEffect(() => {
+    return () => {
+      if (href && typeof URL !== "undefined" && URL.revokeObjectURL) {
+        try {
+          URL.revokeObjectURL(href);
+        } catch {
+          /* noop */
+        }
+      }
+    };
+  }, [href]);
+
+  if (!href) return null;
+  return (
+    <a
+      href={href}
+      download={`prenotazione-${businessName.replace(/\s+/g, "-").toLowerCase()}.ics`}
+      className="btn btn-outline btn-sm inline-flex items-center gap-2"
+    >
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        <rect x="3" y="4" width="18" height="18" rx="2" />
+        <path d="M16 2v4M8 2v4M3 10h18" />
+      </svg>
+      Aggiungi a calendario (.ics)
+    </a>
   );
 }

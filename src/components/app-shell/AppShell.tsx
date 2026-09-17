@@ -3,7 +3,7 @@ import "client-only";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type JSX } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX } from "react";
 import { LogoutButton } from "@/app/(app)/dashboard/LogoutButton";
 import { isAtLeastRole, type MembershipRole } from "@/modules/auth/core/roles";
 
@@ -14,16 +14,42 @@ type NavItem = Readonly<{
   exact?: boolean;
 }>;
 
-const NAV_ITEMS: readonly NavItem[] = [
-  { label: "Dashboard", href: "/app", minRole: "staff", exact: true },
-  { label: "Calendario", href: "/app/calendar", minRole: "staff" },
-  { label: "Prenotazioni", href: "/app/bookings", minRole: "staff" },
-  { label: "Clienti", href: "/app/customers", minRole: "staff" },
-  { label: "Team", href: "/app/team", minRole: "staff" },
-  { label: "Disponibilità", href: "/app/availability", minRole: "manager" },
-  { label: "Sito", href: "/app/site", minRole: "manager" },
-  { label: "Abbonamento", href: "/app/billing", minRole: "owner" },
-  { label: "Impostazioni", href: "/app/settings", minRole: "manager" },
+type NavGroup = Readonly<{
+  id: "operations" | "business" | "site";
+  label: string;
+  items: readonly NavItem[];
+}>;
+
+const NAV_GROUPS: readonly NavGroup[] = [
+  {
+    id: "site",
+    label: "Sito",
+    items: [
+      { label: "Studio sito", href: "/app/site", minRole: "manager" },
+      { label: "Analytics", href: "/app/analytics", minRole: "manager" },
+      { label: "Abbonamento", href: "/app/billing", minRole: "owner" },
+      { label: "Impostazioni", href: "/app/settings", minRole: "manager" },
+    ],
+  },
+  {
+    id: "business",
+    label: "Attività",
+    items: [
+      { label: "Clienti", href: "/app/customers", minRole: "staff" },
+      { label: "Team", href: "/app/team", minRole: "staff" },
+      { label: "Disponibilità", href: "/app/availability", minRole: "manager" },
+    ],
+  },
+  {
+    id: "operations",
+    label: "Operazioni",
+    items: [
+      { label: "Dashboard", href: "/app", minRole: "staff", exact: true },
+      { label: "Setup iniziale", href: "/app/setup", minRole: "owner" },
+      { label: "Calendario", href: "/app/calendar", minRole: "staff" },
+      { label: "Prenotazioni", href: "/app/bookings", minRole: "staff" },
+    ],
+  },
 ] as const;
 
 export type AppShellProps = Readonly<{
@@ -47,11 +73,72 @@ const ROLE_LABEL: Record<MembershipRole, string> = {
   staff: "Staff",
 };
 
+const SHELL_BG = "#f1f5f9";
+const SHELL_FG = "#0f172a";
+const PANEL_BG = "#ffffff";
+const MUTED_FG = "#64748b";
+const BORDER = "#e5e7eb";
+const _BORDER_SOFT = "#f1f5f9";
+const ACCENT_BG = "#4f46e5";
+const ACCENT_FG = "#ffffff";
+const HOVER_BG = "#f1f5f9";
+const HOVER_FG = "#0f172a";
+
+function shellStyle(active: boolean): CSSProperties {
+  return active
+    ? {
+        background: ACCENT_BG,
+        color: ACCENT_FG,
+        boxShadow: "0 1px 2px 0 rgba(15, 23, 42, 0.06)",
+      }
+    : {
+        background: "transparent",
+        color: "#334155",
+      };
+}
+
 function SkipLink(): JSX.Element {
   return (
     <a
       href="#main-content"
-      className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[60] focus:rounded-md focus:bg-indigo-600 focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+      style={{
+        position: "absolute",
+        width: 1,
+        height: 1,
+        padding: 0,
+        margin: -1,
+        overflow: "hidden",
+        clip: "rect(0,0,0,0)",
+        whiteSpace: "nowrap",
+        border: 0,
+      }}
+      onFocus={(e) => {
+        const t = e.currentTarget;
+        t.style.position = "fixed";
+        t.style.top = "12px";
+        t.style.left = "12px";
+        t.style.width = "auto";
+        t.style.height = "auto";
+        t.style.padding = "10px 14px";
+        t.style.margin = "0";
+        t.style.overflow = "visible";
+        t.style.clip = "auto";
+        t.style.borderRadius = "8px";
+        t.style.background = ACCENT_BG;
+        t.style.color = ACCENT_FG;
+        t.style.fontWeight = "600";
+        t.style.zIndex = "999";
+      }}
+      onBlur={(e) => {
+        const t = e.currentTarget;
+        t.style.position = "absolute";
+        t.style.width = "1px";
+        t.style.height = "1px";
+        t.style.padding = "0";
+        t.style.margin = "-1px";
+        t.style.overflow = "hidden";
+        t.style.clip = "rect(0,0,0,0)";
+      }}
     >
       Salta al contenuto principale
     </a>
@@ -68,24 +155,57 @@ function NavLinks(
 ): JSX.Element {
   const { items, pathname, role, onNavigate } = props;
   return (
-    <ul className="flex flex-col gap-1">
+    <ul
+      style={{
+        listStyle: "none",
+        padding: 0,
+        margin: 0,
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+      }}
+    >
       {items.map((item) => {
         if (!isAtLeastRole(role, item.minRole)) return null;
         const active = isActive(pathname, item);
+        const base = shellStyle(active);
         return (
           <li key={item.href}>
             <Link
               href={item.href}
               onClick={() => onNavigate?.()}
               aria-current={active ? "page" : undefined}
-              className={[
-                "group flex items-center rounded-md px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
-                active
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : "text-zinc-700 hover:bg-zinc-200 hover:text-zinc-900",
-              ].join(" ")}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                width: "100%",
+                textDecoration: "none",
+                padding: "8px 12px",
+                borderRadius: 8,
+                fontSize: 14,
+                fontWeight: 500,
+                transition: "background 0.15s ease, color 0.15s ease",
+                ...base,
+                background: base.background,
+                color: base.color,
+                boxShadow: base.boxShadow,
+              }}
+              onMouseEnter={(e) => {
+                if (!active) {
+                  (e.currentTarget as HTMLElement).style.background = HOVER_BG;
+                  (e.currentTarget as HTMLElement).style.color = HOVER_FG;
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!active) {
+                  (e.currentTarget as HTMLElement).style.background = base.background as string;
+                  (e.currentTarget as HTMLElement).style.color = base.color as string;
+                }
+              }}
             >
-              <span className="truncate">{item.label}</span>
+              <span style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>
+                {item.label}
+              </span>
             </Link>
           </li>
         );
@@ -94,7 +214,16 @@ function NavLinks(
   );
 }
 
+type NavGroupWithItems = Readonly<{
+  id: "operations" | "business" | "site";
+  label: string;
+  items: readonly NavItem[];
+}>;
+
+const MD_BREAKPOINT = 768;
+
 export function AppShell(props: AppShellProps): JSX.Element {
+  void _BORDER_SOFT;
   const {
     businessName,
     membershipRole,
@@ -109,13 +238,46 @@ export function AppShell(props: AppShellProps): JSX.Element {
   const pathname = usePathname();
 
   const [mobileOpen, setMobileOpen] = useState(false);
-  const drawerRef = useRef<HTMLElement | null>(null);
+  const [isDesktop, setIsDesktop] = useState<boolean>(
+    typeof window !== "undefined" ? window.innerWidth >= MD_BREAKPOINT : true,
+  );
+  const drawerRef = useRef<HTMLElement>(null);
   const openButtonRef = useRef<HTMLButtonElement | null>(null);
 
-  const visibleNavItems = useMemo(
-    () => NAV_ITEMS.filter((i) => isAtLeastRole(membershipRole, i.minRole)),
-    [membershipRole],
-  );
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    const prevHtmlBg = document.documentElement.style.background;
+    const prevBodyBg = document.body.style.background;
+    const prevBodyBgColor = document.body.style.backgroundColor;
+    document.documentElement.style.background = SHELL_BG;
+    document.body.style.background = SHELL_BG;
+    document.body.style.backgroundColor = SHELL_BG;
+    return () => {
+      document.documentElement.style.background = prevHtmlBg;
+      document.body.style.background = prevBodyBg;
+      document.body.style.backgroundColor = prevBodyBgColor;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const onResize = () => {
+      const now = window.innerWidth >= MD_BREAKPOINT;
+      setIsDesktop(now);
+      if (now) setMobileOpen(false);
+    };
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const visibleNavGroups = useMemo<readonly NavGroupWithItems[]>(() => {
+    return NAV_GROUPS.map((g) => ({
+      id: g.id,
+      label: g.label,
+      items: g.items.filter((i) => isAtLeastRole(membershipRole, i.minRole)),
+    })).filter((g) => g.items.length > 0);
+  }, [membershipRole]);
 
   useEffect(() => {
     if (!mobileOpen) return undefined;
@@ -171,16 +333,76 @@ export function AppShell(props: AppShellProps): JSX.Element {
   const showSub = Boolean(safeDisplayName && userLocalPart);
   const tenantLine = businessName?.trim() || "Attività";
 
+  const shellBgStyle: CSSProperties = {
+    minHeight: "100dvh",
+    overflowX: "hidden",
+    background: SHELL_BG,
+    color: SHELL_FG,
+    fontFamily:
+      'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+  };
+
+  const sidebarFixedStyle: CSSProperties = {
+    display: isDesktop ? "flex" : "none",
+    position: "fixed",
+    top: 0,
+    left: 0,
+    bottom: 0,
+    width: 240,
+    flexDirection: "column",
+    borderRight: `1px solid ${BORDER}`,
+    background: PANEL_BG,
+    color: SHELL_FG,
+    zIndex: 40,
+  };
+
+  const mobileHeaderStyle: CSSProperties = {
+    display: isDesktop ? "none" : "flex",
+    position: "sticky",
+    top: 0,
+    zIndex: 30,
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+    height: 64,
+    padding: "0 16px",
+    borderBottom: `1px solid ${BORDER}`,
+    background: PANEL_BG,
+    boxShadow: "0 1px 2px 0 rgba(15,23,42,0.04)",
+  };
+
   return (
-    <div className="min-h-dvh overflow-x-hidden bg-zinc-50 text-zinc-900">
+    <div style={shellBgStyle}>
       <SkipLink />
 
-      <header className="sticky top-0 z-40 flex h-16 w-full items-center justify-between border-b border-zinc-200 bg-white px-4 shadow-sm md:hidden">
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-xs font-medium uppercase tracking-wide text-zinc-500">
+      <header style={mobileHeaderStyle}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div
+            style={{
+              textTransform: "uppercase",
+              fontSize: 11,
+              letterSpacing: "0.08em",
+              fontWeight: 500,
+              color: MUTED_FG,
+              whiteSpace: "nowrap",
+              textOverflow: "ellipsis",
+              overflow: "hidden",
+            }}
+          >
             {tenantLine}
           </div>
-          <div className="truncate text-sm font-semibold text-zinc-900">{roleBadge}</div>
+          <div
+            style={{
+              fontWeight: 600,
+              fontSize: 14,
+              color: SHELL_FG,
+              whiteSpace: "nowrap",
+              textOverflow: "ellipsis",
+              overflow: "hidden",
+            }}
+          >
+            {roleBadge}
+          </div>
         </div>
         <button
           ref={openButtonRef}
@@ -189,10 +411,20 @@ export function AppShell(props: AppShellProps): JSX.Element {
           aria-label="Apri menu di navigazione"
           aria-controls="app-nav-mobile-drawer"
           aria-expanded={mobileOpen}
-          className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 40,
+            height: 40,
+            borderRadius: 8,
+            border: `1px solid ${BORDER}`,
+            background: PANEL_BG,
+            color: "#334155",
+            cursor: "pointer",
+          }}
         >
           <svg
-            aria-hidden
             width="20"
             height="20"
             viewBox="0 0 24 24"
@@ -201,6 +433,7 @@ export function AppShell(props: AppShellProps): JSX.Element {
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
+            aria-hidden
           >
             <line x1="3" y1="6" x2="21" y2="6" />
             <line x1="3" y1="12" x2="21" y2="12" />
@@ -209,40 +442,144 @@ export function AppShell(props: AppShellProps): JSX.Element {
         </button>
       </header>
 
-      <aside
-        className="fixed inset-y-0 left-0 z-50 hidden w-[240px] flex-col border-r border-zinc-200 bg-white md:flex"
-        aria-label="Navigazione area privata"
-      >
-        <div className="flex h-16 shrink-0 items-center gap-3 border-b border-zinc-200 px-4">
+      <aside style={sidebarFixedStyle} aria-label="Navigazione area privata">
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            height: 64,
+            flexShrink: 0,
+            padding: "0 16px",
+            borderBottom: `1px solid ${BORDER}`,
+          }}
+        >
           <span
             aria-hidden
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-indigo-600 text-sm font-bold text-white"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 36,
+              height: 36,
+              flexShrink: 0,
+              borderRadius: 8,
+              background: ACCENT_BG,
+              color: ACCENT_FG,
+              fontWeight: 700,
+              fontSize: 14,
+            }}
           >
             V
           </span>
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-zinc-900">{tenantLine}</div>
-            <div className="truncate text-xs text-zinc-500">VELORA · {roleBadge}</div>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div
+              style={{
+                fontWeight: 600,
+                fontSize: 14,
+                color: SHELL_FG,
+                whiteSpace: "nowrap",
+                textOverflow: "ellipsis",
+                overflow: "hidden",
+              }}
+            >
+              {tenantLine}
+            </div>
+            <div
+              style={{
+                fontSize: 12,
+                color: MUTED_FG,
+                whiteSpace: "nowrap",
+                textOverflow: "ellipsis",
+                overflow: "hidden",
+              }}
+            >
+              VELORA · {roleBadge}
+            </div>
           </div>
         </div>
-        <nav className="flex-1 overflow-y-auto px-3 py-4">
-          <NavLinks items={visibleNavItems} pathname={pathname} role={membershipRole} />
+
+        <nav
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            padding: "16px 12px",
+          }}
+          aria-label="Menu principale"
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {visibleNavGroups.map((group) => (
+              <div key={group.id}>
+                <div
+                  style={{
+                    marginBottom: 8,
+                    padding: "0 8px",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    letterSpacing: "0.14em",
+                    textTransform: "uppercase",
+                    color: MUTED_FG,
+                    userSelect: "none",
+                  }}
+                >
+                  {group.label}
+                </div>
+                <NavLinks items={group.items} pathname={pathname} role={membershipRole} />
+              </div>
+            ))}
+          </div>
         </nav>
-        <div className="border-t border-zinc-200 px-3 py-3">
-          <div className="mb-3 px-1">
-            <div className="truncate text-sm font-medium text-zinc-900">{userLine}</div>
-            {showSub ? <div className="truncate text-xs text-zinc-500">{userLocalPart}</div> : null}
+
+        <div style={{ borderTop: `1px solid ${BORDER}`, padding: 12 }}>
+          <div style={{ padding: "0 4px 12px" }}>
+            <div
+              style={{
+                fontWeight: 500,
+                color: SHELL_FG,
+                fontSize: 14,
+                whiteSpace: "nowrap",
+                textOverflow: "ellipsis",
+                overflow: "hidden",
+              }}
+            >
+              {userLine}
+            </div>
+            {showSub ? (
+              <div
+                style={{
+                  color: MUTED_FG,
+                  fontSize: 12,
+                  whiteSpace: "nowrap",
+                  textOverflow: "ellipsis",
+                  overflow: "hidden",
+                }}
+              >
+                {userLocalPart}
+              </div>
+            ) : null}
           </div>
           <LogoutButton />
         </div>
       </aside>
 
-      {mobileOpen ? (
+      {mobileOpen && !isDesktop ? (
         <button
           type="button"
           aria-label="Chiudi menu navigazione toccando fuori"
           onClick={() => setMobileOpen(false)}
-          className="fixed inset-0 z-40 border-0 bg-black/40 p-0 text-transparent md:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 40,
+            display: "block",
+            width: "100%",
+            height: "100%",
+            background: "rgba(0,0,0,0.4)",
+            border: 0,
+            padding: 0,
+            cursor: "pointer",
+            color: "transparent",
+          }}
         />
       ) : null}
 
@@ -252,15 +589,60 @@ export function AppShell(props: AppShellProps): JSX.Element {
         role="dialog"
         aria-modal="true"
         aria-label="Menu navigazione"
-        className={[
-          "fixed inset-y-0 left-0 z-50 w-[85vw] max-w-[320px] transform border-r border-zinc-200 bg-white shadow-xl transition-transform md:hidden",
-          mobileOpen ? "translate-x-0" : "-translate-x-full",
-        ].join(" ")}
+        style={{
+          display: isDesktop ? "none" : "flex",
+          position: "fixed",
+          top: 0,
+          left: 0,
+          bottom: 0,
+          zIndex: 50,
+          width: "85vw",
+          maxWidth: 320,
+          transform: mobileOpen ? "translateX(0)" : "translateX(-100%)",
+          transition: "transform 0.2s ease",
+          borderRight: `1px solid ${BORDER}`,
+          background: PANEL_BG,
+          color: SHELL_FG,
+          flexDirection: "column",
+          boxShadow: "0 20px 25px -5px rgba(0,0,0,0.15)",
+        }}
       >
-        <div className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-zinc-200 px-4">
-          <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-zinc-900">{tenantLine}</div>
-            <div className="truncate text-xs text-zinc-500">VELORA · {roleBadge}</div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            height: 64,
+            flexShrink: 0,
+            padding: "0 16px",
+            borderBottom: `1px solid ${BORDER}`,
+          }}
+        >
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div
+              style={{
+                fontWeight: 600,
+                fontSize: 14,
+                color: SHELL_FG,
+                whiteSpace: "nowrap",
+                textOverflow: "ellipsis",
+                overflow: "hidden",
+              }}
+            >
+              {tenantLine}
+            </div>
+            <div
+              style={{
+                color: MUTED_FG,
+                fontSize: 12,
+                whiteSpace: "nowrap",
+                textOverflow: "ellipsis",
+                overflow: "hidden",
+              }}
+            >
+              VELORA · {roleBadge}
+            </div>
           </div>
           <button
             type="button"
@@ -269,7 +651,18 @@ export function AppShell(props: AppShellProps): JSX.Element {
               openButtonRef.current?.focus();
             }}
             aria-label="Chiudi menu di navigazione"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 40,
+              height: 40,
+              borderRadius: 8,
+              border: `1px solid ${BORDER}`,
+              background: PANEL_BG,
+              color: "#334155",
+              cursor: "pointer",
+            }}
           >
             <svg
               aria-hidden
@@ -287,43 +680,89 @@ export function AppShell(props: AppShellProps): JSX.Element {
             </svg>
           </button>
         </div>
+
         <nav
-          className="h-[calc(100%-4rem-1px)] overflow-y-auto px-3 py-4"
-          aria-label="Navigazione area privata"
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            padding: "16px 12px",
+          }}
+          aria-label="Navigazione area privata (mobile)"
         >
-          <ul className="flex flex-col gap-1">
-            {visibleNavItems.map((item) => {
-              const active = isActive(pathname, item);
-              return (
-                <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    onClick={() => setMobileOpen(false)}
-                    aria-current={active ? "page" : undefined}
-                    className={[
-                      "group flex items-center rounded-md px-3 py-2.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
-                      active
-                        ? "bg-indigo-600 text-white shadow-sm"
-                        : "text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900",
-                    ].join(" ")}
-                  >
-                    <span className="truncate">{item.label}</span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {visibleNavGroups.map((group) => (
+              <div key={group.id}>
+                <div
+                  style={{
+                    marginBottom: 8,
+                    padding: "0 8px",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    letterSpacing: "0.14em",
+                    textTransform: "uppercase",
+                    color: MUTED_FG,
+                    userSelect: "none",
+                  }}
+                >
+                  {group.label}
+                </div>
+                <NavLinks
+                  items={group.items}
+                  pathname={pathname}
+                  role={membershipRole}
+                  onNavigate={() => setMobileOpen(false)}
+                />
+              </div>
+            ))}
+          </div>
         </nav>
-        <div className="border-t border-zinc-200 px-3 py-3">
-          <div className="mb-3 px-1">
-            <div className="truncate text-sm font-medium text-zinc-900">{userLine}</div>
-            {showSub ? <div className="truncate text-xs text-zinc-500">{userLocalPart}</div> : null}
+
+        <div style={{ borderTop: `1px solid ${BORDER}`, padding: 12 }}>
+          <div style={{ padding: "0 4px 12px" }}>
+            <div
+              style={{
+                fontWeight: 500,
+                color: SHELL_FG,
+                fontSize: 14,
+                whiteSpace: "nowrap",
+                textOverflow: "ellipsis",
+                overflow: "hidden",
+              }}
+            >
+              {userLine}
+            </div>
+            {showSub ? (
+              <div
+                style={{
+                  fontSize: 12,
+                  color: MUTED_FG,
+                  whiteSpace: "nowrap",
+                  textOverflow: "ellipsis",
+                  overflow: "hidden",
+                }}
+              >
+                {userLocalPart}
+              </div>
+            ) : null}
           </div>
           <LogoutButton />
         </div>
       </aside>
 
-      <main id="main-content" tabIndex={-1} className="w-full md:pl-[240px]">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        style={{
+          width: "100%",
+          minHeight: "100dvh",
+          display: "block",
+          paddingLeft: isDesktop ? 240 : 0,
+          padding: 0,
+          margin: 0,
+          outline: "none",
+          boxSizing: "border-box",
+        }}
+      >
         {children}
       </main>
     </div>

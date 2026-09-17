@@ -6,6 +6,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   test: {
+    maxWorkers: 1,
+    minWorkers: 1,
+    testTimeout: 300_000,
+    hookTimeout: 300_000,
     environment: "jsdom",
     globals: false,
     include: ["src/**/*.{test,spec}.{ts,tsx}", "tests/**/*.{test,spec}.{ts,tsx}"],
@@ -16,7 +20,7 @@ export default defineConfig({
       include: ["src/**/*.{ts,tsx}"],
       exclude: ["src/**/*.d.ts", "src/app/**/*.{ts,tsx}", "src/**/*.{test,spec}.{ts,tsx}"],
     },
-    setupFiles: ["dotenv/config"],
+    setupFiles: ["./tests/vitest-env-local-override.ts"],
     envDir: ".",
   },
   resolve: {

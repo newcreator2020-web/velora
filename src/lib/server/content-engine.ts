@@ -47,14 +47,39 @@ export const ALLOWED_VARIANTS = [
   "inline",
   "floating",
   "icons",
+  "editorial",
+  "asymmetric",
+  "image_cards",
+  "editorial_list",
+  "category_tabs",
+  "image_services",
+  "compact_list",
 ] as const;
 
 export type SectionVariant = (typeof ALLOWED_VARIANTS)[number];
 
 export const SECTION_VARIANTS: Record<SectionType, ReadonlyArray<SectionVariant>> = {
-  hero: ["split", "split_hero_left", "fullscreen", "minimal", "centered", "default"],
+  hero: [
+    "split",
+    "split_hero_left",
+    "fullscreen",
+    "minimal",
+    "centered",
+    "default",
+    "editorial",
+    "asymmetric",
+    "image_cards",
+  ],
   about: ["centered", "split", "default", "minimal"],
-  services: ["cards", "list", "default"],
+  services: [
+    "cards",
+    "list",
+    "default",
+    "editorial_list",
+    "category_tabs",
+    "image_services",
+    "compact_list",
+  ],
   gallery: ["grid", "masonry", "default"],
   staff: ["cards", "compact", "default"],
   reviews: ["carousel", "cards", "default"],
@@ -166,6 +191,7 @@ export const heroSettingsSchema = z.object({
 
 export const aboutSettingsSchema = z.object({
   eyebrow,
+  headline: nonEmptyText(120).nullish(),
   variant: variantAllowed.optional(),
   alignment,
   about_image_url: z.string().max(2000).nullish(),
@@ -183,18 +209,64 @@ export const gallerySettingsSchema = z.object({
   headline: nonEmptyText(120).nullish(),
   variant: variantAllowed.optional(),
   columns: z.number().int().min(1).max(4).nullish(),
+  isFixtureDemo: z.boolean().nullish(),
+  layout: z.enum(["grid", "masonry"]).nullish(),
+  gap: z.enum(["sm", "md", "lg"]).nullish(),
+  items: z
+    .array(
+      z.object({
+        id: z.string().max(64),
+        src: z.string().max(2000),
+        alt: z.string().max(500).nullish(),
+        caption: z.string().max(500).nullish(),
+        category: z.string().max(80).nullish(),
+        isFixtureDemo: z.boolean().nullish(),
+        sources: z
+          .object({
+            small: z.string().max(2000).nullish(),
+            medium: z.string().max(2000).nullish(),
+            large: z.string().max(2000).nullish(),
+          })
+          .nullish(),
+      }),
+    )
+    .max(200)
+    .nullish(),
 });
 
 export const staffSettingsSchema = z.object({
   eyebrow,
   headline: nonEmptyText(120).nullish(),
   variant: variantAllowed.optional(),
+  isFixtureDemo: z.boolean().nullish(),
+  members: z
+    .array(
+      z.object({
+        id: z.string().max(64),
+        name: z.string().max(160),
+        role: z.string().max(200).nullish(),
+        bio: z.string().max(2000).nullish(),
+        photo: z.string().max(2000).nullish(),
+        photoUrl: z.string().max(2000).nullish(),
+        alt: z.string().max(500).nullish(),
+        isFixtureDemo: z.boolean().nullish(),
+      }),
+    )
+    .max(50)
+    .nullish(),
 });
 
 export const reviewsSettingsSchema = z.object({
   eyebrow,
   headline: nonEmptyText(120).nullish(),
   variant: variantAllowed.optional(),
+  sub: nonEmptyText(240).nullish(),
+  cta_label: nonEmptyText(60).nullish(),
+  cta_link: nonEmptyText(240).nullish(),
+  isFixtureDemo: z.boolean().nullish(),
+  fixtureSlug: z.string().nullish(),
+  avg: z.number().nullish(),
+  count: z.number().nullish(),
 });
 
 export const contactSettingsSchema = z.object({

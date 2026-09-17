@@ -80,6 +80,15 @@ e2e/scratch/
 e2e/drafts/
 # If a loose untracked scratch spec must be ignored, list it explicitly below instead of blanket /e2e/
 
+# VELORA acceptance artifacts — transient logs, screenshots, CSVs, tmp scripts.
+# Project evidence lives in /*REPORT*.md and *ACCEPTANCE*.md at repo root only.
+# Do NOT commit bulk evidence; keep repo lean and secret-safe.
+/artifacts/
+
+# IDE / AI scratch document tree (tool-local, not project governance).
+/.trae/
+!/.trae/specs/  # kept above, no-op but explicit
+
 # IDE / AI agent tool-local files (NOT project governance).
 # Project technical rules are the single source of truth in TRAE Project Rules
 # and the docs/ folder. Do not commit regenerated scratch files.

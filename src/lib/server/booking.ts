@@ -91,25 +91,34 @@ export const WEEKDAY_LABELS = ["Dom", "Lun", "Mar", "Mer", "Gio", "Ven", "Sab"] 
 export const SlotStepMinutes = 15;
 export const BookingHorizonDays = 45;
 
-export const CreatePublicBookingSchema = z.object({
-  slug: z.string().regex(/^[a-z0-9][a-z0-9-]{2,58}[a-z0-9]$/),
-  service_id: z.string().uuid(),
-  starts_at: z.coerce.date(),
-  customer_name: z.string().min(1).max(120),
-  customer_email: z.string().email().max(254).optional().or(z.literal("")),
-  customer_phone: z
-    .string()
-    .regex(/^[0-9+\s()-]{4,32}$/)
-    .optional()
-    .or(z.literal("")),
-  notes: z.string().max(500).optional().or(z.literal("")),
-  resource_slug: z
-    .string()
-    .regex(/^(any|[a-z0-9][a-z0-9-]{0,58}[a-z0-9])$/)
-    .max(60)
-    .optional()
-    .or(z.literal("")),
-});
+export const CreatePublicBookingSchema = z
+  .object({
+    slug: z.string().regex(/^[a-z0-9][a-z0-9-]{2,58}[a-z0-9]$/),
+    service_id: z.string().uuid(),
+    starts_at: z.coerce.date(),
+    customer_name: z.string().min(1).max(120),
+    customer_email: z.string().email().max(254).optional().or(z.literal("")),
+    customer_phone: z
+      .string()
+      .regex(/^[0-9+\s()-]{4,32}$/)
+      .optional()
+      .or(z.literal("")),
+    notes: z.string().max(500).optional().or(z.literal("")),
+    resource_slug: z
+      .string()
+      .regex(/^(any|[a-z0-9][a-z0-9-]{0,58}[a-z0-9])$/)
+      .max(60)
+      .optional()
+      .or(z.literal("")),
+  })
+  .refine(
+    (data) => {
+      const hasEmail = Boolean(data.customer_email && data.customer_email.length > 0);
+      const hasPhone = Boolean(data.customer_phone && data.customer_phone.length > 0);
+      return hasEmail || hasPhone;
+    },
+    { message: "Almeno un contatto tra email e telefono è richiesto.", path: ["customer_email"] },
+  );
 
 export type PublicBookingInput = z.infer<typeof CreatePublicBookingSchema>;
 
@@ -192,7 +201,10 @@ export type BusinessAvailabilityRow = {
 export async function getBusinessAvailability(
   tenantId: string,
 ): Promise<BusinessAvailabilityRow[]> {
-  const supabase = await createSupabaseServerClient();
+  const { getSupabaseServiceClient } = await import(
+    /* webpackIgnore: false */ "@/lib/supabase/service"
+  );
+  const supabase = getSupabaseServiceClient();
   const { data, error } = await supabase
     .from("business_availability")
     .select("weekday,enabled,start_time,end_time")

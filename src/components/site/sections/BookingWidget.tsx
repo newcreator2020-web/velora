@@ -9,9 +9,15 @@ const PublicBookingForm = dynamic(() => import("@/app/s/[slug]/booking/BookingCl
     <div
       role="status"
       aria-live="polite"
-      className="rounded-2xl border border-neutral-200 bg-white p-6 text-sm text-neutral-500"
+      className="booking-card rounded-2xl border border-border bg-background p-6 text-sm text-muted"
     >
-      Caricamento form prenotazione…
+      <div className="flex items-center gap-3">
+        <div
+          className="h-4 w-4 shrink-0 rounded-full border-2 border-muted-foreground/30 border-t-primary animate-spin"
+          aria-hidden="true"
+        />
+        <span>Caricamento form prenotazione…</span>
+      </div>
     </div>
   ),
 });
@@ -31,15 +37,17 @@ export function BookingWidgetSectionComponent(section: BookingWidgetSection) {
         data-section="booking_widget"
         data-variant="fallback"
         aria-labelledby="site-booking-widget-title"
-        className="section w-full py-16 px-6 bg-white"
+        className="sec w-full bg-background"
       >
-        <div className="max-w-3xl mx-auto">
-          <h2 id="site-booking-widget-title" className="text-2xl font-bold text-foreground mb-3">
-            {headline}
-          </h2>
-          <p className="text-muted-foreground">
-            Sito non ancora pubblicato completamente. Torna più tardi.
-          </p>
+        <div className="container container-default">
+          <div className="max-w-3xl mx-auto">
+            <h2 id="site-booking-widget-title" className="typo-h2 mb-3">
+              {headline}
+            </h2>
+            <p className="typo-body text-muted">
+              Sito non ancora pubblicato completamente. Torna più tardi.
+            </p>
+          </div>
         </div>
       </section>
     );
@@ -52,40 +60,30 @@ export function BookingWidgetSectionComponent(section: BookingWidgetSection) {
         data-section="booking_widget"
         data-variant="compact"
         aria-labelledby="site-booking-widget-title"
-        className="section w-full py-16 px-6 bg-gradient-to-br from-neutral-50 to-white"
+        className="sec w-full bg-muted/30"
       >
-        <div className="max-w-3xl mx-auto rounded-2xl border border-border bg-white p-8 md:p-10 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-          <div className="flex-1">
-            {eyebrow ? (
-              <p className="text-sm font-semibold uppercase tracking-wider text-primary/80 mb-2">
-                {eyebrow}
-              </p>
-            ) : null}
-            <h2
-              id="site-booking-widget-title"
-              className="text-2xl md:text-3xl font-bold tracking-tight text-foreground mb-3 break-words"
-            >
-              {headline}
-            </h2>
-            {subheadline ? (
-              <p className="text-sm md:text-base text-muted-foreground break-words">
-                {subheadline}
-              </p>
-            ) : null}
-          </div>
-          <div className="flex flex-col gap-3 shrink-0 w-full md:w-auto">
-            <a
-              href={bookingHref}
-              className="inline-flex items-center justify-center rounded-xl bg-neutral-900 px-6 py-3 text-sm font-semibold text-white hover:bg-neutral-800 min-h-[48px] transition w-full md:w-auto"
-            >
-              Prenota ora
-            </a>
-            <a
-              href={`${bookingHref}#services`}
-              className="inline-flex items-center justify-center rounded-xl bg-white px-6 py-3 text-sm font-medium text-neutral-900 border border-neutral-300 hover:bg-neutral-50 min-h-[48px] transition w-full md:w-auto"
-            >
-              Scopri i servizi
-            </a>
+        <div className="container container-default">
+          <div className="max-w-3xl mx-auto booking-card rounded-2xl border border-border bg-background shadow-sm p-8 md:p-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 reveal">
+            <div className="flex-1">
+              {eyebrow ? <p className="eyebrow mb-2">{eyebrow}</p> : null}
+              <h2 id="site-booking-widget-title" className="typo-h2 mb-3 break-words">
+                {headline}
+              </h2>
+              {subheadline ? (
+                <p className="typo-body text-muted break-words">{subheadline}</p>
+              ) : null}
+            </div>
+            <div className="flex flex-col gap-3 shrink-0 w-full md:w-auto">
+              <a href={bookingHref} className="btn btn-primary btn-lg w-full md:w-auto btn-motion">
+                Prenota ora
+              </a>
+              <a
+                href={`${bookingHref}#services`}
+                className="btn btn-outline btn-lg w-full md:w-auto btn-motion"
+              >
+                Scopri i servizi
+              </a>
+            </div>
           </div>
         </div>
       </section>
@@ -116,31 +114,24 @@ export function BookingWidgetSectionComponent(section: BookingWidgetSection) {
       data-section="booking_widget"
       data-variant="full"
       aria-labelledby="site-booking-widget-title"
-      className="section w-full py-16 px-6 bg-neutral-50"
+      className="sec w-full bg-muted/20"
     >
-      <div className="max-w-3xl mx-auto">
-        <div className="mb-6">
-          {eyebrow ? (
-            <p className="text-sm font-semibold uppercase tracking-wider text-primary/80 mb-2">
-              {eyebrow}
-            </p>
-          ) : null}
-          <h2
-            id="site-booking-widget-title"
-            className="text-3xl md:text-4xl font-bold tracking-tight text-foreground mb-3 break-words"
-          >
-            {headline}
-          </h2>
-          {subheadline ? (
-            <p className="text-base text-muted-foreground break-words">{subheadline}</p>
-          ) : null}
+      <div className="container container-default">
+        <div className="max-w-3xl mx-auto">
+          <header className="mb-8 reveal">
+            {eyebrow ? <p className="eyebrow mb-2">{eyebrow}</p> : null}
+            <h2 id="site-booking-widget-title" className="typo-display-h2 mb-3 break-words">
+              {headline}
+            </h2>
+            {subheadline ? <p className="typo-lead text-muted break-words">{subheadline}</p> : null}
+          </header>
+          <PublicBookingForm
+            slug={slug}
+            services={services}
+            availability={availability}
+            timezone={timezone}
+          />
         </div>
-        <PublicBookingForm
-          slug={slug}
-          services={services}
-          availability={availability}
-          timezone={timezone}
-        />
       </div>
     </section>
   );

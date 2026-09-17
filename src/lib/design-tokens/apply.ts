@@ -243,6 +243,36 @@ export function applyTheme(
   cssVars["--theme-heading-scale"] = String(preset.typography.headingScale ?? 1.2);
   cssVars["--theme-body-line-height"] = String(preset.typography.bodyLineHeight ?? 1.6);
 
+  const hScale = preset.typography.headingScale ?? 1.2;
+  cssVars["--t-fs-display"] = `clamp(2.75rem, 6vw + 1rem, ${(4.5 * hScale).toFixed(2)}rem)`;
+  cssVars["--t-fs-h1"] = `clamp(2.25rem, 4.5vw + 0.5rem, ${(3.75 * hScale).toFixed(2)}rem)`;
+  cssVars["--t-fs-h2"] = `clamp(1.75rem, 3vw + 0.25rem, ${(3 * hScale).toFixed(2)}rem)`;
+  cssVars["--t-fs-h3"] = `clamp(1.375rem, 2vw + 0.5rem, ${(2.25 * hScale).toFixed(2)}rem)`;
+  cssVars["--t-fs-h4"] = `clamp(1.125rem, 1.25vw + 0.75rem, ${(1.875 * hScale).toFixed(2)}rem)`;
+  cssVars["--t-fs-body"] = "clamp(0.9375rem, 0.3vw + 0.85rem, 1rem)";
+  cssVars["--t-fs-lead"] = "clamp(1rem, 0.4vw + 0.9rem, 1.125rem)";
+  cssVars["--t-fs-small"] = "clamp(0.8125rem, 0.2vw + 0.75rem, 0.875rem)";
+
+  cssVars["--t-lh-heading"] = preset.typography.headingScale <= 1.15 ? "1.05" : "1.1";
+  cssVars["--t-lh-subhead"] = "1.25";
+  cssVars["--t-lh-body"] = String(preset.typography.bodyLineHeight ?? 1.6);
+  cssVars["--t-measure-narrow"] = "55ch";
+  cssVars["--t-measure"] = "65ch";
+  cssVars["--t-measure-wide"] = "75ch";
+
+  cssVars["--t-section-py-sm"] = `calc(2.5rem * var(--theme-spacing-multiplier))`;
+  cssVars["--t-section-py"] = `calc(4rem * var(--theme-spacing-multiplier))`;
+  cssVars["--t-section-py-lg"] = `calc(6rem * var(--theme-spacing-multiplier))`;
+  cssVars["--t-section-px"] = `calc(1.5rem * var(--theme-spacing-multiplier))`;
+
+  cssVars["--t-card-pad-y"] = `calc(1.5rem * ${densityMult})`;
+  cssVars["--t-card-pad-x"] = `calc(1.75rem * ${densityMult})`;
+  cssVars["--t-stack-xs"] = `calc(0.5rem * var(--theme-spacing-multiplier))`;
+  cssVars["--t-stack-sm"] = `calc(0.875rem * var(--theme-spacing-multiplier))`;
+  cssVars["--t-stack-md"] = `calc(1.5rem * var(--theme-spacing-multiplier))`;
+  cssVars["--t-stack-lg"] = `calc(2.5rem * var(--theme-spacing-multiplier))`;
+  cssVars["--t-stack-xl"] = `calc(3.5rem * var(--theme-spacing-multiplier))`;
+
   return {
     cssVars,
     bodyFontClass: fonts.bodyClass,

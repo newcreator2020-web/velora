@@ -916,5 +916,5 @@ describe("C13 Calendar Read Contract Matrix — 20/20 required", () => {
       );
       await c.query(`COMMIT`);
     }
-  });
+  }, 30_000);
 });

@@ -193,11 +193,12 @@ export default async function AppDashboardPage() {
   const deltaLabel = deltaPct >= 0 ? `+${deltaPct}% vs scorsa` : `${deltaPct}% vs scorsa`;
 
   return (
-    <main
+    <div
       style={{
         minHeight: "100dvh",
-        background: "#f8fafc",
+        background: "transparent",
         padding: 24,
+        boxSizing: "border-box",
       }}
     >
       <div
@@ -494,7 +495,7 @@ export default async function AppDashboardPage() {
           Dati recuperati in tempo reale tramite RLS · Dashboard KPI · VELORA MILESTONE A3
         </footer>
       </div>
-    </main>
+    </div>
   );
 }
 

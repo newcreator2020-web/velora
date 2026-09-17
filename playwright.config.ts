@@ -25,8 +25,36 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      name: "mobile-sm",
+      use: {
+        ...devices["Pixel 7"],
+        viewport: { width: 360, height: 800 },
+        deviceScaleFactor: 2,
+      },
+    },
+    {
+      name: "mobile-lg",
+      use: {
+        ...devices["iPhone 15"],
+        viewport: { width: 390, height: 844 },
+        deviceScaleFactor: 3,
+      },
+    },
+    {
+      name: "tablet",
+      use: {
+        ...devices["iPad mini"],
+        viewport: { width: 768, height: 1024 },
+        deviceScaleFactor: 2,
+      },
+    },
+    {
+      name: "desktop",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1440, height: 900 },
+        deviceScaleFactor: 1,
+      },
     },
   ],
   webServer: {

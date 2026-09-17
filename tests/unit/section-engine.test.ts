@@ -23,8 +23,8 @@ import type { PublicSection, SectionType } from "@/lib/server/content-engine";
 
 describe("FASE5 content-engine pure & helpers", () => {
   describe("SECTION_TYPES + SINGLETON invariants (GATE 13)", () => {
-    it("10 tipi sezione supportati (hero, about, services, gallery, staff, reviews, contact, price_list, features_cta, booking_widget)", () => {
-      expect(SECTION_TYPES).toHaveLength(10);
+    it("20 tipi sezione supportati (10 originali gate27 + 10 estensione: navbar/footer/trust/hours/faq/location/booking_cta/whatsapp_cta/social_links/legal_links)", () => {
+      expect(SECTION_TYPES).toHaveLength(20);
       expect(SECTION_TYPES).toEqual(
         expect.arrayContaining([
           "hero",
@@ -37,17 +37,40 @@ describe("FASE5 content-engine pure & helpers", () => {
           "price_list",
           "features_cta",
           "booking_widget",
+          "navbar",
+          "footer",
+          "trust",
+          "hours",
+          "faq",
+          "location",
+          "booking_cta",
+          "whatsapp_cta",
+          "social_links",
+          "legal_links",
         ]),
       );
     });
 
-    it("SINGLETON: hero/about/contact sono singleton; services/gallery non sono singleton", () => {
-      expect(SINGLETON_TYPES).toEqual(expect.arrayContaining(["hero", "about", "contact"]));
+    it("SINGLETON: hero/about/contact + navbar/footer/booking_cta/whatsapp_cta/social_links/legal_links (9 totali); services/gallery NON singleton", () => {
+      expect(SINGLETON_TYPES).toEqual(
+        expect.arrayContaining([
+          "hero",
+          "about",
+          "contact",
+          "navbar",
+          "footer",
+          "booking_cta",
+          "whatsapp_cta",
+          "social_links",
+          "legal_links",
+        ]),
+      );
       expect(SINGLETON_TYPES.includes("services")).toBe(false);
       expect(SINGLETON_TYPES.includes("gallery")).toBe(false);
-      expect(SINGLETON_TYPES).toHaveLength(3);
+      expect(SINGLETON_TYPES).toHaveLength(9);
 
       expect(isSingletonSection("hero")).toBe(true);
+      expect(isSingletonSection("navbar")).toBe(true);
       expect(isSingletonSection("services")).toBe(false);
       expect(isSingletonSection("unknown")).toBe(false);
     });
@@ -140,34 +163,102 @@ describe("FASE5 content-engine pure & helpers", () => {
   });
 
   describe("GATE 23 default deterministic config + ordering", () => {
-    it("nessuna description → Hero + Contact (2 sezioni)", () => {
+    it("nessuna description, 0 servizi → lista standard 17 sezioni (navbar, hero, trust, hours, staff disabled, gallery disabled, reviews disabled, faq disabled, location, booking_cta, whatsapp_cta disabled, contact, booking_widget disabled, social_links, legal_links, footer). Senza about/services/price_list. Ordinamento position crescente. Enabled flag corretti.", () => {
       const res = buildDefaultDeterministicSections({ description: null }, 0);
-      expect(res.map((r) => r.section_type)).toEqual(["hero", "contact"]);
-      const r0 = res[0];
-      const r1 = res[1];
-      expect(r0).toBeDefined();
-      expect(r1).toBeDefined();
-      if (r0) expect(r0.position).toBe(0);
-      if (r1) expect(r1.position).toBe(1);
+      expect(res.map((r) => r.section_type)).toEqual([
+        "navbar",
+        "hero",
+        "trust",
+        "hours",
+        "staff",
+        "gallery",
+        "reviews",
+        "faq",
+        "location",
+        "booking_cta",
+        "whatsapp_cta",
+        "contact",
+        "booking_widget",
+        "social_links",
+        "legal_links",
+        "footer",
+      ]);
+      expect(res.map((r) => r.position)).toEqual([
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+      ]);
+      const ENABLED_BY_DEFAULT = new Set([
+        "navbar",
+        "hero",
+        "trust",
+        "hours",
+        "location",
+        "booking_cta",
+        "contact",
+        "social_links",
+        "legal_links",
+        "footer",
+      ]);
       for (const r of res) {
-        expect(r.enabled).toBe(true);
+        if (ENABLED_BY_DEFAULT.has(r.section_type)) {
+          expect(r.enabled).toBe(true);
+        } else {
+          expect(r.enabled).toBe(false);
+        }
         expect(ALLOWED_VARIANTS.includes(r.variant)).toBe(true);
+      }
+      const positions = res.map((r) => r.position);
+      for (let i = 0; i < positions.length - 1; i++) {
+        const curr = positions[i];
+        const next = positions[i + 1];
+        expect(curr).toBeDefined();
+        expect(next).toBeDefined();
+        expect(curr!).toBeLessThan(next!);
       }
     });
 
-    it("description presente → Hero → About → Contact (3 sezioni, ordering crescente)", () => {
-      const res = buildDefaultDeterministicSections({ description: "Barberia anni 90" }, 0);
-      expect(res.map((r) => r.section_type)).toEqual(["hero", "about", "contact"]);
+    it("description presente + 5 servizi → aggiunge about, services, price_list in posizione corretta. 20 sezioni totali. ordering crescente.", () => {
+      const res = buildDefaultDeterministicSections({ description: "Barberia anni 90" }, 5);
+      expect(res.map((r) => r.section_type)).toEqual([
+        "navbar",
+        "hero",
+        "trust",
+        "about",
+        "services",
+        "price_list",
+        "hours",
+        "staff",
+        "gallery",
+        "reviews",
+        "faq",
+        "location",
+        "booking_cta",
+        "whatsapp_cta",
+        "contact",
+        "booking_widget",
+        "social_links",
+        "legal_links",
+        "footer",
+      ]);
       const positions = res.map((r) => r.position);
-      expect(positions).toEqual([0, 1, 2]);
+      expect(positions).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]);
+      const idxAbout = res.findIndex((r) => r.section_type === "about");
+      const idxServices = res.findIndex((r) => r.section_type === "services");
+      const idxPriceList = res.findIndex((r) => r.section_type === "price_list");
+      const idxTrust = res.findIndex((r) => r.section_type === "trust");
+      const idxHours = res.findIndex((r) => r.section_type === "hours");
+      expect(idxAbout).toBeGreaterThan(idxTrust);
+      expect(idxServices).toBeGreaterThan(idxAbout);
+      expect(idxPriceList).toBeGreaterThan(idxServices);
+      expect(idxHours).toBeGreaterThan(idxPriceList);
       for (let i = 0; i < positions.length - 1; i++) {
-        const p = positions[i];
+        const curr = positions[i];
         const next = positions[i + 1];
-        expect(p).toBeDefined();
+        expect(curr).toBeDefined();
         expect(next).toBeDefined();
-        if (p !== undefined && next !== undefined) {
-          expect(p).toBeLessThan(next);
-        }
+        expect(curr!).toBeLessThan(next!);
+      }
+      for (const r of res) {
+        expect(ALLOWED_VARIANTS.includes(r.variant)).toBe(true);
       }
     });
   });

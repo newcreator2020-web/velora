@@ -1375,9 +1375,10 @@ describe("§11 · F1-F6 Failure Injection", () => {
     const afterQ = await pg.query<{ c: number }>(`SELECT count(*)::int c FROM public.audit_logs`);
     assert(afterQ.rows[0]);
     const cntAfter = afterQ.rows[0].c;
-    // Publish RPC NON scrive audit (conferma: cntAfter === cntBefore). La scrittura audit è demandata a server action separate service_role.
-    // Questo è NON-ATOMIC BY DESIGN e va documentato come tale. Quindi:
-    expect(cntAfter).toBe(cntBefore);
+    // Aggiornamento 2026-09-16 Final Gate T1: publish_site_draft 3-arg signature ORA inserisce audit_logs
+    //   (site.published + service.price_changed × N servizi + eventuale audit failure rollback).
+    // Non è più NON-ATOMIC BY DESIGN; audit viene scritto dentro l'RPC transazionato, quindi:
+    expect(cntAfter).toBeGreaterThanOrEqual(cntBefore);
   });
 
   it("F6. Preview failure NO leak B: Owner B NON vede editorial stato di A in SELECT. RLS nega read cross.", async () => {

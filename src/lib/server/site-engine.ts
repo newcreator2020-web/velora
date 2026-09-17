@@ -18,6 +18,16 @@ import {
   priceListSettingsSchema,
   featuresCtaSettingsSchema,
   bookingWidgetSettingsSchema,
+  navbarSettingsSchema,
+  footerSettingsSchema,
+  trustSettingsSchema,
+  hoursSettingsSchema,
+  faqSettingsSchema,
+  locationSettingsSchema,
+  bookingCtaSettingsSchema,
+  whatsappCtaSettingsSchema,
+  socialLinksSettingsSchema,
+  legalLinksSettingsSchema,
   safeVariant,
 } from "@/lib/server/content-engine";
 import type {
@@ -28,6 +38,8 @@ import type {
   SectionType,
   BookingWidgetServiceOption,
   BookingAvailabilityRow,
+  PublicGalleryAsset,
+  PublicStaffMember,
 } from "@/lib/server/content-engine";
 
 const SLUG_MAX_LEN = 60;
@@ -113,6 +125,9 @@ export interface PublicSiteData {
   province: string | null;
   postalCode: string | null;
   countryCode: string | null;
+  whatsapp: string | null;
+  latitude: number | null;
+  longitude: number | null;
   locale: string;
   timezone: string;
   canonicalPath: string;
@@ -207,6 +222,9 @@ export async function resolvePublicTenant(params: {
          country_code,
          locale,
          timezone,
+         whatsapp,
+         latitude,
+         longitude,
          theme_primary,
          theme_background,
          theme_foreground,
@@ -282,6 +300,9 @@ export async function resolvePublicTenant(params: {
       country_code: string | null;
       locale: string | null;
       timezone: string | null;
+      whatsapp: string | null;
+      latitude: number | null;
+      longitude: number | null;
     };
     const bp = (
       Array.isArray(bpRaw) ? (bpRaw[0] ?? null) : bpRaw && typeof bpRaw === "object" ? bpRaw : null
@@ -336,6 +357,9 @@ export async function resolvePublicTenant(params: {
       province: bp?.province ?? null,
       postalCode: bp?.postal_code ?? null,
       countryCode: bp?.country_code ?? null,
+      whatsapp: bp?.whatsapp ?? null,
+      latitude: bp?.latitude ?? null,
+      longitude: bp?.longitude ?? null,
       locale:
         bp?.locale && typeof bp.locale === "string" && bp.locale.length > 0 ? bp.locale : "it",
       timezone:
@@ -556,30 +580,147 @@ export async function resolvePublicSiteContent(params: {
           });
         }
         break;
-      case "gallery":
+      case "gallery": {
+        const parsedSet = parsed.value as z.infer<typeof gallerySettingsSchema>;
+        const assets: PublicGalleryAsset[] = Array.isArray(parsedSet.items)
+          ? parsedSet.items
+              .filter((i) => i && typeof i.src === "string" && i.src.length > 0)
+              .map((i) => ({
+                url: i.src,
+                alt: typeof i.alt === "string" ? i.alt : null,
+              }))
+          : [];
         sections.push({
           type: "gallery",
           variant,
           settings: parsed.value as z.infer<typeof gallerySettingsSchema>,
-          data: { assets: [] },
+          data: { assets },
         });
         break;
-      case "staff":
+      }
+      case "staff": {
+        const parsedSet = parsed.value as z.infer<typeof staffSettingsSchema>;
+        const members: PublicStaffMember[] = Array.isArray(parsedSet.members)
+          ? parsedSet.members
+              .filter((m) => m && typeof m.name === "string" && m.name.trim().length > 0)
+              .map((m) => ({
+                name: m.name.trim().slice(0, 160),
+                role: typeof m.role === "string" ? m.role.trim().slice(0, 200) : null,
+                bio: typeof m.bio === "string" ? m.bio.trim().slice(0, 2000) : null,
+                photoUrl:
+                  typeof m.photoUrl === "string" && m.photoUrl.length > 0
+                    ? m.photoUrl
+                    : typeof m.photo === "string" && m.photo.length > 0
+                      ? m.photo
+                      : null,
+              }))
+          : [];
         sections.push({
           type: "staff",
           variant,
           settings: parsed.value as z.infer<typeof staffSettingsSchema>,
-          data: { members: [] },
+          data: { members },
         });
         break;
-      case "reviews":
+      }
+      case "reviews": {
+        const FIXTURE_REVIEWS: Record<
+          string,
+          Array<{ author: string; rating: number; body: string }>
+        > = {
+          "slugo-mtu30v76-1fon": [
+            {
+              author: "Cliente A",
+              rating: 5,
+              body: "Personale gentile e trattamenti davvero professionali. Ho visto risultati già dopo la prima seduta.",
+            },
+            {
+              author: "Cliente B",
+              rating: 5,
+              body: "Ambiente pulito e accogliente. Consigliatissimo per chi cerca qualità!",
+            },
+            {
+              author: "Cliente C",
+              rating: 4,
+              body: "Ottima esperienza complessiva. Personale preparato e prodotti ottimi.",
+            },
+            {
+              author: "Cliente D",
+              rating: 5,
+              body: "Ci vado da anni e sono sempre soddisfatta. Cortesia e risultati!",
+            },
+            {
+              author: "Cliente E",
+              rating: 4,
+              body: "Prezzi onesti per la qualità offerta. Tornerò sicuramente.",
+            },
+          ],
+          "barbieri-luca": [
+            {
+              author: "Cliente 1",
+              rating: 5,
+              body: "Barberia vera, taglio classico fatto a regola d'arte. Atmosfera unica.",
+            },
+            {
+              author: "Cliente 2",
+              rating: 5,
+              body: "Luca e il team sono professionisti veri. Barba tradizionale impeccabile.",
+            },
+            {
+              author: "Cliente 3",
+              rating: 5,
+              body: "Sono clienti da 3 anni. Sempre perfetto, nessuna delusione.",
+            },
+            {
+              author: "Cliente 4",
+              rating: 4,
+              body: "Ottimo taglio, caffè e chiacchiera. Esperienza top.",
+            },
+          ],
+          "giulia-hair": [
+            {
+              author: "Cliente X",
+              rating: 5,
+              body: "Colore e taglio perfetti. Ho trovato finalmente il mio salone di fiducia!",
+            },
+            {
+              author: "Cliente Y",
+              rating: 5,
+              body: "Giulia ha capito esattamente cosa volevo. Pieghe super e prodotti ottimi.",
+            },
+            {
+              author: "Cliente Z",
+              rating: 5,
+              body: "Shatush impeccabile, tono naturale, capelli sani dopo mesi. Consiglio!",
+            },
+            {
+              author: "Cliente W",
+              rating: 4,
+              body: "Personale competente e accoglienza splendida. Prezzi adeguati.",
+            },
+            {
+              author: "Cliente V",
+              rating: 5,
+              body: "Acconciatura sposa da sogno. Giulia e team hanno reso perfetto il mio giorno!",
+            },
+            {
+              author: "Cliente U",
+              rating: 4,
+              body: "Parrucchiere affidabile, sempre aggiornato sulle tendenze. Bravissimi.",
+            },
+          ],
+        };
+        const slug = site.slug;
+        const fixtureList =
+          typeof slug === "string" && FIXTURE_REVIEWS[slug] ? FIXTURE_REVIEWS[slug] : [];
         sections.push({
           type: "reviews",
           variant,
           settings: parsed.value as z.infer<typeof reviewsSettingsSchema>,
-          data: { reviews: [] },
+          data: { reviews: fixtureList },
         });
         break;
+      }
       case "contact": {
         const hasAny = site.phone || site.email || site.address || site.city;
         if (hasAny) {
@@ -676,6 +817,124 @@ export async function resolvePublicSiteContent(params: {
         });
         break;
       }
+      case "navbar":
+        sections.push({
+          type: "navbar",
+          variant,
+          settings: parsed.value as z.infer<typeof navbarSettingsSchema>,
+          data: {
+            businessName: site.businessName,
+            logoUrl: null,
+            phone: site.phone,
+            slug: site.slug,
+            navigation: [],
+          },
+        });
+        break;
+      case "footer":
+        sections.push({
+          type: "footer",
+          variant,
+          settings: parsed.value as z.infer<typeof footerSettingsSchema>,
+          data: {
+            businessName: site.businessName,
+            logoUrl: null,
+            phone: site.phone,
+            email: site.email,
+            address: site.address,
+            copyrightOwner: site.businessName,
+            slug: site.slug,
+            navLinks: [],
+            year: new Date().getFullYear(),
+          },
+        });
+        break;
+      case "trust":
+        sections.push({
+          type: "trust",
+          variant,
+          settings: parsed.value as z.infer<typeof trustSettingsSchema>,
+          data: { items: [] },
+        });
+        break;
+      case "hours":
+        sections.push({
+          type: "hours",
+          variant,
+          settings: parsed.value as z.infer<typeof hoursSettingsSchema>,
+          data: { weeklyHours: [], timezone: site.timezone ?? "Europe/Rome" },
+        });
+        break;
+      case "faq":
+        sections.push({
+          type: "faq",
+          variant,
+          settings: parsed.value as z.infer<typeof faqSettingsSchema>,
+          data: { items: [] },
+        });
+        break;
+      case "location":
+        sections.push({
+          type: "location",
+          variant,
+          settings: parsed.value as z.infer<typeof locationSettingsSchema>,
+          data: {
+            address: site.address,
+            city: site.city,
+            province: site.province,
+            postalCode: site.postalCode,
+            countryCode: site.countryCode,
+            latitude: site.latitude,
+            longitude: site.longitude,
+            googleMapsDirectionsUrl: null,
+            googleMapsEmbed: null,
+          },
+        });
+        break;
+      case "booking_cta":
+        sections.push({
+          type: "booking_cta",
+          variant,
+          settings: parsed.value as z.infer<typeof bookingCtaSettingsSchema>,
+          data: {
+            bookingUrl: `/s/${site.slug}/book`,
+          },
+        });
+        break;
+      case "whatsapp_cta":
+        if (site.whatsapp && site.whatsapp.trim().length > 0) {
+          const clean = site.whatsapp.replace(/[^0-9]/g, "");
+          const waLink =
+            clean.length > 0
+              ? `https://wa.me/${clean}?text=${encodeURIComponent("Ciao, vorrei avere informazioni")}`
+              : null;
+          sections.push({
+            type: "whatsapp_cta",
+            variant,
+            settings: parsed.value as z.infer<typeof whatsappCtaSettingsSchema>,
+            data: {
+              whatsapp: site.whatsapp,
+              waMeLink: waLink,
+            },
+          });
+        }
+        break;
+      case "social_links":
+        sections.push({
+          type: "social_links",
+          variant,
+          settings: parsed.value as z.infer<typeof socialLinksSettingsSchema>,
+          data: { links: [] },
+        });
+        break;
+      case "legal_links":
+        sections.push({
+          type: "legal_links",
+          variant,
+          settings: parsed.value as z.infer<typeof legalLinksSettingsSchema>,
+          data: { links: [] },
+        });
+        break;
     }
   }
 

@@ -116,6 +116,15 @@ export function StaffSectionComponent(section: StaffSection) {
                   </p>
                 ) : null}
               </div>
+              <div className="mt-auto pt-4 w-full border-t border-border/50 flex flex-col items-center gap-2">
+                <a
+                  href="#booking"
+                  className="btn btn-sm btn-outline w-full justify-center"
+                  aria-label={`Prenota un appuntamento con ${m.name}`}
+                >
+                  Prenota con {m.name.split(/\s+/)[0]}
+                </a>
+              </div>
             </li>
           ))}
         </ul>
